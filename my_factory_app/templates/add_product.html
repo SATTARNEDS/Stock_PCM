@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>จัดการอุปกรณ์ (FIFO System) - Stock System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-dark bg-dark px-4 shadow-sm mb-4">
+    <a class="navbar-brand fw-medium" href="/admin">🏭 Stock Manager (FIFO Mode)</a>
+    <a href="/admin" class="btn btn-outline-light btn-sm rounded-pill px-3">กลับ Dashboard</a>
+</nav>
+
+<div class="container pb-5">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            
+            <div id="alert-container">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm">{{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+            </div>
+
+            <div class="card border-0 shadow-lg overflow-hidden mb-4">
+                <div class="card-header bg-white p-0">
+                    <ul class="nav nav-tabs nav-fill border-0" id="stockTab" role="tablist">
+                        <li class="nav-item">
+                            <button class="nav-link active py-3 fw-medium" id="old-tab" data-bs-toggle="tab" data-bs-target="#old" type="button">📦 รับสินค้าเข้า (เพิ่ม Lot ใหม่)</button>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link py-3 fw-medium" id="new-tab" data-bs-toggle="tab" data-bs-target="#new" type="button">✨ ลงทะเบียนอุปกรณ์ใหม่</button>
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="card-body p-4 p-md-5">
+                    <div class="tab-content">
+                        <div class="tab-pane fade show active" id="old">
+                            <form id="stockUpdateForm" method="POST">
+                                <input type="hidden" name="action_type" value="update_stock">
+                                <div class="mb-4">
+                                    <label class="form-label fw-medium">1. ค้นหารหัสหรือชื่ออุปกรณ์</label>
+                                    <select name="product_id" id="choices-search" class="form-select" required>
+                                        <option value="">-- พิมพ์เพื่อค้นหา --</option>
+                                        {% for p in all_products %}
+                                        <option value="{{ p['id'] }}">{{ p['code'] }} : {{ p['name'] }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+
+                                <div class="row mb-4">
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-medium">2. เลขที่ Lot (Lot No.)</label>
+                                        <input type="text" name="lot_number" class="form-control border-primary" placeholder="เช่น L{{ today[:4] }}-001">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-medium">3. จำนวนที่รับเข้า</label>
+                                        <div class="input-group">
+                                            <input type="number" name="add_qty" class="form-control border-primary" min="1" required>
+                                            <span class="input-group-text bg-primary text-white">หน่วย</span>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-medium text-success">4. วันที่รับเข้าคลัง</label>
+                                        <input type="date" name="receive_date" class="form-control border-success" value="{{ today }}" required>
+                                    </div>
+                                </div>
+
+                                <div class="row mb-4">
+                                    <div class="col-md-12">
+                                        <label class="form-label fw-medium text-danger">5. วันหมดอายุ (ถ้ามี)</label>
+                                        <input type="date" name="expire_date" class="form-control border-danger">
+                                        <small class="text-muted">* เว้นว่างไว้หากไม่มีวันหมดอายุ</small>
+                                    </div>
+                                </div>
+
+                                <button type="submit" id="submitBtn" class="btn btn-primary w-100 btn-lg fw-medium shadow">บันทึกรับเข้าสต็อก (FIFO)</button>
+                            </form>
+                        </div>
+
+                        <div class="tab-pane fade" id="new">
+                            <form method="POST">
+                                <input type="hidden" name="action_type" value="new_product">
+                                <div class="row mb-3">
+                                    <div class="col-md-6"><label class="fw-medium">รหัสอุปกรณ์</label><input type="text" name="code" class="form-control" required></div>
+                                    <div class="col-md-6"><label class="fw-medium">หมวดหมู่</label>
+                                        <select name="category" class="form-select">
+                                            <option>Office</option><option>Safety</option><option>Medicine</option><option>Maid</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="mb-3"><label class="fw-medium">ชื่ออุปกรณ์</label><input type="text" name="name" class="form-control" required></div>
+                                <div class="row mb-4">
+                                    <div class="col-md-4"><label class="fw-medium">จำนวนตั้งต้น</label><input type="number" name="stock" class="form-control" value="0"></div>
+                                    <div class="col-md-4"><label class="fw-medium">หน่วย</label><input type="text" name="unit" class="form-control" value="PCS"></div>
+                                    <div class="col-md-4"><label class="fw-medium">สถานที่</label>
+                                        <select name="location" class="form-select"><option value="PC1">PC1</option><option value="CC">CC</option></select>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-success w-100 btn-lg fw-medium shadow">สร้างอุปกรณ์ใหม่เข้าระบบ</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm overflow-hidden">
+                <div class="card-header bg-dark text-white p-3">
+                    <h5 class="mb-0"><i class="fas fa-list-ul me-2"></i>รายการ Lot คงเหลือในคลัง (Active Lots)</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="ps-3">รหัส / ชื่อสินค้า</th>
+                                    <th>Lot No.</th>
+                                    <th class="text-center">คงเหลือ</th>
+                                    <th>วันที่รับเข้า</th>
+                                    <th>วันหมดอายุ</th>
+                                    <th>อายุคงเหลือ</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if active_lots %}
+                                    {% for lot in active_lots %}
+                                    <tr>
+                                        <td class="ps-3">
+                                            <div class="fw-bold">{{ lot['code'] }}</div>
+                                            <div class="small text-muted">{{ lot['name'] }}</div>
+                                        </td>
+                                        <td><span class="badge bg-secondary">{{ lot['lot_number'] }}</span></td>
+                                        <td class="text-center fw-bold text-primary">{{ lot['qty'] }}</td>
+                                        <td>{{ lot['received_date'] }}</td>
+                                        <td>{{ lot['expiry_date'] if lot['expiry_date'] else '-' }}</td>
+                                        <td>
+                                            {% if lot['expiry_date'] %}
+                                                <span class="small"><i class="far fa-calendar-alt me-1"></i>ระบบกำลังคำนวณ...</span>
+                                            {% else %}
+                                                <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    <tr>
+                                        <td colspan="6" class="text-center py-4 text-muted">ยังไม่มีข้อมูล Lot สินค้าในคลัง</td>
+                                    </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // เริ่มการทำงานของ Choices.js สำหรับช่องค้นหา
+        const productSearch = new Choices('#choices-search', { 
+            searchEnabled: true, 
+            itemSelectText: '', 
+            placeholderValue: 'พิมพ์ค้นหาอุปกรณ์...' 
+        });
+
+        const stockForm = document.getElementById('stockUpdateForm');
+        const submitBtn = document.getElementById('submitBtn');
+
+        // ระบบบันทึกข้อมูลโดยไม่รีเฟรชหน้า (AJAX)
+        stockForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> กำลังบันทึกข้อมูล...';
+
+            const formData = new FormData(this);
+            
+            fetch("{{ url_for('add_product') }}", {
+                method: "POST",
+                body: formData,
+                headers: { "X-Requested-With": "XMLHttpRequest" }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if(data.success) {
+                    // เมื่อสำเร็จ ให้รีโหลดหน้าเพื่อให้ตาราง Lot ด้านล่างอัปเดต
+                    window.location.reload();
+                } else {
+                    const alertHtml = `
+                        <div class="alert alert-danger alert-dismissible fade show shadow-sm">
+                            ${data.message}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>`;
+                    document.getElementById('alert-container').innerHTML = alertHtml;
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = 'บันทึกรับเข้าสต็อก (FIFO)';
+                }
+            })
+            .catch(error => {
+                alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = 'บันทึกรับเข้าสต็อก (FIFO)';
+            });
+        });
+    });
+</script>
+</body>
+</html>

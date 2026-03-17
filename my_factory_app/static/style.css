@@ -1,0 +1,192 @@
+/* static/style.css */
+
+body {
+    background-color: #f8f9fa;
+    font-family: "Mitr", sans-serif;
+    /* แนะนำหาฟอนต์สวยๆ มาใส่เพิ่มได้ */
+}
+
+/* ปรับแต่งตาราง Dark Mode */
+.table-dark {
+    background-color: #1e1e1e;
+}
+
+.table-qr-preview {
+    background: linear-gradient(135deg, #17a2b8 0%, #117a8b 100%);
+    color: white;
+    border: none;
+    border-radius: 20px;
+    padding: 5px 15px;
+    transition: 0.3s;
+}
+
+.btn-qr-preview {
+    background-color: #343a40;
+    color: #17a2b8;
+    border: 1px solid #17a2b8;
+    border-radius: 50px;
+    padding: 4px 12px;
+    font-size: 0.85rem;
+}
+
+.btn-qr-preview:hover {
+    background-color: #17a2b8;
+    color: white;
+    box-shadow: 0 0 10px rgba(23, 162, 184, 0.5);
+}
+
+/* ทำให้รหัสสินค้าดูเด่น */
+code {
+    font-size: 1rem;
+    background: #2d2d2d;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.btn-outline-info {
+    border-radius: 8px;
+    padding: 2px 8px;
+}
+
+.btn-outline-info:hover {
+    box-shadow: 0 0 8px rgba(23, 162, 184, 0.4);
+}
+
+/* การ์ดสินค้า */
+.item-card {
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 12px;
+    transition: transform 0.2s, box-shadow 0.2s;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.item-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.08);
+    border-color: #0d6efd;
+}
+
+/* ป้ายแสดงรหัสสินค้า */
+.code-tag {
+    font-family: monospace;
+    font-weight: bold;
+    color: #0d6efd;
+    background-color: #e7f1ff;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+/* ป้ายแสดงสต็อก */
+.stock-tag {
+    font-size: 0.85rem;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background-color: #f1f3f5;
+    color: #495057;
+    font-weight: 500;
+}
+
+/* หน้า Login */
+.login-container {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #eef2f3 0%, #8e9eab 100%);
+}
+
+.login-card {
+    width: 100%;
+    max-width: 420px;
+    padding: 2.5rem;
+    border-radius: 20px;
+    background: white;
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+}
+
+.logo-icon {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+    display: block;
+}
+
+/* Tabs */
+.nav-pills .nav-link {
+    color: #495057;
+    border-radius: 50px;
+    padding: 8px 24px;
+    font-weight: 500;
+}
+
+.nav-pills .nav-link.active {
+    background-color: #0d6efd;
+    color: white;
+    box-shadow: 0 4px 10px rgba(13, 110, 253, 0.3);
+}
+
+/* Modal */
+.modal-header {
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+}
+
+/* static/style.css เพิ่มต่อท้าย */
+
+.input-group-text {
+    background-color: white;
+    border-right: none;
+}
+
+.input-group .form-control {
+    border-left: none;
+}
+
+.input-group .form-control:focus {
+    box-shadow: none;
+    border-color: #ced4da;
+    /* สีขอบปกติ ไม่ให้เป็นสีฟ้า */
+}
+
+/* ทำให้ปุ่มหมวดหมู่ดูนุ่มนวล */
+.btn-outline-secondary:hover {
+    background-color: #e2e6ea;
+    color: #000;
+    border-color: #6c757d;
+}
+
+.hover-shadow {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.hover-shadow:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* static/style.css */
+.item-row {
+    transition: all 0.3s cubic-bezier(.25, .8, .25, 1);
+    border-radius: 15px !important;
+    background: #ffffff;
+    border: 1px solid #f0f0f0 !important;
+}
+
+.item-row:hover {
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.05) !important;
+    border-color: #0d6efd !important;
+}
+
+.btn-warning {
+    background: #ffc107;
+    color: #212529;
+    font-weight: 700;
+}
+
+.badge.bg-info {
+    background-color: #e3f2fd !important;
+    color: #0d47a1 !important;
+}

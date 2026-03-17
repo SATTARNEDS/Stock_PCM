@@ -1,0 +1,28 @@
+
+git bash
+source venv/bin/activate(เข้า venv ที่ทำการติดตั้ง python ไว้เพื่อรันสคริปต์)
+cd my_factory_app(เข้าไปยังโฟลเดอร์โปรเจค)
+
+pip install -r requirements.txt(ติดตั้ง dependencies ที่จำเป็นสำหรับโปรเจค)
+
+PowerShell
+.\venv\Scripts\Activate.ps1 (เข้า venv ที่ทำการติดตั้ง python ไว้เพื่อรันสคริปต์)
+py app.py (รันแอปพลิเคชัน)
+
+gitbash
+
+python build_db.py (สร้างฐานข้อมูลและตารางที่จำเป็นสำหรับโปรเจค)
+python import_employees.py (นำเข้าข้อมูลพนักงานจากไฟล์ Staff working update 6-2-2026.csv)
+python import_fifo_data.py (นำเข้าข้อมูล FIFO จากไฟล์ DATA_JK.xlsx)
+python update_db.py (อัพเดตฐานข้อมูลด้วยข้อมูลที่นำเข้า)
+python fix_missing_columns.py (แก้ไขปัญหาคอลัมน์ที่ขาดหายไปในฐานข้อมูล)
+python app.py (รันแอปพลิเคชัน)
+
+
+LINE(ใช้งานหลัก)
+LINE_CHANNEL_ACCESS_TOKEN = '3QbgTXY3rgtW3rswVEqu9JRKAJBO4VbacDuVczn+Z+IFPu5BW0FkScnOTbPTtlEAaVj66MPQgwZW3d4OzwvBTD+liN+nWWi9VleKbQtwNU4lgXrfmzihCxLFhikWKBVQ0Ykp8QDK70sfSo5078lTeAdB04t89/1O/w1cDnyilFU=' 
+LINE_ADMIN_USER_ID = 'C65cf63711c8a37424f740c352188a8c4' 
+
+LINE(สำหรับทดสอบ)
+LINE_TEST_CHANNEL_ACCESS_TOKEN = '3QbgTXY3rgtW3rswVEqu9JRKAJBO4VbacDuVczn+Z+IFPu5BW0FkScnOTbPTtlEAaVj66MPQgwZW3d4OzwvBTD+liN+nWWi9VleKbQtwNU4lgXrfmzihCxLFhikWKBVQ0Ykp8QDK70sfSo5078lTeAdB04t89/1O/w1cDnyilFU='
+LINE_TEST_ADMIN_USER_ID = 'C5220a09d21e6761f29f28985edc0a733'
