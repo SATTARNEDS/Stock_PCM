@@ -1,0 +1,17 @@
+
+
+{% for item in low_stock %}
+<tr class="align-middle">
+    <td><code class="text-primary fw-bold">{{ item['code'] }}</code></td>
+    
+    <td>{{ item['name'] }}</td>
+    
+    <td><span class="badge bg-light text-dark">{{ item['category'] }}</span></td>
+    
+    <td class="text-end {{ 'text-danger fw-bold' if item['stock'] <= item['safety_stock'] else '' }}">
+        {{ item['stock'] }}
+    </td>
+</tr>
+{% else %}
+<tr><td colspan="3" class="text-center py-3 text-muted">สต็อกปกติทุกรายการ</td></tr>
+{% endfor %}

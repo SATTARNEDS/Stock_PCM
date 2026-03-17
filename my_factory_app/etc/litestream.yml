@@ -1,0 +1,10 @@
+access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+
+dbs:
+  - path: /app/my_factory_app/factory_stock.db
+    replicas:
+      - url: ${LITESTREAM_REPLICA_URL}
+        # ถ้าใช้ Cloudflare R2 ต้องมี 2 บรรทัดข้างล่างนี้เสมอ
+        endpoint: ${LITESTREAM_ENDPOINT}
+        force-path-style: true

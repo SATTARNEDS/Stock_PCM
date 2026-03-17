@@ -1,0 +1,28 @@
+{% for log in logs %}
+{% if log['status'] != 'Pending' %}
+<tr>
+    <td class="small">{{ log['timestamp'] }}</td>
+    <td>
+        <div class="fw-medium">{{ log['emp_name'] or log['emp_id'] }}</div>
+        <small class="text-muted">
+            {{ log['department'] }} 
+            {% if log['location'] %}
+                <span class="text-primary">({{ log['location'] }})</span>
+            {% endif %}
+        </small>
+    </td>
+    <td>
+        <span class="badge {% if 'เบิก' in log['action'] %}bg-warning text-dark{% elif 'เติม' in log['action'] %}bg-success{% else %}bg-info{% endif %} mb-1">
+            {{ log['action'] }}
+        </span><br>
+        {{ log['product_name'] }}
+    </td>
+    <td class="text-center fw-medium">{{ log['qty'] }}</td>
+    <td class="text-center">
+        <span class="badge {% if log['status']=='Approved' %}bg-success{% elif log['status']=='Rejected' %}bg-danger{% else %}bg-secondary{% endif %}">
+            {{ log['status'] }}
+        </span>
+    </td>
+</tr>
+{% endif %}
+{% endfor %}

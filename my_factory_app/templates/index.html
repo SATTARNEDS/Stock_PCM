@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>เข้าสู่ระบบ - Stock System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@200;300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Mitr', sans-serif;
+        }
+
+        .login-card {
+            background: white;
+            padding: 2.5rem;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .logo-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="login-container w-100 px-3">
+        <div class="login-card mx-auto text-center">
+            <div class="logo-icon">🏭</div>
+            <h4 class="fw-bold mb-2">Stock System</h4>
+            <p class="text-muted mb-4 small">PPE, Medicine, Maid Equipment, Stationary, IT stock</p>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            {% for category, message in messages %}
+            <div class="alert alert-{{ category }} shadow-sm rounded-3 small text-start">{{ message }}</div>
+            {% endfor %}
+            {% endif %}
+            {% endwith %}
+            <div class="card-body p-4">
+                <form action="/" method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">รหัสพนักงาน</label>
+                        <input type="text" name="emp_id" class="form-control form-control-lg rounded-pill text-center"
+                            placeholder="กรอกรหัสพนักงาน" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-lg w-100 rounded-pill mb-3">
+                        เข้าสู่ระบบเบิกของ
+                    </button>
+                </form>
+
+                <div class="text-center">
+                    <div class="hr-text text-muted mb-3">หรือ</div>
+                    <a href="{{ url_for('scanner_page') }}" class="btn btn-dark btn-lg w-100 rounded-pill shadow-sm">
+                        <i class="fas fa-camera me-2 text-warning"></i>สแกน QR Code สินค้า
+                    </a>
+                </div>
+            </div>
+
+            <div class="mt-4 pt-3 border-top">
+                <a href="/admin_login" class="text-decoration-none text-secondary small">
+                    <i class="fas fa-lock me-1"></i> สำหรับผู้ดูแลระบบ (Admin)
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            const empInput = document.getElementById('empIdInput');
+            if (empInput) empInput.focus();
+        });
+    </script>
+</body>
+
+</html>
