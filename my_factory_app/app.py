@@ -813,19 +813,20 @@ def filter_low_stock():
     if not session.get('admin_logged_in'): return "Unauthorized", 401
     
     role = session.get('admin_role', 'superadmin')
+    # ต้องดึงค่า low_stock_cat ที่ส่งมาจาก JavaScript
     cat = request.args.get('low_stock_cat', '')
     
     conn = get_db_connection()
     
-    # 1. กรองสิทธิ์ตาม Role (PC1/CC)
+    # กรองตาม Role ของ Admin (PC1/CC)
     loc_filter = ""
     if role == 'admin_pc1':
         loc_filter = " AND (location LIKE '%PC1%')"
     elif role == 'admin_cc':
         loc_filter = " AND (location LIKE '%Coil Center%' OR location LIKE '%CC%')"
 
-    # 2. Query หาสินค้าที่ stock < safety_stock
-    sql = f"SELECT * FROM products WHERE stock < safety_stock {loc_filter}"
+    # Query หาสินค้าที่ต่ำกว่าเกณฑ์
+    sql = f"SELECT * FROM products WHERE stock <= safety_stock {loc_filter}"
     params = []
     
     if cat:
@@ -835,6 +836,7 @@ def filter_low_stock():
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     
+    # ส่งผลลัพธ์กลับไปที่หน้า HTML (ส่วนของแถวตาราง)
     return render_template('low_stock_row.html', low_stock=rows)
 
 @app.route('/admin/filter_stock')

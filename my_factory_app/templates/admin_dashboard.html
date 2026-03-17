@@ -469,138 +469,179 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <script>
-        // --- ฟังก์ชัน Global สำหรับปุ่ม Filter Logs ---
-        function filterLogs(loc) {
-            fetch(`/admin/filter_logs?log_loc=${encodeURIComponent(loc)}`)
-                .then(response => response.text())
-                .then(html => {
-                    const body = document.getElementById('logTableBody');
-                    if (body) body.innerHTML = html;
-                })
-                .catch(err => console.error(err));
+    // ==========================================
+    // 1. ฟังก์ชัน Global (ใช้งานจาก HTML โดยตรง)
+    // ==========================================
+    function filterLogs(loc) {
+        fetch(`/admin/filter_logs?log_loc=${encodeURIComponent(loc)}`)
+            .then(response => response.text())
+            .then(html => {
+                const body = document.getElementById('logTableBody');
+                if (body) body.innerHTML = html;
+            })
+            .catch(err => console.error('Filter Logs Error:', err));
 
-            // อัปเดตสีปุ่ม
-            const btns = { '': 'btn-log-all', 'PC1': 'btn-log-pc1', 'CC': 'btn-log-cc' };
-            Object.keys(btns).forEach(key => {
-                const el = document.getElementById(btns[key]);
-                if (el) el.className = (key === loc) ? 'btn btn-sm rounded-pill px-3 btn-primary' : 'btn btn-sm rounded-pill px-3 btn-light text-muted border-0';
-            });
-        }
-
-        document.addEventListener('DOMContentLoaded', function () {
-            // --- 1. วาดกราฟ (ซ่อม Syntax) ---
-            const ctx = document.getElementById('deptChart');
-            if (ctx) {
-                const labels = {{ (dept_labels or[]) | tojson | safe }};
-        const values = {{ (dept_values or[]) | tojson | safe }};
-
-        if (labels.length > 0) {
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'จำนวน (ชิ้น)',
-                        data: values,
-                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                        borderColor: 'rgba(54, 162, 235, 1)',
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: { y: { beginAtZero: true } }
-                }
-            });
-        }
-        }
-
-        // --- 2. AJAX Search Stock (คงเดิม) ---
-        const catSelect = document.getElementById('stockCatSelector');
-        const searchInput = document.getElementById('stockSearchInput');
-        const tableBody = document.getElementById('stockTableBody');
-
-        function loadStock() {
-            if (!catSelect || !searchInput) return;
-            fetch(`/admin/filter_stock?cat=${encodeURIComponent(catSelect.value)}&search=${encodeURIComponent(searchInput.value)}`)
-                .then(res => res.text())
-                .then(html => { tableBody.innerHTML = html; });
-        }
-
-        if (catSelect) catSelect.addEventListener('change', loadStock);
-        if (searchInput) searchInput.addEventListener('input', loadStock);
-
-        // --- 3. Edit Modal (คงเดิม) ---
-        const editModal = document.getElementById('editProductModal');
-        if (editModal) {
-            editModal.addEventListener('show.bs.modal', function (event) {
-                const btn = event.relatedTarget;
-                const mapping = {
-                    'edit_id': 'data-id', 'edit_code': 'data-code', 'edit_name': 'data-name',
-                    'edit_category': 'data-category', 'edit_location': 'data-location', 'edit_safety': 'data-safety'
-                };
-                Object.keys(mapping).forEach(id => {
-                    const input = editModal.querySelector('#' + id);
-                    if (input) input.value = btn.getAttribute(mapping[id]) || '';
-                });
-            });
-        }
-    });
-    </script>
-<script>
-function generateNextCode() {
-    // ดึงค่าหมวดหมู่และสถานที่ที่ผู้ใช้เลือก
-    const category = document.getElementById('productCategory').value;
-    const location = document.getElementById('productLocation').value;
-    const codeInput = document.getElementById('productCode');
-
-    // ถ้ายังเลือกไม่ครบ ให้ว่างไว้ก่อน
-    if (!category || !location) {
-        codeInput.value = '';
-        return;
+        const btns = { '': 'btn-log-all', 'PC1': 'btn-log-pc1', 'CC': 'btn-log-cc' };
+        Object.keys(btns).forEach(key => {
+            const el = document.getElementById(btns[key]);
+            if (el) el.className = (key === loc) ? 'btn btn-sm rounded-pill px-3 btn-primary' : 'btn btn-sm rounded-pill px-3 btn-light text-muted border-0';
+        });
     }
 
-    // ถ้าเลือกครบแล้ว ให้ยิงไปถาม Python หลังบ้าน
-    fetch(`/admin/get_next_code?category=${encodeURIComponent(category)}&location=${encodeURIComponent(location)}`)
-        .then(response => response.json())
-        .then(data => {
-            // นำรหัสใหม่ที่ได้ มาใส่โชว์ในช่องรหัสสินค้าอัตโนมัติ
-            codeInput.value = data.next_code;
-        })
-        .catch(error => console.error('Error:', error));
-}
-// ฟังก์ชันเมื่อกดปุ่มแก้ไขในตาราง
-function editProductModal(code) {
-    // 1. วิ่งไปขอข้อมูลจาก Python หลังบ้าน
-    fetch('/admin/get_product/' + code)
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                alert('เกิดข้อผิดพลาด: ไม่พบข้อมูลสินค้า');
-                return;
+    function generateNextCode() {
+        const category = document.getElementById('productCategory').value;
+        const location = document.getElementById('productLocation').value;
+        const codeInput = document.getElementById('productCode');
+
+        if (!category || !location) {
+            codeInput.value = '';
+            return;
+        }
+        fetch(`/admin/get_next_code?category=${encodeURIComponent(category)}&location=${encodeURIComponent(location)}`)
+            .then(response => response.json())
+            .then(data => { codeInput.value = data.next_code; })
+            .catch(error => console.error('Gen Code Error:', error));
+    }
+
+    function editProductModal(code) {
+        fetch('/admin/get_product/' + code)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('เกิดข้อผิดพลาด: ไม่พบข้อมูลสินค้า');
+                    return;
+                }
+                document.getElementById('edit_code').value = data.code;
+                document.getElementById('edit_code_display').value = data.code;
+                document.getElementById('edit_name').value = data.name;
+                document.getElementById('edit_category').value = data.category;
+                document.getElementById('edit_category_display').value = data.category;
+                document.getElementById('edit_unit').value = data.unit;
+                document.getElementById('edit_location').value = data.location;
+                document.getElementById('edit_location_display').value = data.location;
+                document.getElementById('edit_safety_stock').value = data.safety_stock;
+                document.getElementById('edit_stock').value = data.stock;
+                document.getElementById('edit_expiry_date').value = data.expiry_date || '';
+
+                var myModal = new bootstrap.Modal(document.getElementById('editProductModal'));
+                myModal.show();
+            })
+            .catch(error => console.error('Edit Modal Error:', error));
+    }
+
+    // ==========================================
+    // 2. ส่วนที่ทำงานทันทีเมื่อโหลดหน้าเว็บ
+    // ==========================================
+    document.addEventListener('DOMContentLoaded', function () {
+        
+        // [ป้องกันโปรแกรมแครช] แยกการวาดกราฟไว้ใน try...catch
+        try {
+            const ctx = document.getElementById('deptChart');
+            if (ctx) {
+                const labels = {{ (dept_labels or []) | tojson | safe }};
+                const values = {{ (dept_values or []) | tojson | safe }};
+                if (labels.length > 0) {
+                    new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: 'จำนวน (ชิ้น)',
+                                data: values,
+                                backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: { y: { beginAtZero: true } }
+                        }
+                    });
+                }
             }
-            // 2. เอาข้อมูลเก่ามาหยอดใส่ช่องฟอร์ม
-            document.getElementById('edit_code').value = data.code; // ช่องซ่อน
-            document.getElementById('edit_code_display').value = data.code; // ช่องโชว์
-            document.getElementById('edit_name').value = data.name;
-            document.getElementById('edit_category').value = data.category;
-            document.getElementById('edit_category_display').value = data.category;
-            document.getElementById('edit_unit').value = data.unit;
-            document.getElementById('edit_location').value = data.location;
-            document.getElementById('edit_location_display').value = data.location;
-            document.getElementById('edit_safety_stock').value = data.safety_stock;
-            document.getElementById('edit_stock').value = data.stock;
-            document.getElementById('edit_expiry_date').value = data.expiry_date || '';
+        } catch (error) {
+            console.error("Chart Error: กราฟมีปัญหา แต่ระบบอื่นยังทำงานได้", error);
+        }
 
-            // 3. สั่งเปิดหน้าต่าง Modal
-            var myModal = new bootstrap.Modal(document.getElementById('editProductModal'));
-            myModal.show();
-        })
-        .catch(error => console.error('Error:', error));
-}
-</script>
+        // --- AJAX ค้นหาสต็อกหลัก ---
+        try {
+            const catSelect = document.getElementById('stockCatSelector');
+            const searchInput = document.getElementById('stockSearchInput');
+            const tableBody = document.getElementById('stockTableBody');
 
+            function loadStock() {
+                if (!catSelect || !searchInput) return;
+                fetch(`/admin/filter_stock?cat=${encodeURIComponent(catSelect.value)}&search=${encodeURIComponent(searchInput.value)}`)
+                    .then(res => {
+                        if (res.status === 401) {
+                            window.location.href = "/admin_login";
+                            return Promise.reject("Session expired");
+                        }
+                        if (!res.ok) throw new Error("Server Error " + res.status);
+                        return res.text();
+                    })
+                    .then(html => { tableBody.innerHTML = html; })
+                    .catch(err => console.error('Load Stock Error:', err));
+            }
+
+            if (catSelect) catSelect.addEventListener('change', loadStock);
+            if (searchInput) searchInput.addEventListener('input', loadStock);
+        } catch(error) {
+            console.error("Main Stock Error:", error);
+        }
+
+        // --- AJAX กรองสินค้าใกล้หมด (Low Stock) ---
+        try {
+            const lowStockCat = document.getElementById('lowStockCatSelector');
+            const lowStockTable = document.getElementById('lowStockTableBody');
+
+            if (lowStockCat) {
+                lowStockCat.addEventListener('change', function() {
+                    fetch(`/admin/filter_low_stock?low_stock_cat=${encodeURIComponent(this.value)}`)
+                        .then(res => {
+                            if (res.status === 401) {
+                                window.location.href = "/admin_login";
+                                return Promise.reject("Session expired");
+                            }
+                            if (!res.ok) throw new Error("Server Error " + res.status);
+                            return res.text();
+                        })
+                        .then(html => {
+                            if (lowStockTable) lowStockTable.innerHTML = html;
+                        })
+                        .catch(err => console.error('Low Stock Filter Error:', err));
+                });
+            }
+        } catch(error) {
+            console.error("Low Stock Error:", error);
+        }
+    });
+
+    // ==========================================
+    // 3. ระบบ Auto-Logout เมื่อไม่มีการใช้งาน 60 นาที
+    // ==========================================
+    let idleTime = 0;
+    const maxIdleTime = 60; // นาที
+
+    function resetIdleTime() {
+        idleTime = 0;
+    }
+
+    document.addEventListener('mousemove', resetIdleTime);
+    document.addEventListener('keypress', resetIdleTime);
+    document.addEventListener('click', resetIdleTime);
+    document.addEventListener('scroll', resetIdleTime);
+
+    setInterval(function() {
+        idleTime++;
+        if (idleTime >= maxIdleTime) {
+            alert("เซสชันหมดอายุแล้ว (ไม่มีการใช้งาน 60 นาที) กรุณาเข้าสู่ระบบใหม่");
+            window.location.href = "/admin/logout";
+        }
+    }, 60000);
+
+    </script>
 </body>
-
 </html>

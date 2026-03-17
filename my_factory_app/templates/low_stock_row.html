@@ -1,17 +1,26 @@
-
-
 {% for item in low_stock %}
 <tr class="align-middle">
-    <td><code class="text-primary fw-bold">{{ item['code'] }}</code></td>
+    <td class="ps-4"><code class="text-primary fw-bold">{{ item['code'] }}</code></td>
     
     <td>{{ item['name'] }}</td>
     
-    <td><span class="badge bg-light text-dark">{{ item['category'] }}</span></td>
+    <td class="text-center">
+        <span class="fw-bold text-danger">{{ item['stock'] }}</span> 
+        <small class="text-muted">/ {{ item['unit'] }}</small>
+    </td>
     
-    <td class="text-end {{ 'text-danger fw-bold' if item['stock'] <= item['safety_stock'] else '' }}">
-        {{ item['stock'] }}
+    <td class="text-center">
+        {% if item['stock'] <= 0 %}
+            <span class="badge bg-dark">ของหมด</span>
+        {% else %}
+            <span class="badge bg-danger">ต้องสั่งซื้อ</span>
+        {% endif %}
     </td>
 </tr>
 {% else %}
-<tr><td colspan="3" class="text-center py-3 text-muted">สต็อกปกติทุกรายการ</td></tr>
+<tr>
+    <td colspan="4" class="text-center py-4 text-muted">
+        <i class="fas fa-check-circle me-1 text-success"></i> สต็อกปกติทุกรายการ
+    </td>
+</tr>
 {% endfor %}
