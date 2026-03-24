@@ -1213,7 +1213,7 @@ def scheduled_daily_alert():
         if expiring_items:
             message += "\n⚠️ [สินค้าใกล้หมดอายุ]\n" + "\n".join([f"- {i['name']} ({i['expiry_date']})" for i in expiring_items])
         if helmet_alerts:
-            message += "\n👷 [ครบกำหนดเปลี่ยนหมวก]\n" + "\n".join([f"- {i['emp_name']} ({i['product_name']})" for i in helmet_alerts])
+            message += "\n👷 [ครบกำหนดเปลี่ยนหมวก]\n" + "\n".join([f"- {i['emp_name']} {i['department']} {i['location']} ({i['timestamp']})" for i in helmet_alerts])
 
         if message:
             send_line_message(message)
@@ -1239,8 +1239,8 @@ def fix_db():
 def check_server_time():
     return f"Server Time (UTC): {datetime.now()}<br>Thai Time: {get_thailand_time()}"
 
-# วางไว้ก่อนส่วน if __name__ == '__main__':
-@scheduler.task('cron', id='Daily_Alert_Job', hour=14, minute=14, timezone='Asia/Bangkok')
+#-------------------------------------------
+@scheduler.task('cron', id='Daily_Alert_Job', hour=14, minute=30, timezone='Asia/Bangkok')
 def scheduled_daily_alert_task():
     # เรียกฟังก์ชันเดิมที่คุณเขียนไว้
     scheduled_daily_alert()
