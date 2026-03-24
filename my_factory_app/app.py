@@ -12,9 +12,16 @@ from flask import Flask, render_template, request, redirect, url_for, flash, ses
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_apscheduler import APScheduler
 
+# --- เพิ่ม Config ---
+class Config:
+    SCHEDULER_API_ENABLED = True
+    SCHEDULER_TIMEZONE = "Asia/Bangkok" # บังคับ Timezone ระดับ Global
 
-scheduler = APScheduler()
 app = Flask(__name__)
+app.config.from_object(Config())
+scheduler = APScheduler()
+# -------------------------
+
 app.secret_key = 'factory_smart_key_2026'
 DB_NAME = 'factory_stock.db'
 
@@ -227,20 +234,49 @@ def confirm_withdrawal():
         WHERE c.emp_id = ?
     ''', (emp_id,)).fetchall()
     
-    if not cart_items: return redirect(url_for('index'))
+    if not cart_items: 
+        conn.close()
+        return redirect(url_for('index'))
     
     msg_list = [f"🚀 *มีคำขอเบิกใหม่* 🚀\n👤 ผู้เบิก: {user['name']}\n📍 แผนก: {user['department']} ({user['location']})"]
     
     thai_now = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
+    
     for item in cart_items:
-        conn.execute('''
-            INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp) 
-            VALUES (?, ?, ?, ?, 'Pending', ?)
-        ''', (emp_id, item['product_id'], 'ขอเบิกอุปกรณ์', item['qty'], thai_now))
+        item_name = item['name']
         
-        # คำนวณสต็อกที่จะเหลือหลังเบิก
+        # --- ส่วนที่แก้ไข: เช็คว่าเป็นตระกูลหมวกเซฟตี้หรือไม่ ---
+        if "หมวกเซฟตี้" in item_name or "Helmet" in item_name:
+            # ใช้ Logic อัปเดต (หรือ Insert ใหม่ถ้ายังไม่มี) เพื่อเก็บวันที่เบิกล่าสุดไว้เช็ค 2 ปี
+            # เราจะเช็คจาก emp_id และ product_id เดิมที่มี Action นี้อยู่แล้ว
+            existing_helmet = conn.execute('''
+                SELECT id FROM transaction_logs 
+                WHERE emp_id = ? AND product_id = ? AND action = 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)'
+            ''', (emp_id, item['product_id'])).fetchone()
+
+            if existing_helmet:
+                # ถ้าเคยเบิกแล้ว ให้ UPDATE วันที่เบิกล่าสุดทับของเดิม
+                conn.execute('''
+                    UPDATE transaction_logs 
+                    SET qty = ?, timestamp = ?, status = 'Pending'
+                    WHERE id = ?
+                ''', (item['qty'], thai_now, existing_helmet['id']))
+            else:
+                # ถ้ายังไม่เคยเบิกหมวกใบนี้เลย ให้ INSERT ใหม่
+                conn.execute('''
+                    INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp) 
+                    VALUES (?, ?, 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)', ?, 'Pending', ?)
+                ''', (emp_id, item['product_id'], item['qty'], thai_now))
+        else:
+            # กรณีสินค้าทั่วไป: INSERT เป็นประวัติใหม่เสมอ
+            conn.execute('''
+                INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp) 
+                VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, 'Pending', ?)
+            ''', (emp_id, item['product_id'], item['qty'], thai_now))
+        
+        # คำนวณสต็อกคงเหลือโชว์ใน Line
         remain_after = item['stock']
-        msg_list.append(f"📦 {item['name']}\n   🔹 จำนวน: {item['qty']} {item['unit']}\n   ⚠️ คงเหลือหลังเบิก: {remain_after}")
+        msg_list.append(f"📦 {item_name}\n   🔹 จำนวน: {item['qty']} {item['unit']}\n   ⚠️ คงเหลือหลังเบิก: {remain_after}")
 
     # ล้างตะกร้า
     conn.execute('DELETE FROM carts WHERE emp_id = ?', (emp_id,))
@@ -250,10 +286,9 @@ def confirm_withdrawal():
     # ส่งข้อความเข้า Line
     send_line_message("\n".join(msg_list))
     
-    flash('✅ ส่งคำขอเรียบร้อย! กรุณารอแอดมินตรวจสอบ', 'success')
+    flash('✅ ส่งคำขอเรียบร้อย! ระบบบันทึกรอบการเบิกหมวกเซฟตี้ให้คุณแล้ว', 'success')
     return redirect(url_for('menu', emp_id=emp_id))
-    
-    
+ 
 # ==========================================
 # 🔐 ส่วนของแอดมิน (ADMIN)
 # ==========================================
@@ -1139,50 +1174,52 @@ def make_session_permanent():
 
 # ฟังก์ชันที่จะให้ทำงานอัตโนมัติ (Background Task)
 def scheduled_daily_alert():
-    # เวลาจะบันทึก Log หรือทำงานอัตโนมัติ ให้ใช้แบบนี้ครับ:
-    current_time = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
-    # ⚠️ สำคัญ: ต้องใช้ app.app_context() เพื่อให้เข้าถึง DB และ Flask ฟังก์ชันได้
     with app.app_context():
-        print(f"⏰ เริ่มรันระบบแจ้งเตือนอัตโนมัติ: {datetime.now()}")
+        print(f"🔔 [SYSTEM] เริ่มรัน Job อัตโนมัติ: {get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')}")
         
         conn = get_db_connection()
         
-        # --- 1. เช็คสินค้าใกล้หมดอายุ ---
+        # 1. เช็คสินค้าใกล้หมดอายุ
         expiry_query = '''
             SELECT name, expiry_date FROM products 
             WHERE expiry_date IS NOT NULL AND expiry_date != '' 
             AND expiry_date <= date('now', '+30 days')
-            AND (category LIKE '%ยา%' OR name LIKE '%Safety Helmet%' OR name LIKE '%Coffee%')
+            AND (category LIKE '%ยา%' OR name LIKE '%Helmet%' OR name LIKE '%Coffee%')
         '''
         expiring_items = conn.execute(expiry_query).fetchall()
 
-        # --- 2. เช็คหมวกเซฟตี้ครบ 2 ปี ---
+        # --- 2. เช็คหมวกเซฟตี้ (ฉบับแก้ทาง SQLite ให้ดักจับได้ชัวร์ที่สุด) ---
         helmet_query = '''
-            SELECT u.name as emp_name, p.name as product_name 
+            SELECT u.name as emp_name, u.department, l.action as product_name, l.timestamp
             FROM transaction_logs l
             JOIN users u ON l.emp_id = u.emp_id
-            JOIN products p ON l.product_id = p.id
-            WHERE p.name LIKE '%Helmet%' AND l.status = 'Approved'
-            AND l.timestamp <= date('now', '+7 hours', '-23 months')
+            WHERE (l.action LIKE '%หมวก%' OR l.action LIKE '%Helmet%')
+            AND l.status = 'Approved'
+            AND strftime('%Y-%m', l.timestamp) <= strftime('%Y-%m', 'now', '+7 hours', '-23 months')
         '''
-        helmet_alerts = conn.execute(helmet_query).fetchall()
-        conn.close()
 
-        # --- 3. รวบรวมข้อความและส่งเข้า LINE ---
+        helmet_alerts = conn.execute(helmet_query).fetchall()
+        
+        # --- ส่วนของ DEBUG (ดูใน Terminal) ---
+        print(f"🔎 [DEBUG SQL] ดึงข้อมูลได้ทั้งหมด: {len(helmet_alerts)} รายการ")
+        for row in helmet_alerts:
+            print(f"👤 พบพนักงาน: {row['emp_name']} | วันที่เบิก: {row['timestamp']}")
+        # ------------------------------------
+
+        conn.close()
+        
+        # 3. รวมข้อความ
         message = ""
         if expiring_items:
-            message += "\n⚠️ รายการใกล้หมดอายุ (30 วัน):\n"
-            message += "\n".join([f"- {i['name']} ({i['expiry_date']})" for i in expiring_items])
-
+            message += "\n⚠️ [สินค้าใกล้หมดอายุ]\n" + "\n".join([f"- {i['name']} ({i['expiry_date']})" for i in expiring_items])
         if helmet_alerts:
-            message += "\n👷 ครบกำหนดเปลี่ยนหมวก (2 ปี):\n"
-            message += "\n".join([f"- {i['emp_name']} ({i['product_name']})" for i in helmet_alerts])
+            message += "\n👷 [ครบกำหนดเปลี่ยนหมวก]\n" + "\n".join([f"- {i['emp_name']} ({i['product_name']})" for i in helmet_alerts])
 
         if message:
             send_line_message(message)
             print("✅ ส่งแจ้งเตือนเข้า LINE เรียบร้อย")
         else:
-            print("💤 ไม่มีรายการแจ้งเตือนในวันนี้")
+            print("💤 ไม่มีรายการแจ้งเตือนที่ตรงเงื่อนไข")
 
 @app.route('/fix_db')
 def fix_db():
@@ -1198,13 +1235,27 @@ def fix_db():
         conn.close()
     return msg
 
+@app.route('/check_time')
+def check_server_time():
+    return f"Server Time (UTC): {datetime.now()}<br>Thai Time: {get_thailand_time()}"
+
+# วางไว้ก่อนส่วน if __name__ == '__main__':
+@scheduler.task('cron', id='Daily_Alert_Job', hour=14, minute=14, timezone='Asia/Bangkok')
+def scheduled_daily_alert_task():
+    # เรียกฟังก์ชันเดิมที่คุณเขียนไว้
+    scheduled_daily_alert()
+
+# --- เพิ่ม Route สำหรับกดรันเองเพื่อเช็ค Logic ---
+@app.route('/test_alert')
+def test_alert():
+    scheduled_daily_alert()
+    return "🚀 สั่งรันระบบแจ้งเตือน Manual เรียบร้อย! เช็ค LINE และ Terminal ดูครับ"
+
 # --- ส่วนของการรันแอป ---
 if __name__ == '__main__':
-    # 1. เริ่มต้น Scheduler
-    # ตรวจสอบให้มั่นใจว่าตั้งเวลา hour/minute ให้ตรงกับเวลาที่คุณจะทดสอบ
-    scheduler.init_app(app) # เพิ่มบรรทัดนี้เพื่อความสมบูรณ์
-    scheduler.add_job(id='Daily_Alert_Job', func=scheduled_daily_alert, trigger='cron', hour=13, minute=55)
+    scheduler.init_app(app)
     scheduler.start()
+    print("🚀 [STATUS] Scheduler is ACTIVE (Codespaces Mode)")
     
-    # 2. รัน Flask App (เหลือไว้ที่เดียวพอ)
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # ปิด reloader และระบุ debug=False เพื่อความเสถียรของ Thread
+    app.run(debug=False, host='0.0.0.0', port=5000, use_reloader=False)
