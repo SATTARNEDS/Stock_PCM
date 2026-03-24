@@ -1,4 +1,5 @@
 import math
+import os
 import sqlite3
 import json
 import pandas as pd
@@ -1172,54 +1173,6 @@ app.permanent_session_lifetime = timedelta(minutes=30) # บังคับใ�
 def make_session_permanent():
     session.permanent = True # ทำให้ทุก Session มีวันหมดอายุตามที่ตั้งไว้
 
-# ฟังก์ชันที่จะให้ทำงานอัตโนมัติ (Background Task)
-def scheduled_daily_alert():
-    with app.app_context():
-        print(f"🔔 [SYSTEM] เริ่มรัน Job อัตโนมัติ: {get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        conn = get_db_connection()
-        
-        # 1. เช็คสินค้าใกล้หมดอายุ
-        expiry_query = '''
-            SELECT name, expiry_date FROM products 
-            WHERE expiry_date IS NOT NULL AND expiry_date != '' 
-            AND expiry_date <= date('now', '+30 days')
-            AND (category LIKE '%ยา%' OR name LIKE '%Helmet%' OR name LIKE '%Coffee%')
-        '''
-        expiring_items = conn.execute(expiry_query).fetchall()
-
-        # --- 2. เช็คหมวกเซฟตี้ (ฉบับแก้ทาง SQLite ให้ดักจับได้ชัวร์ที่สุด) ---
-        helmet_query = '''
-            SELECT u.name as emp_name, u.department, l.action as product_name, l.timestamp
-            FROM transaction_logs l
-            JOIN users u ON l.emp_id = u.emp_id
-            WHERE (l.action LIKE '%หมวก%' OR l.action LIKE '%Helmet%')
-            AND l.status = 'Approved'
-            AND strftime('%Y-%m', l.timestamp) <= strftime('%Y-%m', 'now', '+7 hours', '-23 months')
-        '''
-
-        helmet_alerts = conn.execute(helmet_query).fetchall()
-        
-        # --- ส่วนของ DEBUG (ดูใน Terminal) ---
-        print(f"🔎 [DEBUG SQL] ดึงข้อมูลได้ทั้งหมด: {len(helmet_alerts)} รายการ")
-        for row in helmet_alerts:
-            print(f"👤 พบพนักงาน: {row['emp_name']} | วันที่เบิก: {row['timestamp']}")
-        # ------------------------------------
-
-        conn.close()
-        
-        # 3. รวมข้อความ
-        message = ""
-        if expiring_items:
-            message += "\n⚠️ [สินค้าใกล้หมดอายุ]\n" + "\n".join([f"- {i['name']} ({i['expiry_date']})" for i in expiring_items])
-        if helmet_alerts:
-            message += "\n👷 [ครบกำหนดเปลี่ยนหมวก]\n" + "\n".join([f"- {i['emp_name']} {i['department']} {i['location']} ({i['timestamp']})" for i in helmet_alerts])
-
-        if message:
-            send_line_message(message)
-            print("✅ ส่งแจ้งเตือนเข้า LINE เรียบร้อย")
-        else:
-            print("💤 ไม่มีรายการแจ้งเตือนที่ตรงเงื่อนไข")
 
 @app.route('/fix_db')
 def fix_db():
@@ -1235,27 +1188,98 @@ def fix_db():
         conn.close()
     return msg
 
-@app.route('/check_time')
-def check_server_time():
-    return f"Server Time (UTC): {datetime.now()}<br>Thai Time: {get_thailand_time()}"
+# ฟังก์ชันที่จะให้ทำงานอัตโนมัติ (Background Task)
+def scheduled_daily_alert():
+    with app.app_context():
+        print(f"🔔 [SYSTEM] เริ่มรัน Job อัตโนมัติ: {get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        conn = get_db_connection()
+        
+      # --- ส่วนที่ 1: เช็คสินค้าใกล้หมดอายุ ---
+        expiry_query = '''
+            SELECT name, expiry_date 
+            FROM products 
+            WHERE expiry_date IS NOT NULL AND expiry_date != '' 
+            AND expiry_date <= date('now', '+30 days')
+            AND (category LIKE '%ยา%' OR name LIKE '%Helmet%' OR name LIKE '%Coffee%')
+        '''
+        # มั่นใจว่าได้ใช้ conn.row_factory = sqlite3.Row ใน get_db_connection() แล้ว
+        expiring_items = conn.execute(expiry_query).fetchall()
 
-#-------------------------------------------
-@scheduler.task('cron', id='Daily_Alert_Job', hour=14, minute=30, timezone='Asia/Bangkok')
+        # --- 2. เช็คหมวกเซฟตี้ (เพิ่มคอลัมน์ที่ขาดไป) ---
+        helmet_query = '''
+            SELECT 
+                u.name AS emp_name, 
+                u.department, 
+                u.location, 
+                l.action AS product_name, 
+                l.timestamp
+            FROM transaction_logs l
+            JOIN users u ON l.emp_id = u.emp_id
+            WHERE (l.action LIKE '%หมวก%' OR l.action LIKE '%Helmet%')
+            AND l.status = 'Approved'
+            AND strftime('%Y-%m', l.timestamp) <= strftime('%Y-%m', 'now', '+7 hours', '-23 months')
+        '''
+        helmet_alerts = conn.execute(helmet_query).fetchall()
+        
+        # --- ส่วนของ DEBUG (ดูใน Terminal) ---
+        print(f"🔎 [DEBUG SQL] ดึงข้อมูลได้ทั้งหมด: {len(helmet_alerts)} รายการ")
+        for row in helmet_alerts:
+            print(f"👤 พบพนักงาน: {row['emp_name']} | วันที่เบิก: {row['timestamp']}")
+        # ------------------------------------
+
+        conn.close()
+        
+       # --- 3. รวมข้อความและส่งเข้า LINE (ปรับฟอร์มตามรูปภาพ) ---
+        message = ""
+        
+        # ส่วนของสินค้าใกล้หมดอายุ (ถ้ามี)
+        if expiring_items:
+            message += "⚠️ [แจ้งเตือนสินค้าใกล้หมดอายุ]\n"
+            for item in expiring_items:
+                message += f"📦 {item['name']}\n📅 หมดอายุ: {item['expiry_date']}\n"
+            message += "--------------------------\n"
+
+        # ส่วนของหมวกเซฟตี้ (ฟอร์มตามที่คุณต้องการ)
+        if helmet_alerts:
+            message += "👷 [ครบกำหนดเปลี่ยนหมวกเซฟตี้]\n"
+            for alert in helmet_alerts:
+                # ดึงชื่อและแผนกมาแสดงในบรรทัดเดียวกัน
+                emp_info = f"{alert['emp_name']} ({alert['department']} - {alert['location']})"
+                
+                message += f"👤 คุณ{emp_info}\n"
+                message += f"🗓️ เบิกเมื่อ: {alert['timestamp']}\n"
+            
+        # ถ้ามีข้อความให้ส่งเข้า LINE
+        if message:
+            send_line_message(message.strip())
+            print("✅ ส่งแจ้งเตือนฟอร์มใหม่เข้า LINE เรียบร้อย")
+        else:
+            print("💤 ไม่มีรายการแจ้งเตือนที่ตรงเงื่อนไข")
+    pass
+
+# --- 2. ตั้ง Job แบบใช้ฟังก์ชันธรรมดา (ย้ายมาไว้ตรงนี้) ---
+@scheduler.task('cron', id='Daily_Alert_Job', hour=14, minute=45, timezone='Asia/Bangkok')
 def scheduled_daily_alert_task():
-    # เรียกฟังก์ชันเดิมที่คุณเขียนไว้
-    scheduled_daily_alert()
+    # บังคับให้ใช้ App Context เพื่อให้ดึง DB ได้บน Codespaces
+    with app.app_context():
+        print(f"⏰ [SCHEDULER] เริ่มทำงานตามเวลาที่ตั้งไว้...")
+        scheduled_daily_alert()
 
-# --- เพิ่ม Route สำหรับกดรันเองเพื่อเช็ค Logic ---
+# --- 3. Route สำหรับ Test (เพื่อให้ชัวร์ว่า Path ถูก) ---
 @app.route('/test_alert')
 def test_alert():
+    print("🎯 [MANUAL] มีการสั่งรันผ่าน URL")
     scheduled_daily_alert()
-    return "🚀 สั่งรันระบบแจ้งเตือน Manual เรียบร้อย! เช็ค LINE และ Terminal ดูครับ"
+    return "🚀 สั่งรันระบบแจ้งเตือนเรียบร้อย! เช็ค LINE และ Terminal"
 
-# --- ส่วนของการรันแอป ---
+# --- 4. ส่วนการรัน (ปรับให้ Codespaces ยอมรับ) ---
 if __name__ == '__main__':
-    scheduler.init_app(app)
-    scheduler.start()
-    print("🚀 [STATUS] Scheduler is ACTIVE (Codespaces Mode)")
-    
-    # ปิด reloader และระบุ debug=False เพื่อความเสถียรของ Thread
-    app.run(debug=False, host='0.0.0.0', port=5000, use_reloader=False)
+    # ตรวจสอบเพื่อไม่ให้ Scheduler รันซ้อนกัน (Prevent double execution)
+    if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        scheduler.init_app(app)
+        scheduler.start()
+        print("🚀 [STATUS] Scheduler is ACTIVE and WAITING...")
+
+    # ตั้งค่าให้เหมาะสมกับ Codespaces
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
