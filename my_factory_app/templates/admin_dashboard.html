@@ -24,6 +24,22 @@
         .table th {
             font-weight: 500;
         }
+
+        /* เพิ่มในส่วน <style> */
+        #userManagementModal .table-responsive {
+            max-height: 450px;
+            /* ความสูงของตาราง */
+            overflow-y: auto;
+        }
+
+        #userManagementModal thead th {
+            position: sticky;
+            top: 0;
+            background-color: #343a40;
+            /* สีพื้นหลังหัวตาราง (เข้มตาม Modal) */
+            z-index: 10;
+            border-bottom: 2px solid #454d55;
+        }
     </style>
 </head>
 
@@ -35,9 +51,10 @@
             {% if role == 'admin_pc1' %}Admin PC1{% elif role == 'admin_cc' %}Admin CC{% else %}Super Admin{% endif %}
         </a>
         <div class="ms-auto d-flex align-items-center">
-            <div class="text-white me-3 d-none d-md-block">
-                Login as: <span class="text-warning fw-medium">{{ session.get('admin_name') }}</span>
-            </div>
+            <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3 me-2" data-bs-toggle="modal"
+                data-bs-target="#userManagementModal" onclick="loadUserList()">
+                <i class="fas fa-user-friends"></i> จัดการพนักงาน
+            </button>
             <a href="{{ url_for('monthly_report') }}" class="btn btn-primary btn-sm rounded-pill px-3">
                 <i class="fas fa-file-invoice me-1"></i> รายงานเบิกจ่ายประจำเดือน
             </a>
@@ -53,9 +70,10 @@
                 <input type="file" id="importFile" name="file"
                     onchange="document.getElementById('importForm').submit()">
             </form>
-           <button type="button" class="btn btn-success btn-sm rounded-pill px-3 me-2" data-bs-toggle="modal" data-bs-target="#addProductModal">
-    <i class="fas fa-plus"></i> เติมของในคลัง
-</button>
+            <button type="button" class="btn btn-success btn-sm rounded-pill px-3 me-2" data-bs-toggle="modal"
+                data-bs-target="#addProductModal">
+                <i class="fas fa-plus"></i> เพิ่มของใหม่เข้าระบบ
+            </button>
             <a href="{{ url_for('manage_zombies') }}" class="btn btn-outline-warning btn-sm rounded-pill px-3 me-2">
                 <i class="fas fa-users-cog"></i> ตรวจสอบพนักงานค้าง
             </a>
@@ -86,7 +104,7 @@
                         <tr>
                             <th>เวลา</th>
                             <th>ผู้เบิก</th>
-                            <th>รายการสินค้า</th>
+                            <th>รายการของในระบบ</th>
                             <th class="text-center">จำนวน</th>
                             <th class="text-center">จัดการ</th>
                         </tr>
@@ -124,7 +142,7 @@
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-header bg-success text-white py-3">
                 <div class="row align-items-center">
-                    <div class="col-md-4 fw-medium"><i class="fas fa-boxes me-2"></i>จัดการสต็อกสินค้า</div>
+                    <div class="col-md-4 fw-medium"><i class="fas fa-boxes me-2"></i>จัดการสต็อก</div>
                     <div class="col-md-8">
                         <div class="d-flex gap-2 justify-content-end">
                             <a href="{{ url_for('print_all_qrs') }}" target="_blank" class="btn btn-warning btn-sm">
@@ -147,7 +165,7 @@
                     <thead class="table-light sticky-top">
                         <tr>
                             <th>Code</th>
-                            <th>ชื่อสินค้า</th>
+                            <th>ชื่อของ</th>
                             <th>หมวดหมู่</th>
                             <th class="text-end">คงเหลือ</th>
                             <th class="text-end">Safety</th>
@@ -204,7 +222,7 @@
                 <div class="card border-0 shadow-sm h-100">
                     <div class="card-header bg-white py-3">
                         <h6 class="mb-0 fw-bold text-dark"><i class="fas fa-fire me-2 text-orange"
-                                style="color:#fd7e14;"></i>สินค้าเบิกสูงสุด (Top 5)</h6>
+                                style="color:#fd7e14;"></i>ของเบิกสูงสุด (Top 5)</h6>
                     </div>
                     <div class="card-body p-0">
                         <div class="list-group list-group-flush">
@@ -258,8 +276,8 @@
                 <table class="table table-hover align-middle mb-0">
                     <thead class="table-light sticky-top">
                         <tr>
-                            <th class="ps-4">รหัสสินค้า</th>
-                            <th>ชื่อสินค้า</th>
+                            <th class="ps-4">รหัสของ</th>
+                            <th>ชื่อของ</th>
                             <th class="text-center">คงเหลือปัจจุบัน</th>
                             <th class="text-center">สถานะ</th>
                         </tr>
@@ -337,229 +355,506 @@
     </div>
     </div>
 
-    <div class="modal fade" id="addProductModal" tabindex="-1" aria-labelledby="addProductModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content bg-dark text-white border-secondary">
-            <div class="modal-header border-secondary">
-                <h5 class="modal-title" id="addProductModalLabel"><i class="fas fa-plus-circle text-success"></i> เพิ่มของใหม่เข้าระบบ</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+    <div class="modal fade" id="addProductModal" tabindex="-1" aria-labelledby="addProductModalLabel"
+        aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-white border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title" id="addProductModalLabel"><i class="fas fa-plus-circle text-success"></i>
+                        เพิ่มของใหม่เข้าระบบ</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                        aria-label="Close"></button>
+                </div>
+
+                <form action="/admin/add_product" method="POST">
+                    <div class="modal-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">รหัสของ (Auto Generate) *</label>
+                                <input type="text" id="productCode" name="code"
+                                    class="form-control bg-secondary text-white" readonly required
+                                    placeholder="รอการสร้างรหัส...">
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">หมวดหมู่ (Category)</label>
+                                <select id="productCategory" name="category" class="form-select" required
+                                    onchange="generateNextCode()">
+                                    <option value="">-- เลือกหมวดหมู่ --</option>
+                                    <option value="แม่บ้าน">แม่บ้าน</option>
+                                    <option value="Safety">เซฟตี้</option>
+                                    <option value="ยา">ยา</option>
+                                    <option value="ของใช้สำนักงาน">ของใช้สำนักงาน</option>
+                                    <option value="อื่นๆ">อื่นๆ</option>
+                                </select>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">สถานที่เก็บ (Location)</label>
+                                <select id="productLocation" name="location" class="form-select" required
+                                    onchange="generateNextCode()">
+                                    {% if role == 'superadmin' %}
+                                    <option value="PC1">PC1</option>
+                                    <option value="Coil Center">Coil Center (CC)</option>
+                                    {% elif role == 'admin_pc1' %}
+                                    <option value="PC1" selected>PC1</option>
+                                    {% elif role == 'admin_cc' %}
+                                    <option value="Coil Center" selected>Coil Center (CC)</option>
+                                    {% endif %}
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">ชื่อของ (Name) *</label>
+                                <input type="text" name="name" class="form-control" required>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">หน่วยนับ (Unit)</label>
+                                <input type="text" name="unit" class="form-control" required>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">จุดสั่งซื้อ (Safety)</label>
+                                <input type="number" name="safety_stock" class="form-control" value="0">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">จำนวนเริ่มต้น</label>
+                                <input type="number" name="stock" class="form-control" value="0">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">วันที่รับเข้า (ระบบจะสร้าง Lot อัตโนมัติ)</label>
+                                <input type="date" name="received_date" class="form-control">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">วันหมดอายุ (ถ้ามี)</label>
+                                <input type="date" name="expiry_date" class="form-control">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                        <button type="button" class="btn btn-success" onclick="submitAddProduct()">บันทึก</button>
+                    </div>
+                </form>
+
             </div>
-            
-            <form action="/admin/add_product" method="POST">
+        </div>
+    </div>
+
+    <div class="modal fade" id="editProductModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-white border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="fas fa-edit text-warning"></i> แก้ไขข้อมูล</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+
+                <form action="/admin/edit_product" method="POST">
+                    <div class="modal-body row g-3">
+                        <input type="hidden" id="edit_code" name="code">
+
+                        <div class="col-md-6">
+                            <label>รหัสของ (แก้ไขไม่ได้)</label>
+                            <input type="text" id="edit_code_display" class="form-control bg-secondary text-white"
+                                disabled>
+                        </div>
+                        <div class="col-md-6">
+                            <label>ชื่อของ *</label>
+                            <input type="text" id="edit_name" name="name" class="form-control" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label>หมวดหมู่</label>
+                            <input type="hidden" id="edit_category" name="category">
+                            <input type="text" id="edit_category_display" class="form-control bg-secondary text-white"
+                                disabled>
+                        </div>
+                        <div class="col-md-6">
+                            <label>หน่วยนับ</label>
+                            <input type="text" id="edit_unit" name="unit" class="form-control" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label>สถานที่เก็บ</label>
+                            <input type="hidden" id="edit_location" name="location">
+                            <input type="text" id="edit_location_display" class="form-control bg-secondary text-white"
+                                disabled>
+                        </div>
+                        <div class="col-md-3">
+                            <label>จุดสั่งซื้อ (Safety)</label>
+                            <input type="number" id="edit_safety_stock" name="safety_stock" class="form-control">
+                        </div>
+                        <div class="col-md-3">
+                            <label>จำนวนคงเหลือ</label>
+                            <input type="number" id="edit_stock" name="stock" class="form-control">
+                        </div>
+                        <div class="col-md-6">
+                            <label>วันหมดอายุ</label>
+                            <input type="date" id="edit_expiry_date" name="expiry_date" class="form-control">
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                        <button type="button" class="btn btn-warning"
+                            onclick="submitEditProduct()">บันทึกการแก้ไข</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="userManagementModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content bg-dark text-white">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="fas fa-users"></i> รายชื่อพนักงานที่เข้าใช้งานได้</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
                 <div class="modal-body">
-                    <div class="row g-3">
-                        <div class="col-md-6">
-    <label class="form-label">รหัสสินค้า (Auto Generate) *</label>
-    <input type="text" id="productCode" name="code" class="form-control bg-secondary text-white" readonly required placeholder="รอการสร้างรหัส...">
-</div>
-
-<div class="col-md-6">
-    <label class="form-label">หมวดหมู่ (Category)</label>
-    <select id="productCategory" name="category" class="form-select" required onchange="generateNextCode()">
-        <option value="">-- เลือกหมวดหมู่ --</option>
-        <option value="แม่บ้าน">แม่บ้าน</option>
-        <option value="Safety">เซฟตี้</option>
-        <option value="ยา">ยา</option>
-        <option value="ของใช้สำนักงาน">ของใช้สำนักงาน</option>
-        <option value="อื่นๆ">อื่นๆ</option>
-    </select>
-</div>
-
-<div class="col-md-6">
-    <label class="form-label">สถานที่เก็บ (Location)</label>
-    <select id="productLocation" name="location" class="form-select" required onchange="generateNextCode()">
-        <option value="PC1">PC1</option>
-        <option value="Coil Center">Coil Center (CC)</option>
-    </select>
-</div>
-                        <div class="col-md-6">
-                            <label class="form-label">ชื่อสินค้า (Name) *</label>
-                            <input type="text" name="name" class="form-control" required>
-                        </div>
-                        
-                        <div class="col-md-6">
-                            <label class="form-label">หน่วยนับ (Unit)</label>
-                            <input type="text" name="unit" class="form-control" required>
+                    <form id="addUserForm" class="row g-2 mb-4 p-3 bg-secondary rounded shadow-sm">
+                        <div class="col-md-3">
+                            <input type="text" name="emp_id" class="form-control form-control-sm"
+                                placeholder="รหัสพนักงาน *" required>
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label">จุดสั่งซื้อ (Safety)</label>
-                            <input type="number" name="safety_stock" class="form-control" value="0">
+                            <input type="text" name="name" class="form-control form-control-sm"
+                                placeholder="ชื่อ-นามสกุล *" required>
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label">จำนวนเริ่มต้น</label>
-                            <input type="number" name="stock" class="form-control" value="0">
+                            <label class="form-label text-white-50 small">แผนก</label>
+                            <select name="department" id="userDeptSelect" class="form-select form-select-sm" required>
+                                <option value="">-- กำลังโหลดแผนก... --</option>
+                            </select>
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label">วันที่รับเข้า (ระบบจะสร้าง Lot อัตโนมัติ)</label>
-                            <input type="date" name="received_date" class="form-control">
+                        <div class="col-md-2">
+                            <select name="location" class="form-select form-select-sm" required>
+                                {% if role == 'superadmin' %}
+                                <option value="PC1">PC1</option>
+                                <option value="Coil Center">CC</option>
+                                {% elif role == 'admin_pc1' %}
+                                <option value="PC1" selected>PC1</option>
+                                {% elif role == 'admin_cc' %}
+                                <option value="Coil Center" selected>Coil Center</option>
+                                {% endif %}
+                            </select>
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label">วันหมดอายุ (ถ้ามี)</label>
-                            <input type="date" name="expiry_date" class="form-control">
+                        <div class="col-md-2" id="userSubmitBtnContainer">
+                            <button type="button" class="btn btn-success btn-sm w-100" onclick="submitAddUser()">
+                                <i class="fas fa-plus"></i> เพิ่มพนักงาน
+                            </button>
                         </div>
-                        </div>
-                </div>
-                <div class="modal-footer border-secondary">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
-                    <button type="submit" class="btn btn-success">บันทึกสินค้า</button>
-                </div>
-            </form>
-            
-        </div>
-    </div>
-</div>
+                    </form>
 
-<div class="modal fade" id="editProductModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content bg-dark text-white border-secondary">
-            <div class="modal-header border-secondary">
-                <h5 class="modal-title"><i class="fas fa-edit text-warning"></i> แก้ไขข้อมูลสินค้า</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-sm table-dark table-striped table-hover mb-0">
+                            <thead style="position: sticky; top: 0; z-index: 100; background-color: #212529;">
+                                <tr class="text-warning">
+                                    <th style="width: 15%;">รหัสพนักงาน</th>
+                                    <th style="width: 30%;">ชื่อ-นามสกุล</th>
+                                    <th style="width: 25%;">แผนก</th>
+                                    <th style="width: 15%;">โรงงาน</th>
+                                    <th style="width: 15%;" class="text-center">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="userTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
-            
-            <form action="/admin/edit_product" method="POST">
-                <div class="modal-body row g-3">
-                    <input type="hidden" id="edit_code" name="code">
-                    
-                    <div class="col-md-6">
-                        <label>รหัสสินค้า (แก้ไขไม่ได้)</label>
-                        <input type="text" id="edit_code_display" class="form-control bg-secondary text-white" disabled>
-                    </div>
-                    <div class="col-md-6">
-                        <label>ชื่อสินค้า *</label>
-                        <input type="text" id="edit_name" name="name" class="form-control" required>
-                    </div>
-                    <div class="col-md-6">
-                        <label>หมวดหมู่</label>
-                        <input type="hidden" id="edit_category" name="category">
-                        <input type="text" id="edit_category_display" class="form-control bg-secondary text-white" disabled>
-                    </div>
-                    <div class="col-md-6">
-                        <label>หน่วยนับ</label>
-                        <input type="text" id="edit_unit" name="unit" class="form-control" required>
-                    </div>
-                    <div class="col-md-6">
-                        <label>สถานที่เก็บ</label>
-                        <input type="hidden" id="edit_location" name="location">
-                        <input type="text" id="edit_location_display" class="form-control bg-secondary text-white" disabled>
-                    </div>
-                    <div class="col-md-3">
-                        <label>จุดสั่งซื้อ (Safety)</label>
-                        <input type="number" id="edit_safety_stock" name="safety_stock" class="form-control">
-                    </div>
-                    <div class="col-md-3">
-                        <label>จำนวนคงเหลือ</label>
-                        <input type="number" id="edit_stock" name="stock" class="form-control">
-                    </div>
-                    <div class="col-md-6">
-                        <label>วันหมดอายุ</label>
-                        <input type="date" id="edit_expiry_date" name="expiry_date" class="form-control">
-                    </div>
-                </div>
-                <div class="modal-footer border-secondary">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
-                    <button type="submit" class="btn btn-warning">บันทึกการแก้ไข</button>
-                </div>
-            </form>
         </div>
     </div>
-</div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <script>
-    // ==========================================
-    // 1. ฟังก์ชัน Global (ใช้งานจาก HTML โดยตรง)
-    // ==========================================
-    function filterLogs(loc) {
-        fetch(`/admin/filter_logs?log_loc=${encodeURIComponent(loc)}`)
-            .then(response => response.text())
-            .then(html => {
-                const body = document.getElementById('logTableBody');
-                if (body) body.innerHTML = html;
-            })
-            .catch(err => console.error('Filter Logs Error:', err));
+        // ==========================================
+        // 1. ฟังก์ชัน Global (ใช้งานจาก HTML โดยตรง)
+        // ==========================================
+        function filterLogs(loc) {
+            fetch(`/admin/filter_logs?log_loc=${encodeURIComponent(loc)}`)
+                .then(response => response.text())
+                .then(html => {
+                    const body = document.getElementById('logTableBody');
+                    if (body) body.innerHTML = html;
+                })
+                .catch(err => console.error('Filter Logs Error:', err));
 
-        const btns = { '': 'btn-log-all', 'PC1': 'btn-log-pc1', 'CC': 'btn-log-cc' };
-        Object.keys(btns).forEach(key => {
-            const el = document.getElementById(btns[key]);
-            if (el) el.className = (key === loc) ? 'btn btn-sm rounded-pill px-3 btn-primary' : 'btn btn-sm rounded-pill px-3 btn-light text-muted border-0';
-        });
-    }
-
-    function generateNextCode() {
-        const category = document.getElementById('productCategory').value;
-        const location = document.getElementById('productLocation').value;
-        const codeInput = document.getElementById('productCode');
-
-        if (!category || !location) {
-            codeInput.value = '';
-            return;
+            const btns = { '': 'btn-log-all', 'PC1': 'btn-log-pc1', 'CC': 'btn-log-cc' };
+            Object.keys(btns).forEach(key => {
+                const el = document.getElementById(btns[key]);
+                if (el) el.className = (key === loc) ? 'btn btn-sm rounded-pill px-3 btn-primary' : 'btn btn-sm rounded-pill px-3 btn-light text-muted border-0';
+            });
         }
-        fetch(`/admin/get_next_code?category=${encodeURIComponent(category)}&location=${encodeURIComponent(location)}`)
-            .then(response => response.json())
-            .then(data => { codeInput.value = data.next_code; })
-            .catch(error => console.error('Gen Code Error:', error));
-    }
 
-    function editProductModal(code) {
-        fetch('/admin/get_product/' + code)
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    alert('เกิดข้อผิดพลาด: ไม่พบข้อมูลสินค้า');
-                    return;
-                }
-                document.getElementById('edit_code').value = data.code;
-                document.getElementById('edit_code_display').value = data.code;
-                document.getElementById('edit_name').value = data.name;
-                document.getElementById('edit_category').value = data.category;
-                document.getElementById('edit_category_display').value = data.category;
-                document.getElementById('edit_unit').value = data.unit;
-                document.getElementById('edit_location').value = data.location;
-                document.getElementById('edit_location_display').value = data.location;
-                document.getElementById('edit_safety_stock').value = data.safety_stock;
-                document.getElementById('edit_stock').value = data.stock;
-                document.getElementById('edit_expiry_date').value = data.expiry_date || '';
+        function generateNextCode() {
+            const category = document.getElementById('productCategory').value;
+            const location = document.getElementById('productLocation').value;
+            const codeInput = document.getElementById('productCode');
 
-                var myModal = new bootstrap.Modal(document.getElementById('editProductModal'));
-                myModal.show();
+            if (!category || !location) {
+                codeInput.value = '';
+                return;
+            }
+            fetch(`/admin/get_next_code?category=${encodeURIComponent(category)}&location=${encodeURIComponent(location)}`)
+                .then(response => response.json())
+                .then(data => { codeInput.value = data.next_code; })
+                .catch(error => console.error('Gen Code Error:', error));
+        }
+
+        function submitEditProduct() {
+            // 1. รวบรวมข้อมูลจาก Form ใน Modal
+            const formData = new FormData();
+            formData.append('code', document.getElementById('edit_code').value);
+            formData.append('name', document.getElementById('edit_name').value);
+            formData.append('unit', document.getElementById('edit_unit').value);
+            formData.append('safety_stock', document.getElementById('edit_safety_stock').value);
+            formData.append('stock', document.getElementById('edit_stock').value);
+            formData.append('expiry_date', document.getElementById('edit_expiry_date').value);
+
+            // 2. ส่งข้อมูลไปที่ Server ด้วย Fetch (AJAX)
+            fetch('/admin/edit_product', {
+                method: 'POST',
+                body: formData
             })
-            .catch(error => console.error('Edit Modal Error:', error));
-    }
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // 3. ปิด Modal เมื่อบันทึกสำเร็จ
+                        const modalEl = document.getElementById('editProductModal');
+                        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+                        modalInstance.hide();
 
-    // ==========================================
-    // 2. ส่วนที่ทำงานทันทีเมื่อโหลดหน้าเว็บ
-    // ==========================================
-    document.addEventListener('DOMContentLoaded', function () {
-        
-        // [ป้องกันโปรแกรมแครช] แยกการวาดกราฟไว้ใน try...catch
-        try {
-            const ctx = document.getElementById('deptChart');
-            if (ctx) {
-                const labels = {{ (dept_labels or []) | tojson | safe }};
-                const values = {{ (dept_values or []) | tojson | safe }};
-                if (labels.length > 0) {
-                    new Chart(ctx, {
-                        type: 'bar',
-                        data: {
-                            labels: labels,
-                            datasets: [{
-                                label: 'จำนวน (ชิ้น)',
-                                data: values,
-                                backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                                borderColor: 'rgba(54, 162, 235, 1)',
-                                borderWidth: 1
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            scales: { y: { beginAtZero: true } }
-                        }
+                        // 4. อัปเดตตารางของทันที (เรียกฟังก์ชันค้นหาที่มีอยู่แล้วเพื่อรีโหลดข้อมูลเฉพาะจุด)
+                        // วิธีที่ง่ายที่สุดคือสั่งให้ช่องค้นหาทำรายการใหม่
+                        const searchInput = document.getElementById('stockSearchInput');
+                        searchInput.dispatchEvent(new Event('input'));
+
+                        // (ถ้ามีระบบ Alert แบบไม่รีเฟรชหน้าสามารถใส่ตรงนี้ได้)
+                        console.log("บันทึกสำเร็จ: " + data.message);
+                    } else {
+                        alert('❌ เกิดข้อผิดพลาด: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Submit Error:', error);
+                    alert('เกิดข้อผิดพลาดในการเชื่อมต่อ');
+                });
+        }
+
+        function submitAddProduct() {
+            const form = document.querySelector('#addProductModal form');
+            const formData = new FormData(form);
+
+            fetch('/admin/add_product', {
+                method: 'POST',
+                body: formData
+            })
+                .then(res => {
+                    // ปิด Modal
+                    const modalEl = document.getElementById('addProductModal');
+                    bootstrap.Modal.getInstance(modalEl).hide();
+                    // รีเฟรชตารางของ (ใช้ฟังก์ชันเดิมของคุณ)
+                    document.getElementById('stockSearchInput').dispatchEvent(new Event('input'));
+                    form.reset();
+                })
+                .catch(err => alert("Error: " + err));
+        }
+
+        function editProductModal(code) {
+            fetch('/admin/get_product/' + code)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('เกิดข้อผิดพลาด: ไม่พบข้อมูลของ');
+                        return;
+                    }
+                    document.getElementById('edit_code').value = data.code;
+                    document.getElementById('edit_code_display').value = data.code;
+                    document.getElementById('edit_name').value = data.name;
+                    document.getElementById('edit_category').value = data.category;
+                    document.getElementById('edit_category_display').value = data.category;
+                    document.getElementById('edit_unit').value = data.unit;
+                    document.getElementById('edit_location').value = data.location;
+                    document.getElementById('edit_location_display').value = data.location;
+                    document.getElementById('edit_safety_stock').value = data.safety_stock;
+                    document.getElementById('edit_stock').value = data.stock;
+                    document.getElementById('edit_expiry_date').value = data.expiry_date || '';
+
+                    var myModal = new bootstrap.Modal(document.getElementById('editProductModal'));
+                    myModal.show();
+                })
+                .catch(error => console.error('Edit Modal Error:', error));
+        }
+
+        function updateDeptDropdown() {
+            fetch('/admin/list_departments')
+                .then(res => res.json())
+                .then(depts => {
+                    const select = document.getElementById('userDeptSelect');
+                    if (!select) return;
+
+                    // ล้างตัวเลือกเก่าออกก่อน แล้วใส่ตัวเลือกเริ่มต้น
+                    let html = '<option value="">-- เลือกแผนก --</option>';
+
+                    // วนลูปรายชื่อแผนกจาก Database มาสร้างเป็น <option>
+                    depts.forEach(d => {
+                        html += `<option value="${d.name}">${d.name}</option>`;
                     });
+
+                    select.innerHTML = html;
+                    console.log("✅ อัปเดตรายชื่อแผนกจาก DB แล้ว");
+                })
+                .catch(err => console.error("❌ ดึงข้อมูลแผนกไม่สำเร็จ:", err));
+        }
+
+        // สั่งให้ทำงานทันทีที่เปิด Modal "จัดการพนักงาน"
+        document.getElementById('userManagementModal').addEventListener('shown.bs.modal', function () {
+            updateDeptDropdown(); // โหลดแผนก
+            loadUserList();       // โหลดรายชื่อพนักงาน
+        });
+        // --- 2. แก้ไขฟังก์ชัน editUser (เพื่อไม่ให้ Location หาย) ---
+        function editUser(id, name, dept, loc) {
+            // โหลดแผนกก่อนเพื่อให้มั่นใจว่ามี List ให้เลือก
+            updateDeptDropdown(() => {
+                const form = document.getElementById('addUserForm');
+
+                // เติมข้อมูล
+                form.querySelector('[name="emp_id"]').value = id;
+                form.querySelector('[name="emp_id"]').readOnly = true;
+                form.querySelector('[name="name"]').value = name;
+
+                // เลือกแผนก (ทำงานได้เพราะรันใน Callback หลังโหลด List เสร็จ)
+                document.getElementById('userDeptSelect').value = dept;
+
+                // เลือก Location
+                const locSelect = form.querySelector('[name="location"]');
+                if (locSelect) locSelect.value = loc;
+
+                // เปลี่ยนปุ่ม (เปลี่ยนเฉพาะเนื้อหาใน Container ไม่ลบ Row)
+                const btnAction = document.getElementById('userSubmitBtnContainer');
+                btnAction.innerHTML = `
+            <button type="button" class="btn btn-primary btn-sm w-100" onclick="submitUpdateUser()">
+                <i class="fas fa-save"></i> บันทึกแก้ไข
+            </button>
+            <button type="button" class="btn btn-link btn-sm text-white-50 w-100 mt-1" onclick="resetUserForm()">ยกเลิก</button>
+        `;
+            });
+        }
+
+        // โหลดรายชื่อพนักงานทั้งหมด
+        function loadUserList() {
+            fetch('/admin/list_users')
+                .then(res => res.json())
+                .then(users => {
+                    const tbody = document.getElementById('userTableBody');
+                    tbody.innerHTML = users.map(user => `
+                <tr>
+                    <td>${user.emp_id}</td>
+                    <td>${user.name}</td>
+                    <td>${user.department}</td>
+                    <td>${user.location}</td>
+                    <td class="text-center">
+                        <button class="btn btn-sm btn-warning me-1" onclick="editUser('${user.emp_id}', '${user.name}', '${user.department}', '${user.location}')">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteUser('${user.emp_id}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+                });
+            updateDeptDropdown();
+        }
+
+
+        // ฟังก์ชันส่งข้อมูลแก้ไขไป Server
+        function submitUpdateUser() {
+            const form = document.getElementById('addUserForm');
+            const formData = new FormData(form);
+
+            fetch('/admin/update_user_ajax', { method: 'POST', body: formData })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('✅ แก้ไขข้อมูลพนักงานเรียบร้อย');
+                        resetUserForm(); // ล้างฟอร์มและเปลี่ยนปุ่มกลับเป็น "เพิ่ม"
+                        loadUserList();
+                    }
+                });
+        }
+
+        function resetUserForm() {
+            const form = document.getElementById('addUserForm');
+            form.reset();
+            form.querySelector('[name="emp_id"]').readOnly = false;
+
+            // คืนค่าปุ่มสีเขียว
+            const btnAction = document.getElementById('userSubmitBtnContainer');
+            btnAction.innerHTML = `
+        <button type="button" class="btn btn-success btn-sm w-100" onclick="submitAddUser()">
+            <i class="fas fa-plus"></i> เพิ่มพนักงาน
+        </button>
+    `;
+        }
+
+        // เพิ่มพนักงานใหม่
+        function submitAddUser() {
+            const form = document.getElementById('addUserForm');
+            const formData = new FormData(form);
+            fetch('/admin/add_user_ajax', { method: 'POST', body: formData })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        form.reset();
+                        loadUserList();
+                        alert('✅ เพิ่มพนักงานเรียบร้อย');
+                    } else {
+                        alert('❌ ' + data.message);
+                    }
+                });
+        }
+        // ลบพนักงาน
+        function deleteUser(emp_id) {
+            if (confirm(`ยืนยันการลบพนักงานรหัส ${emp_id}?`)) {
+                fetch(`/admin/delete_user/${emp_id}`, { method: 'POST' })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) loadUserList();
+                        else alert('❌ ' + data.message);
+                    });
+            }
+        }
+        // ==========================================
+        // 2. ส่วนที่ทำงานทันทีเมื่อโหลดหน้าเว็บ
+        // ==========================================
+        document.addEventListener('DOMContentLoaded', function () {
+
+            // [ป้องกันโปรแกรมแครช] แยกการวาดกราฟไว้ใน try...catch
+            try {
+                const ctx = document.getElementById('deptChart');
+                if (ctx) {
+                    const labels = {{ (dept_labels or[]) | tojson | safe }};
+        const values = {{ (dept_values or[]) | tojson | safe }};
+        if (labels.length > 0) {
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'จำนวน (ชิ้น)',
+                        data: values,
+                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true } }
                 }
+            });
+        }
             }
         } catch (error) {
             console.error("Chart Error: กราฟมีปัญหา แต่ระบบอื่นยังทำงานได้", error);
@@ -588,17 +883,17 @@
 
             if (catSelect) catSelect.addEventListener('change', loadStock);
             if (searchInput) searchInput.addEventListener('input', loadStock);
-        } catch(error) {
+        } catch (error) {
             console.error("Main Stock Error:", error);
         }
 
-        // --- AJAX กรองสินค้าใกล้หมด (Low Stock) ---
+        // --- AJAX กรองของใกล้หมด (Low Stock) ---
         try {
             const lowStockCat = document.getElementById('lowStockCatSelector');
             const lowStockTable = document.getElementById('lowStockTableBody');
 
             if (lowStockCat) {
-                lowStockCat.addEventListener('change', function() {
+                lowStockCat.addEventListener('change', function () {
                     fetch(`/admin/filter_low_stock?low_stock_cat=${encodeURIComponent(this.value)}`)
                         .then(res => {
                             if (res.status === 401) {
@@ -614,34 +909,35 @@
                         .catch(err => console.error('Low Stock Filter Error:', err));
                 });
             }
-        } catch(error) {
+        } catch (error) {
             console.error("Low Stock Error:", error);
         }
     });
 
-    // ==========================================
-    // 3. ระบบ Auto-Logout เมื่อไม่มีการใช้งาน 60 นาที
-    // ==========================================
-    let idleTime = 0;
-    const maxIdleTime = 60; // นาที
+        // ==========================================
+        // 3. ระบบ Auto-Logout เมื่อไม่มีการใช้งาน 60 นาที
+        // ==========================================
+        let idleTime = 0;
+        const maxIdleTime = 60; // นาที
 
-    function resetIdleTime() {
-        idleTime = 0;
-    }
-
-    document.addEventListener('mousemove', resetIdleTime);
-    document.addEventListener('keypress', resetIdleTime);
-    document.addEventListener('click', resetIdleTime);
-    document.addEventListener('scroll', resetIdleTime);
-
-    setInterval(function() {
-        idleTime++;
-        if (idleTime >= maxIdleTime) {
-            alert("เซสชันหมดอายุแล้ว (ไม่มีการใช้งาน 60 นาที) กรุณาเข้าสู่ระบบใหม่");
-            window.location.href = "/admin/logout";
+        function resetIdleTime() {
+            idleTime = 0;
         }
-    }, 60000);
+
+        document.addEventListener('mousemove', resetIdleTime);
+        document.addEventListener('keypress', resetIdleTime);
+        document.addEventListener('click', resetIdleTime);
+        document.addEventListener('scroll', resetIdleTime);
+
+        setInterval(function () {
+            idleTime++;
+            if (idleTime >= maxIdleTime) {
+                alert("เซสชันหมดอายุแล้ว (ไม่มีการใช้งาน 60 นาที) กรุณาเข้าสู่ระบบใหม่");
+                window.location.href = "/admin/logout";
+            }
+        }, 60000);
 
     </script>
 </body>
+
 </html>

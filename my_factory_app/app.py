@@ -127,12 +127,12 @@ def menu():
     user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
     if not user: return redirect(url_for('index'))
 
-    # --- 1. แยกสินค้าตาม Location ของ User (แก้ไขข้อ 1) ---
+    # --- 1. แยกของตาม Location ของ User (แก้ไขข้อ 1) ---
     location_condition = ""
-    # ถ้า User อยู่ PC1 -> เห็นสินค้า PC1 + General
+    # ถ้า User อยู่ PC1 -> เห็นของ PC1 + General
     if user['location'] and 'PC1' in user['location']:
         location_condition = " AND (location LIKE '%PC1%' OR location = 'General' OR location IS NULL)"
-    # ถ้า User อยู่ CC -> เห็นสินค้า CC + General
+    # ถ้า User อยู่ CC -> เห็นของ CC + General
     elif user['location'] and ('Coil Center' in user['location'] or 'CC' in user['location']):
         location_condition = " AND (location LIKE '%Coil Center%' OR location LIKE '%CC%' OR location = 'General' OR location IS NULL)"
     
@@ -141,7 +141,7 @@ def menu():
     cat_rows = conn.execute(cat_query).fetchall()
     all_categories = [row['category'] for row in cat_rows]
 
-    # Query สินค้า (กรองตาม Location ด้วย)
+    # Query ของ (กรองตาม Location ด้วย)
     query = f'SELECT * FROM products WHERE stock > 0 {location_condition}'
     params = []
     
@@ -201,7 +201,7 @@ def add_to_cart():
         conn.commit()
         flash(f'🛒 เพิ่ม {product["name"]} เรียบร้อย', 'success')
     else:
-        flash('❌ สินค้าหมดหรือมีไม่พอ', 'danger')
+        flash('❌ ของหมดหรือมีไม่พอ', 'danger')
     
     conn.close()
     return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
@@ -269,7 +269,7 @@ def confirm_withdrawal():
                     VALUES (?, ?, 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)', ?, 'Pending', ?)
                 ''', (emp_id, item['product_id'], item['qty'], thai_now))
         else:
-            # กรณีสินค้าทั่วไป: INSERT เป็นประวัติใหม่เสมอ
+            # กรณีของทั่วไป: INSERT เป็นประวัติใหม่เสมอ
             conn.execute('''
                 INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp) 
                 VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, 'Pending', ?)
@@ -378,7 +378,7 @@ def admin_dashboard():
     print(f"DEBUG Chart Labels: {dept_labels}") # ดูใน Terminal
     print(f"DEBUG Chart Values: {dept_values}")
 
-    # --- 2. Analytics: สินค้าที่ถูกเบิกสูงสุด 5 อันดับแรก (Top 5 Items) ---
+    # --- 2. Analytics: ของที่ถูกเบิกสูงสุด 5 อันดับแรก (Top 5 Items) ---
     top_items_query = f'''
         SELECT p.name, SUM(l.qty) as total_qty, p.unit
         FROM transaction_logs l
@@ -446,7 +446,7 @@ def admin_dashboard():
                            logs=logs,
                            page=page, total_pages=total_pages,
                            dept_labels=dept_labels, dept_values=dept_values, # ข้อมูลสำหรับกราฟ
-                           top_items=top_items, # ข้อมูลสินค้าเบิกสูงสุด
+                           top_items=top_items, # ข้อมูลของเบิกสูงสุด
                            role=role,
                            selected_loc=selected_loc)
 
@@ -455,7 +455,7 @@ def daily_alert():
     # 1. เชื่อมต่อฐานข้อมูล
     conn = get_db_connection()
     
-    # --- ส่วนที่ 1: เช็คสินค้าใกล้หมดอายุ (ภายใน 30 วัน) ---
+    # --- ส่วนที่ 1: เช็คของใกล้หมดอายุ (ภายใน 30 วัน) ---
     expiry_query = '''
         SELECT name, expiry_date, category FROM products 
         WHERE expiry_date IS NOT NULL AND expiry_date != '' 
@@ -483,7 +483,7 @@ def daily_alert():
 
     if expiring_items:
         alert_triggered = True
-        message += "\n⚠️ [แจ้งเตือนสินค้าใกล้หมดอายุ]\n"
+        message += "\n⚠️ [แจ้งเตือนของใกล้หมดอายุ]\n"
         for item in expiring_items:
             message += f"📦 {item['name']}\n📅 หมดอายุ: {item['expiry_date']}\n"
 
@@ -512,7 +512,7 @@ def approve_request(log_id):
         product_id = log['product_id']
         qty_to_withdraw = log['qty']
         
-        # 2. ค้นหา Lot สินค้าที่เก่าที่สุดที่มีของอยู่ (FIFO)
+        # 2. ค้นหา Lot ของที่เก่าที่สุดที่มีของอยู่ (FIFO)
         # เรียงตาม received_date (วันที่รับ) และ id (ตัวไหนเข้าฐานข้อมูลก่อน)
         lots = conn.execute('''
             SELECT * FROM product_lots 
@@ -544,7 +544,7 @@ def approve_request(log_id):
             WHERE id = ?
         ''', (last_lot_id, thai_now, log_id))
         
-        # อัปเดตยอดเบิกสะสมในตารางสินค้าหลัก
+        # อัปเดตยอดเบิกสะสมในตารางของหลัก
         conn.execute('UPDATE products SET withdraw = withdraw + ? WHERE id = ?', (qty_to_withdraw, product_id))
         
         conn.commit()
@@ -557,7 +557,7 @@ def approve_request(log_id):
     conn.close()
     return redirect(url_for('admin_dashboard'))
 
-def check_safety_alert(product_id): # ฟังก์ชันนี้จะถูกเรียกหลังจากอนุมัติการเบิก เพื่อเช็คว่าสินค้าตัวนั้นๆ ต่ำกว่า Safety Stock หรือไม่
+def check_safety_alert(product_id): # ฟังก์ชันนี้จะถูกเรียกหลังจากอนุมัติการเบิก เพื่อเช็คว่าของตัวนั้นๆ ต่ำกว่า Safety Stock หรือไม่
     conn = get_db_connection()
     product = conn.execute('SELECT name, stock, safety_stock, unit FROM products WHERE id = ?', (product_id,)).fetchone()
     conn.close()
@@ -565,7 +565,7 @@ def check_safety_alert(product_id): # ฟังก์ชันนี้จะถ
     if product and product['stock'] <= product['safety_stock']:
         alert_msg = (
             f"⚠️ *แจ้งเตือนสต็อกต่ำกว่าเกณฑ์*\n"
-            f"📦 สินค้า: {product['name']}\n"
+            f"📦 ของ: {product['name']}\n"
             f"📉 คงเหลือปัจจุบัน: {product['stock']} {product['unit']}\n"
             f"🚩 จุดสั่งซื้อ (Safety): {product['safety_stock']} {product['unit']}\n"
             f"--- กรุณาพิจารณาสั่งซื้อเพิ่ม ---"
@@ -702,11 +702,11 @@ def export_excel():
         location_filter = "" # ดึงทั้งหมด
         filename = "Inventory_ALL.xlsx"
         
-    # 2. Query ดึงข้อมูลจากตารางสินค้า (Inventory)
+    # 2. Query ดึงข้อมูลจากตารางของ (Inventory)
     query = f'''
         SELECT 
-            code as 'รหัสสินค้า',
-            name as 'ชื่อสินค้า',
+            code as 'รหัสของ',
+            name as 'ชื่อของ',
             category as 'หมวดหมู่',
             unit as 'หน่วยนับ',
             location as 'สถานที่เก็บ (Location)',
@@ -767,15 +767,23 @@ def import_excel():
             inserted_count = 0
 
             for index, row in df.iterrows():
-                code_col = next((col for col in df.columns if col.lower() in ['code', 'รหัส', 'รหัสสินค้า']), None)
+                code_col = next((col for col in df.columns if col.lower() in ['code', 'รหัส', 'รหัสของ']), None)
                 if not code_col: continue
 
                 code = str(row[code_col]).strip()
                 if not code or code.lower() == 'nan': continue
                 
-                name = row.get('Name', row.get('ชื่อสินค้า', 'No Name'))# เพิ่มการอ่านชื่อสินค้าได้จากหลายชื่อคอลัมน์
-                stock = row.get('Qty', row.get('จำนวนคงเหลือ', row.get('คงเหลือ', 0)))# เพิ่มการอ่านจำนวนคงเหลือจากหลายชื่อคอลัมน์
-                safty_stock = row.get('Safety Stock', row.get('จุดสั่งซื้อ (Safety Stock)', 0))# เพิ่มการอ่าน Safety Stock ด้วย
+                name = row.get('Name', row.get('ชื่อของ', 'No Name'))# เพิ่มการอ่านชื่อของได้จากหลายชื่อคอลัมน์
+
+                try:
+                    stock = int(row.get('Qty', row.get('จำนวนคงเหลือ', 0)))# เพิ่มการอ่านจำนวนคงเหลือได้จากหลายชื่อคอลัมน์ และแปลงเป็น Integer (ถ้าแปลงไม่ได้จะถือว่าเป็น 0)
+                except:
+                    stock = 0
+                try:
+                    safety_stock = int(row.get('Safety Stock', row.get('จุดสั่งซื้อ', 0)))# เพิ่มการอ่านจุดสั่งซื้อได้จากหลายชื่อคอลัมน์ และแปลงเป็น Integer (ถ้าแปลงไม่ได้จะถือว่าเป็น 0)
+                except:
+                    safety_stock = 0
+
                 category = row.get('Category', row.get('หมวดหมู่', 'General'))# เพิ่มการอ่านหมวดหมู่ด้วย
                 unit = row.get('Unit', row.get('หน่วยนับ', 'PCS'))# เพิ่มการอ่านหน่วยนับด้วย
                 location = row.get('Location', row.get('สถานที่เก็บ (Location)', '-')) # นำเข้า Location ด้วย
@@ -799,7 +807,7 @@ def import_excel():
             
     return redirect(url_for('admin_dashboard'))
 
-# 1. ดึงข้อมูลสินค้าเดิมมาแสดงในหน้าต่างแก้ไข
+# 1. ดึงข้อมูลของเดิมมาแสดงในหน้าต่างแก้ไข
 @app.route('/admin/get_product/<code>')
 def get_product(code):
     if not session.get('admin_logged_in'): return jsonify({'error': 'Unauthorized'}), 401
@@ -812,9 +820,9 @@ def get_product(code):
 
 @app.route('/admin/edit_product', methods=['POST'])
 def edit_product():
-    if not session.get('admin_logged_in'): return redirect(url_for('admin_login'))
+    if not session.get('admin_logged_in'): 
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
     
-    # รับค่าจาก Form ที่ส่งมา
     code = request.form.get('code')
     name = request.form.get('name')
     unit = request.form.get('unit')
@@ -824,25 +832,18 @@ def edit_product():
 
     conn = get_db_connection()
     try:
-        # ทำการอัปเดตข้อมูล
         conn.execute('''
             UPDATE products 
             SET name=?, unit=?, safety_stock=?, stock=?, expiry_date=?
             WHERE code=?
-        ''', (name, unit,  safety_stock, stock, expiry_date, code))
+        ''', (name, unit, safety_stock, stock, expiry_date, code))
         conn.commit()
-        
-        # เพิ่มแจ้งเตือนเมื่อสำเร็จ
-        flash('✅ แก้ไขข้อมูลสินค้าเรียบร้อย', 'success')
-        
+        # คืนค่า Success เป็น JSON แทนการ Redirect
+        return jsonify({'success': True, 'message': 'แก้ไขข้อมูลของเรียบร้อย'})
     except Exception as e:
-        # เพิ่มแจ้งเตือนเมื่อมี Error
-        flash(f'❌ เกิดข้อผิดพลาด: {e}', 'danger')
-        
+        return jsonify({'success': False, 'message': str(e)})
     finally:
         conn.close()
-        
-    return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/filter_low_stock')
 def filter_low_stock():
@@ -861,7 +862,7 @@ def filter_low_stock():
     elif role == 'admin_cc':
         loc_filter = " AND (location LIKE '%Coil Center%' OR location LIKE '%CC%')"
 
-    # Query หาสินค้าที่ต่ำกว่าเกณฑ์
+    # Query หาของที่ต่ำกว่าเกณฑ์
     sql = f"SELECT * FROM products WHERE stock <= safety_stock {loc_filter}"
     params = []
     
@@ -961,7 +962,7 @@ def admin_logout():
     session.clear()
     return redirect(url_for('admin_login'))
 
-# --- ฟังก์ชันเบิกสินค้าแบบ FIFO ---
+# --- ฟังก์ชันเบิกของแบบ FIFO ---
 def withdraw_fifo_logic(product_id, qty_to_withdraw, emp_id):
     conn = get_db_connection()
     # ดึง Lot ที่มีของอยู่ เรียงตามวันที่รับเข้าจากเก่าไปใหม่
@@ -983,7 +984,7 @@ def withdraw_fifo_logic(product_id, qty_to_withdraw, emp_id):
         # บันทึก Transaction แยกตาม Lot เพื่อความแม่นยำ
         conn.execute('''
             INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, status)
-            VALUES (?, ?, ?, 'เบิกสินค้า (FIFO)', ?, 'Approved')
+            VALUES (?, ?, ?, 'เบิกของ (FIFO)', ?, 'Approved')
         ''', (emp_id, product_id, lot['id'], take))
 
     # อัปเดตยอดรวมในตารางหลัก
@@ -1021,7 +1022,7 @@ def add_product_ajax():
         ''', (f"ADMIN:{admin_name}", product_id, f"รับเข้า Lot: {lot_number}", qty))
 
         conn.commit()
-        return jsonify({'success': True, 'message': 'เพิ่ม Lot สินค้าสำเร็จ!'})
+        return jsonify({'success': True, 'message': 'เพิ่ม Lot ของสำเร็จ!'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
     finally:
@@ -1035,8 +1036,8 @@ def monthly_report():
     # ดึงข้อมูลการเบิกจ่ายที่ Approved แล้วในเดือนปัจจุบัน
     query = '''
         SELECT 
-            p.code AS "รหัสสินค้า", 
-            p.name AS "ชื่อสินค้า", 
+            p.code AS "รหัสของ", 
+            p.name AS "ชื่อของ", 
             u.department AS "แผนกที่เบิก", 
             SUM(l.qty) AS "จำนวนที่เบิกทั้งหมด",
             p.unit AS "หน่วย"
@@ -1121,17 +1122,17 @@ def scanner_page():
 @app.route('/scan/<product_code>')
 def scan_product(product_code):
     conn = get_db_connection()
-    # ค้นหา ID สินค้าจากรหัส (Code) ที่สแกนได้
+    # ค้นหา ID ของจากรหัส (Code) ที่สแกนได้
     product = conn.execute('SELECT id FROM products WHERE code = ?', (product_code,)).fetchone()
     conn.close()
     
     if product:
-        # ถ้าพบสินค้า ให้ส่งไปหน้าเมนู พร้อม Filter สินค้าตัวนั้นทันที
+        # ถ้าพบของ ให้ส่งไปหน้าเมนู พร้อม Filter ของตัวนั้นทันที
         # เราส่ง open_item ไปเพื่อให้ JavaScript ในหน้าเมนูรู้ว่าต้องเปิด Popup ตัวไหน
-        flash(f'🔍 พบสินค้า: {product_code}', 'success')
+        flash(f'🔍 พบของ: {product_code}', 'success')
         return redirect(url_for('menu', search=product_code, open_item=product['id']))
     
-    flash(f'❌ ไม่พบรหัสสินค้า: {product_code} ในระบบ', 'danger')
+    flash(f'❌ ไม่พบรหัสของ: {product_code} ในระบบ', 'danger')
     return redirect(url_for('index'))
 
 # --- 1. หน้าจอแสดงรายชื่อพนักงานที่สถานะ Online ค้างอยู่ ---
@@ -1173,20 +1174,133 @@ app.permanent_session_lifetime = timedelta(minutes=30) # บังคับใ�
 def make_session_permanent():
     session.permanent = True # ทำให้ทุก Session มีวันหมดอายุตามที่ตั้งไว้
 
-
-@app.route('/fix_db')
-def fix_db():
+@app.route('/admin/list_departments')
+def list_departments():
+    if not session.get('admin_logged_in'): return jsonify([])
+    
+    role = session.get('admin_role')
     conn = get_db_connection()
+    
     try:
-        # สั่งเพิ่มคอลัมน์ lot_no เข้าไปในตาราง products
-        conn.execute('ALTER TABLE products ADD COLUMN lot_no TEXT;')
-        conn.commit()
-        msg = "✅ อัปเดตฐานข้อมูลสำเร็จ! เพิ่มคอลัมน์ lot_no เรียบร้อยแล้ว"
+        if role == 'admin_pc1':
+            depts = conn.execute("SELECT name FROM departments WHERE location = 'PC1' ORDER BY name ASC").fetchall()
+        elif role == 'admin_cc':
+            depts = conn.execute("SELECT name FROM departments WHERE location = 'Coil Center' ORDER BY name ASC").fetchall()
+        else:
+            depts = conn.execute("SELECT DISTINCT name FROM departments ORDER BY name ASC").fetchall()
+        
+        return jsonify([dict(d) for d in depts])
     except Exception as e:
-        msg = f"⚠️ มีคอลัมน์นี้อยู่แล้ว หรือเกิดข้อผิดพลาด: {e}"
+        print(f"Error fetching departments: {e}")
+        return jsonify([]) # คืนค่าลิสต์ว่างถ้ายังไม่มีตาราง
     finally:
         conn.close()
-    return msg
+
+@app.route('/admin/list_users')
+def list_users():
+    if not session.get('admin_logged_in'): 
+        return jsonify([])
+        
+    role = session.get('admin_role')
+    conn = get_db_connection()
+    
+    # --- Logic กรองตามสิทธิ์ ---
+    if role == 'admin_pc1':
+        query = "SELECT emp_id, name, department, location FROM users WHERE location = 'PC1'"
+    elif role == 'admin_cc':
+        query = "SELECT emp_id, name, department, location FROM users WHERE location = 'Coil Center'"
+    else:
+        # Superadmin เห็นทั้งหมด
+        query = "SELECT emp_id, name, department, location FROM users"
+        
+    users = conn.execute(query).fetchall()
+    conn.close()
+    return jsonify([dict(u) for u in users])
+
+@app.route('/admin/add_user_ajax', methods=['POST'])
+def add_user_ajax():
+    if not session.get('admin_logged_in'): return jsonify({'success': False, 'message': 'Unauthorized'})
+    emp_id = request.form.get('emp_id')
+    name = request.form.get('name')
+    dept = request.form.get('department')
+    loc = request.form.get('location')
+    
+    conn = get_db_connection()
+    try:
+        conn.execute('INSERT INTO users (emp_id, name, department, location, is_locked) VALUES (?, ?, ?, ?, 0)',
+                     (emp_id, name, dept, loc))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'message': 'รหัสพนักงานซ้ำหรือข้อมูลผิดพลาด'})
+    finally:
+        conn.close()
+
+@app.route('/admin/delete_user/<emp_id>', methods=['POST'])
+def delete_user(emp_id):
+    if not session.get('admin_logged_in'): 
+        return jsonify({'success': False, 'message': 'Unauthorized'})
+        
+    role = session.get('admin_role')
+    conn = get_db_connection()
+    
+    # ตรวจสอบสิทธิ์ก่อนลบจริง
+    user = conn.execute('SELECT location FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
+    
+    if not user:
+        return jsonify({'success': False, 'message': 'ไม่พบพนักงาน'})
+        
+    # ถ้าไม่ใช่ Super Admin และพนักงานไม่ได้อยู่โรงงานตัวเอง จะลบไม่ได้
+    if role == 'admin_pc1' and user['location'] != 'PC1':
+        return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์จัดการพนักงานนอก PC1'})
+    if role == 'admin_cc' and user['location'] != 'Coil Center':
+        return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์จัดการพนักงานนอก CC'})
+
+    conn.execute('DELETE FROM users WHERE emp_id = ?', (emp_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/admin/update_user_ajax', methods=['POST'])
+def update_user_ajax():
+    if not session.get('admin_logged_in'): return jsonify({'success': False})
+    
+    emp_id = request.form.get('emp_id')
+    name = request.form.get('name')
+    dept = request.form.get('department')
+    loc = request.form.get('location')
+    
+    conn = get_db_connection()
+    # อัปเดตข้อมูลพนักงานยกเว้นรหัส (รหัสเป็น Key หลักห้ามแก้)
+    conn.execute('UPDATE users SET name=?, department=?, location=? WHERE emp_id=?', 
+                 (name, dept, loc, emp_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/setup_dept_table')
+def setup_dept_table():
+    conn = get_db_connection()
+    try:
+        # สร้างตารางแผนก
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS departments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                location TEXT NOT NULL
+            )
+        ''')
+        
+        # เพิ่มข้อมูลตัวอย่าง (Optional)
+        # conn.execute("INSERT INTO departments (name, location) VALUES ('General Affairs', 'PC1')")
+        # conn.execute("INSERT INTO departments (name, location) VALUES ('Production Control', 'Coil Center')")
+        
+        conn.commit()
+        return "✅ สร้างตาราง departments สำเร็จแล้ว!"
+    except Exception as e:
+        return f"❌ เกิดข้อผิดพลาด: {e}"
+    finally:
+        conn.close()
 
 # ฟังก์ชันที่จะให้ทำงานอัตโนมัติ (Background Task)
 def scheduled_daily_alert():
@@ -1195,7 +1309,7 @@ def scheduled_daily_alert():
         
         conn = get_db_connection()
         
-      # --- ส่วนที่ 1: เช็คสินค้าใกล้หมดอายุ ---
+      # --- ส่วนที่ 1: เช็คของใกล้หมดอายุ ---
         expiry_query = '''
             SELECT name, expiry_date 
             FROM products 
@@ -1233,9 +1347,9 @@ def scheduled_daily_alert():
        # --- 3. รวมข้อความและส่งเข้า LINE (ปรับฟอร์มตามรูปภาพ) ---
         message = ""
         
-        # ส่วนของสินค้าใกล้หมดอายุ (ถ้ามี)
+        # ส่วนของของใกล้หมดอายุ (ถ้ามี)
         if expiring_items:
-            message += "⚠️ [แจ้งเตือนสินค้าใกล้หมดอายุ]\n"
+            message += "⚠️ [แจ้งเตือนของใกล้หมดอายุ]\n"
             for item in expiring_items:
                 message += f"📦 {item['name']}\n📅 หมดอายุ: {item['expiry_date']}\n"
             message += "--------------------------\n"

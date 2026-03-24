@@ -1,24 +1,24 @@
 {% for item in items %}
 <tr class="align-middle">
     <td><code class="text-primary fw-bold">{{ item['code'] }}</code></td>
-    
+
     <td>{{ item['name'] }}</td>
-    
+
     <td><span class="badge bg-light text-dark">{{ item['category'] }}</span></td>
-    
-    <td class="text-end {{ 'text-danger fw-bold' if item['stock'] <= item['safety_stock'] else '' }}">
+
+    <td class="text-end {{ 'text-danger fw-bold' if item['stock']|int <= item['safety_stock']|int else '' }}">
         {{ item['stock'] }}
     </td>
-    
+
     <td class="text-end text-muted">{{ item['safety_stock'] }}</td>
-    
+
     <td class="text-center">
-        <a href="{{ url_for('generate_qr', code=item['code']) }}" target="_blank"
-            class="btn btn-sm btn-outline-info" title="ดู QR Code">
+        <a href="{{ url_for('generate_qr', code=item['code']) }}" target="_blank" class="btn btn-sm btn-outline-info"
+            title="ดู QR Code">
             <i class="fas fa-qrcode"></i>
         </a>
     </td>
-    
+
     <td class="text-center">
         <button class="btn btn-sm btn-outline-secondary" onclick="editProductModal('{{ item['code'] }}')">
             <i class="fas fa-edit"></i>
