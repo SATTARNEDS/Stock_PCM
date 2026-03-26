@@ -623,54 +623,70 @@ def get_next_code():
 
 @app.route('/admin/add_product', methods=['POST'])
 def add_product():
-    if not session.get('admin_logged_in'): return redirect(url_for('admin_login'))
-
+    if not session.get('admin_logged_in'): 
+        return jsonify({'success': False, 'message': 'Unauthorized'})
+    
     code = request.form.get('code')
     name = request.form.get('name')
     category = request.form.get('category')
     unit = request.form.get('unit')
     location = request.form.get('location')
-    safety_stock = request.form.get('safety_stock', 0)
-    stock = request.form.get('stock', 0)
-    expiry_date = request.form.get('expiry_date', '')
-    received_date = request.form.get('received_date', '')
+    safety_stock = int(request.form.get('safety_stock') or 0)
+    stock = int(request.form.get('stock') or 0)
+    expiry_date = request.form.get('expiry_date', '').strip()
     
-    # ข้อ 2: Lot No. ไม่บังคับกรอก ถ้าว่างให้คำนวณจากวันที่รับเข้า
-    # 2.1. รับค่า Lot No. จากฟอร์ม (ถ้าแอดมินกรอกมาเอง)
-    lot_no = request.form.get('lot_no', '').strip()
-    
-    # 2.2. ถ้าแอดมินไม่ได้กรอกมา ให้ระบบสร้างให้เองเป็น DDMMYYYY
-    if not lot_no:
-        if received_date: # ถ้ามีการเลือกวันที่รับเข้า (YYYY-MM-DD)
-            try:
-                # แปลงจาก YYYY-MM-DD เป็น วัตถุวันที่ก่อน
-                date_obj = datetime.strptime(received_date, '%Y-%m-%d')
-                # แล้วแปลงกลับเป็นรูปแบบที่ต้องการคือ DDMMYYYY
-                lot_no = date_obj.strftime('%d%m%Y')
-            except:
-                # ถ้าแปลงพลาด ให้ใช้วันที่ปัจจุบัน (ไทย)
-                lot_no = get_thailand_time().strftime('%d%m%Y')
-        else:
-            # ถ้าไม่มีทั้ง Lot และ วันที่รับเข้า ให้ใช้วันที่ปัจจุบันทันที
-            lot_no = get_thailand_time().strftime('%d%m%Y')
+    # ✅ 1. จัดการเรื่องวันที่รับเข้า (ถ้าว่าง ให้ใช้วันนี้)
+    received_date = request.form.get('received_date', '').strip()
+    if not received_date:
+        received_date = get_thailand_time().strftime('%Y-%m-%d')
 
-    # เพิ่ม prefix "L" เข้าไปข้างหน้าเพื่อให้รู้ว่าเป็นเลข Lot (เลือกได้ว่าจะใส่หรือไม่ใส่)
-    # lot_no = "L" + lot_no
+    # ✅ 2. จัดการเรื่อง Lot No (อิงจาก received_date)
+    lot_no = request.form.get('lot_no', '').strip()
+    if not lot_no:
+        try:
+            date_obj = datetime.strptime(received_date, '%Y-%m-%d')
+            lot_no = date_obj.strftime('%d%m%Y')
+        except:
+            lot_no = get_thailand_time().strftime('%d%m%Y')
+        else:
+            lot_no = get_thailand_time().strftime('%d%m%Y')
 
     conn = get_db_connection()
     try:
-        # ข้อ 1 & 3: เอา price ออกจากคำสั่ง SQL แล้ว
-        conn.execute('''
+        cursor = conn.cursor()
+        
+        # 1. บันทึกข้อมูลลงตารางหลัก (products)
+        cursor.execute('''
             INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, received_date, lot_no)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (code, name, category, unit, location, safety_stock, stock, expiry_date, received_date, lot_no))
+        
+        # ดึง ID ของสินค้าที่เพิ่งถูกสร้างขึ้นมาสดๆ ร้อนๆ
+        new_product_id = cursor.lastrowid 
+
+        # 2. ถ้าใส่จำนวนเริ่มต้นมาด้วย ให้บันทึกลงตาราง product_lots ทันที (เป็น Lot ที่ 1)
+        if stock > 0:
+            cursor.execute('''
+                INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (new_product_id, lot_no, stock, received_date, expiry_date))
+            
+            # 3. แอบบันทึกประวัติ (Log) ไว้ด้วยว่าแอดมินนำเข้าเป็น Lot แรก
+            admin_name = session.get('admin_name')
+            thai_now = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute('''
+                INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp) 
+                VALUES (?, ?, ?, ?, 'Completed', ?)
+            ''', (f"ADMIN:{admin_name}", new_product_id, f"รับเข้า Lot แรก: {lot_no}", stock, thai_now))
+
         conn.commit()
+        return jsonify({'success': True, 'message': 'เพิ่มข้อมูลสินค้าและสร้าง Lot สำเร็จ'})
+        
     except Exception as e:
-        print(f"Error adding product: {e}") # ไว้ดู error ใน logs ของ Render
+        print(f"Error adding product: {e}")
+        return jsonify({'success': False, 'message': f"เกิดข้อผิดพลาด: {e}"})
     finally:
         conn.close()
-
-    return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/reset_lock')
 def reset_lock():
@@ -773,30 +789,35 @@ def import_excel():
                 code = str(row[code_col]).strip()
                 if not code or code.lower() == 'nan': continue
                 
-                name = row.get('Name', row.get('ชื่อของ', 'No Name'))# เพิ่มการอ่านชื่อของได้จากหลายชื่อคอลัมน์
+                name = row.get('Name', row.get('ชื่อของ', 'No Name'))
 
                 try:
-                    stock = int(row.get('Qty', row.get('จำนวนคงเหลือ', 0)))# เพิ่มการอ่านจำนวนคงเหลือได้จากหลายชื่อคอลัมน์ และแปลงเป็น Integer (ถ้าแปลงไม่ได้จะถือว่าเป็น 0)
+                    stock = int(row.get('Qty', row.get('จำนวนคงเหลือ', 0)))
                 except:
                     stock = 0
+                    
                 try:
-                    safety_stock = int(row.get('Safety Stock', row.get('จุดสั่งซื้อ', 0)))# เพิ่มการอ่านจุดสั่งซื้อได้จากหลายชื่อคอลัมน์ และแปลงเป็น Integer (ถ้าแปลงไม่ได้จะถือว่าเป็น 0)
+                    safety_stock = int(row.get('Safety Stock', row.get('จุดสั่งซื้อ', 0))) # ชื่อตัวแปร safety_stock (มี e)
                 except:
                     safety_stock = 0
 
-                category = row.get('Category', row.get('หมวดหมู่', 'General'))# เพิ่มการอ่านหมวดหมู่ด้วย
-                unit = row.get('Unit', row.get('หน่วยนับ', 'PCS'))# เพิ่มการอ่านหน่วยนับด้วย
-                location = row.get('Location', row.get('สถานที่เก็บ (Location)', '-')) # นำเข้า Location ด้วย
+                category = row.get('Category', row.get('หมวดหมู่', 'General'))
+                unit = row.get('Unit', row.get('หน่วยนับ', 'PCS'))
+                location = row.get('Location', row.get('สถานที่เก็บ (Location)', '-'))
 
                 existing = conn.execute('SELECT id FROM products WHERE code = ?', (code,)).fetchone()
                 
                 if existing:
+                    # แก้ไข safty_stock -> safety_stock
                     conn.execute('UPDATE products SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=? WHERE id=?', 
-                                 (name, stock, safty_stock, category, unit, location, existing['id']))
+                                 (name, stock, safety_stock, category, unit, location, existing['id']))
                     updated_count += 1
                 else:
-                    conn.execute('INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock) VALUES (?, ?, ?, ?, ?, ?, 0, 0)', 
-                                 (code, name, stock, safty_stock, category, unit, location))
+                    # แก้ไขเพิ่ม ? ให้ครบ 7 ตัว และแก้ safty_stock -> safety_stock
+                    conn.execute('''
+                        INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)
+                    ''', (code, name, stock, safety_stock, category, unit, location))
                     inserted_count += 1
 
             conn.commit()
@@ -1174,28 +1195,6 @@ app.permanent_session_lifetime = timedelta(minutes=30) # บังคับใ�
 def make_session_permanent():
     session.permanent = True # ทำให้ทุก Session มีวันหมดอายุตามที่ตั้งไว้
 
-@app.route('/admin/list_departments')
-def list_departments():
-    if not session.get('admin_logged_in'): return jsonify([])
-    
-    role = session.get('admin_role')
-    conn = get_db_connection()
-    
-    try:
-        if role == 'admin_pc1':
-            depts = conn.execute("SELECT name FROM departments WHERE location = 'PC1' ORDER BY name ASC").fetchall()
-        elif role == 'admin_cc':
-            depts = conn.execute("SELECT name FROM departments WHERE location = 'Coil Center' ORDER BY name ASC").fetchall()
-        else:
-            depts = conn.execute("SELECT DISTINCT name FROM departments ORDER BY name ASC").fetchall()
-        
-        return jsonify([dict(d) for d in depts])
-    except Exception as e:
-        print(f"Error fetching departments: {e}")
-        return jsonify([]) # คืนค่าลิสต์ว่างถ้ายังไม่มีตาราง
-    finally:
-        conn.close()
-
 @app.route('/admin/list_users')
 def list_users():
     if not session.get('admin_logged_in'): 
@@ -1278,29 +1277,56 @@ def update_user_ajax():
     conn.close()
     return jsonify({'success': True})
 
+# 1. ฟังก์ชันสร้างตาราง (รันครั้งเดียว)
 @app.route('/setup_dept_table')
 def setup_dept_table():
     conn = get_db_connection()
     try:
-        # สร้างตารางแผนก
         conn.execute('''
             CREATE TABLE IF NOT EXISTS departments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                location TEXT NOT NULL
+                name TEXT NOT NULL
             )
         ''')
         
-        # เพิ่มข้อมูลตัวอย่าง (Optional)
-        # conn.execute("INSERT INTO departments (name, location) VALUES ('General Affairs', 'PC1')")
-        # conn.execute("INSERT INTO departments (name, location) VALUES ('Production Control', 'Coil Center')")
+        count = conn.execute("SELECT COUNT(*) FROM departments").fetchone()[0]
+        if count == 0:
+            # แก้ไขตรงนี้: เติม , หลังข้อความในทุกวงเล็บ
+            sample_depts = [
+                ('-',),
+                ('Accounting',),
+                ('General Affairs & Purchase & IT',),
+                ('General Affairs',),
+                ('Quality Control',),
+                ('Maintenance',),
+                ('Administration',),
+                ('Sales & BOI ',),
+                ('Technical Development & Quality Control',),
+                ('Purchase',),
+                ('Production control & Logistic',),
+                ('Manufacturing',),
+                ('IT',)
+            ]
+            conn.executemany("INSERT INTO departments (name) VALUES (?)", sample_depts)
         
         conn.commit()
-        return "✅ สร้างตาราง departments สำเร็จแล้ว!"
+        return "✅ ตาราง departments พร้อมใช้งานแล้ว!"
     except Exception as e:
-        return f"❌ เกิดข้อผิดพลาด: {e}"
+        return f"❌ ข้อผิดพลาด: {e}"
     finally:
         conn.close()
+
+# 2. API สำหรับดึงรายชื่อแผนกไปใช้ใน Dropdown
+@app.route('/admin/list_departments')
+def list_departments():
+    if not session.get('admin_logged_in'): return jsonify([])
+    
+    conn = get_db_connection()
+    # ดึงชื่อแผนกทั้งหมดแบบไม่ซ้ำกัน ไม่ว่าจะแอดมินคนไหนก็เห็นแผนกเหมือนกันเพื่อเลือกใส่ให้พนักงาน
+    depts = conn.execute("SELECT DISTINCT name FROM departments ORDER BY name ASC").fetchall()
+    conn.close()
+    
+    return jsonify([dict(d) for d in depts])
 
 # ฟังก์ชันที่จะให้ทำงานอัตโนมัติ (Background Task)
 def scheduled_daily_alert():

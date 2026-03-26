@@ -1,28 +1,35 @@
 {% for item in items %}
 <tr class="align-middle">
-    <td><code class="text-primary fw-bold">{{ item['code'] }}</code></td>
-
-    <td>{{ item['name'] }}</td>
-
-    <td><span class="badge bg-light text-dark">{{ item['category'] }}</span></td>
-
-    <td class="text-end {{ 'text-danger fw-bold' if item['stock']|int <= item['safety_stock']|int else '' }}">
+    <td class="ps-4"><code>{{ item['code'] }}</code></td>
+    <td class="fw-medium">{{ item['name'] }}</td>
+    <td><span class="badge bg-light text-dark border">{{ item['category'] }}</span></td>
+    <td class="text-center fw-bold {{ 'text-danger' if item['stock'] <= item['safety_stock'] else 'text-success' }}">
         {{ item['stock'] }}
     </td>
-
-    <td class="text-end text-muted">{{ item['safety_stock'] }}</td>
-
+    <td class="text-center text-muted">{{ item['safety_stock'] }}</td>
     <td class="text-center">
-        <a href="{{ url_for('generate_qr', code=item['code']) }}" target="_blank" class="btn btn-sm btn-outline-info"
-            title="ดู QR Code">
+        <a href="{{ url_for('generate_qr', code=item['code']) }}" target="_blank" class="btn btn-sm btn-outline-info rounded-circle" title="ดู QR Code">
             <i class="fas fa-qrcode"></i>
         </a>
     </td>
-
-    <td class="text-center">
-        <button class="btn btn-sm btn-outline-secondary" onclick="editProductModal('{{ item['code'] }}')">
+    <td class="text-center text-nowrap">
+        <button class="btn btn-sm btn-light text-success border shadow-sm rounded-circle me-1 hover-shadow" 
+                title="เพิ่มสต็อก (Add Lot)" 
+                onclick="openAddLotModal('{{ item['code'] }}')">
+            <i class="fas fa-plus"></i>
+        </button>
+        <button class="btn btn-sm btn-light text-warning border shadow-sm rounded-circle hover-shadow" 
+                title="แก้ไข" 
+                onclick="editProductModal('{{ item['code'] }}')">
             <i class="fas fa-edit"></i>
         </button>
+    </td>
+</tr>
+{% else %}
+<tr>
+    <td colspan="7" class="text-center py-5 text-muted">
+        <i class="fas fa-box-open fa-2x mb-3 opacity-25 d-block"></i>
+        ไม่พบข้อมูลสินค้าที่ค้นหา
     </td>
 </tr>
 {% endfor %}

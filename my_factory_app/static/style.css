@@ -122,7 +122,7 @@ code {
     font-weight: 500;
 }
 
-.nav-pills .nav-link.active {
+.nav-pills {
     background-color: #0d6efd;
     color: white;
     box-shadow: 0 4px 10px rgba(13, 110, 253, 0.3);
@@ -189,4 +189,30 @@ code {
 .badge.bg-info {
     background-color: #e3f2fd !important;
     color: #0d47a1 !important;
+}
+
+/* Table Management Inside Modal */
+#userManagementModal thead th {
+    position: sticky;
+    top: 0;
+    background-color: #2c3e50 !important;
+    color: #fff;
+    z-index: 10;
+    border: none;
+}
+
+#userTableBody tr:hover {
+    background-color: rgba(13, 110, 253, 0.05) !important;
+}
+
+/* บังคับให้ป้ายรหัสสินค้า (Code) เป็นสีฟ้าอ่อนทั้งหมดเสมอ */
+code {
+    font-size: 0.9rem !important;
+    background-color: #e3f2fd !important; /* พื้นหลังสีฟ้าอ่อน */
+    color: #0d6efd !important; /* ตัวหนังสือสีน้ำเงิน (ให้อ่านง่าย) */
+    padding: 4px 10px !important;
+    border-radius: 6px !important;
+    font-weight: 600 !important;
+    border: 1px solid #b6d4fe !important; /* ขอบสีฟ้าให้ดูมีมิติ */
+    display: inline-block !important;
 }

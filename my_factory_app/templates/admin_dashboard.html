@@ -11,374 +11,490 @@
     <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@200;300;400;500;600;700&display=swap"
         rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
     <style>
+        /* =========================================
+           CSS เฉพาะหน้า Admin Dashboard ป้องกันการกระทบหน้าอื่น
+           ========================================= */
         body {
             font-family: "Mitr", sans-serif;
             background-color: #f4f6f9;
         }
 
-        .card {
-            border-radius: 12px;
+        /* --- 1. โครงสร้าง Sidebar และ Main Content --- */
+        :root {
+            --sidebar-width: 260px;
+            --dark-bg: #212529 !important;
         }
 
-        .table th {
+        .sidebar {
+            background-color: var(--dark-bg);
+            min-height: 100vh;
+            transition: all 0.3s ease;
+            border-right: none;
+        }
+
+        /* Desktop Mode */
+        @media (min-width: 992px) {
+            .sidebar {
+                position: fixed;
+                top: 0;
+                bottom: 0;
+                left: 0;
+                width: var(--sidebar-width);
+                z-index: 1040;
+                box-shadow: 4px 0 10px rgba(0, 0, 0, 0.05);
+            }
+
+            .content-wrapper {
+                margin-left: var(--sidebar-width);
+                width: calc(100% - var(--sidebar-width));
+                min-height: 100vh;
+            }
+        }
+
+        /* Mobile Mode */
+        @media (max-width: 991.98px) {
+            .content-wrapper {
+                margin-left: 0;
+                width: 100%;
+            }
+
+            .sidebar {
+                width: var(--sidebar-width);
+            }
+        }
+
+        /* --- 2. การตกแต่งเมนู Sidebar --- */
+        .nav-category {
+            font-size: 0.75rem;
+            font-weight: 200;
+            color: #adb5bd;
+            /* เปลี่ยนให้สว่างขึ้นเพื่อให้อ่านออกบนพื้นดำ */
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 20px 25px 5px;
+        }
+
+        .nav-link {
+            color: #ced4da !important;
+            padding: 10px 25px;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            transition: all 0.2s;
+            text-decoration: none;
+            border-left: 4px solid transparent;
+        }
+
+        .nav-link i {
+            width: 25px;
+            font-size: 1.1rem;
+            margin-right: 10px;
+        }
+
+        .nav-link:hover {
+            color: #fff !important;
+            background-color: rgba(255, 255, 255, 0.05);
+            padding-left: 30px;
+        }
+
+        .nav-link.active {
+            color: #fff !important;
+            background-color: rgba(13, 110, 253, 0.15);
+            border-left-color: #0d6efd;
             font-weight: 500;
         }
 
-        /* เพิ่มในส่วน <style> */
+        /* --- 3. การจัดการตารางใน Modal --- */
         #userManagementModal .table-responsive {
-            max-height: 450px;
-            /* ความสูงของตาราง */
+            max-height: 400px;
             overflow-y: auto;
         }
 
         #userManagementModal thead th {
             position: sticky;
             top: 0;
-            background-color: #343a40;
-            /* สีพื้นหลังหัวตาราง (เข้มตาม Modal) */
+            background-color: #2c3e50 !important;
+            color: #fff !important;
             z-index: 10;
-            border-bottom: 2px solid #454d55;
+            border: none;
+            padding: 12px;
+        }
+
+        #userTableBody tr {
+            transition: all 0.2s;
+        }
+
+        #userTableBody tr:hover {
+            background-color: rgba(13, 110, 253, 0.05) !important;
+        }
+
+        #userTableBody td {
+            padding: 12px 8px;
+            vertical-align: middle;
         }
     </style>
 </head>
 
-<body class="bg-light pb-5">
+<body>
 
-    <nav class="navbar navbar-dark bg-dark px-4 shadow-sm mb-4">
-        <a class="navbar-brand fw-medium" href="#">
-            <i class="fas fa-user-shield me-2"></i>
-            {% if role == 'admin_pc1' %}Admin PC1{% elif role == 'admin_cc' %}Admin CC{% else %}Super Admin{% endif %}
-        </a>
-        <div class="ms-auto d-flex align-items-center">
-            <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3 me-2" data-bs-toggle="modal"
-                data-bs-target="#userManagementModal" onclick="loadUserList()">
-                <i class="fas fa-user-friends"></i> จัดการพนักงาน
-            </button>
-            <a href="{{ url_for('monthly_report') }}" class="btn btn-primary btn-sm rounded-pill px-3">
-                <i class="fas fa-file-invoice me-1"></i> รายงานเบิกจ่ายประจำเดือน
-            </a>
-            <a href="{{ url_for('export_excel') }}" class="btn btn-outline-light btn-sm rounded-pill px-3 me-2">
-                <i class="fas fa-file-export"></i> Export
-            </a>
-            <button class="btn btn-outline-info btn-sm rounded-pill px-3 me-2"
-                onclick="document.getElementById('importFile').click()">
-                <i class="fas fa-file-import"></i> Import
-            </button>
-            <form id="importForm" action="{{ url_for('import_excel') }}" method="POST" enctype="multipart/form-data"
-                style="display:none;">
-                <input type="file" id="importFile" name="file"
-                    onchange="document.getElementById('importForm').submit()">
-            </form>
-            <button type="button" class="btn btn-success btn-sm rounded-pill px-3 me-2" data-bs-toggle="modal"
-                data-bs-target="#addProductModal">
-                <i class="fas fa-plus"></i> เพิ่มของใหม่เข้าระบบ
-            </button>
-            <a href="{{ url_for('manage_zombies') }}" class="btn btn-outline-warning btn-sm rounded-pill px-3 me-2">
-                <i class="fas fa-users-cog"></i> ตรวจสอบพนักงานค้าง
-            </a>
-            <a href="/admin/logout" class="btn btn-danger btn-sm rounded-pill px-3">Logout</a>
-        </div>
+    <nav class="navbar navbar-dark bg-dark d-lg-none px-3 shadow-sm sticky-top">
+        <button class="navbar-toggler border-0 shadow-none" type="button" data-bs-toggle="offcanvas"
+            data-bs-target="#sidebarMenu">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <span class="navbar-brand mb-0 h1 fs-6 fw-bold">PCM STOCK ADMIN</span>
     </nav>
 
-    <div class="container">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-        {% for category, message in messages %}
-        <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm mb-4">{{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-        {% endfor %}
-        {% endif %}
-        {% endwith %}
+    <div class="offcanvas-lg offcanvas-start sidebar bg-dark shadow-sm" id="sidebarMenu" tabindex="-1">
+        <div class="d-flex flex-column h-100 py-3">
+            <div class="px-4 mb-4 mt-2">
+                <h5 class="text-white fw-bold mb-1"><i class="fas fa-shield-alt text-primary me-2"></i>{{ role|upper }}
+                </h5>
+                <small class="text-white-50">ยินดีต้อนรับ, {{ session.get('admin_name') }}</small>
+            </div>
 
-        <div class="card border-0 shadow-sm mb-4">
-            <div
-                class="card-header bg-warning text-dark fw-medium py-3 d-flex justify-content-between align-items-center">
-                <span><i class="fas fa-bell me-2"></i>รายการขอเบิกใหม่ (รออนุมัติ)</span>
-                <span class="badge bg-dark">{{ pending_logs|length }} รายการ</span>
+            <div class="flex-grow-1 overflow-auto">
+                <div class="nav-category">คลังสินค้า</div>
+                <a href="#" class="nav-link active"><i class="fas fa-boxes text-light"></i> หน้าหลักสต็อก</a>
+                <a href="javascript:void(0)" class="nav-link" data-bs-toggle="modal" data-bs-target="#addProductModal">
+                    <i class="fas fa-plus-circle text-success"></i> เพิ่มของใหม่
+                </a>
+                <a href="{{ url_for('export_excel') }}" class="nav-link"><i class="fas fa-file-excel text-info"></i>
+                    Export ข้อมูล</a>
+                <a href="javascript:void(0)" onclick="document.getElementById('importFile').click()" class="nav-link">
+                    <i class="fas fa-file-import text-info"></i> Import ข้อมูล
+                </a>
+                <form id="importForm" action="{{ url_for('import_excel') }}" method="POST" enctype="multipart/form-data"
+                    style="display:none;">
+                    <input type="file" id="importFile" name="file"
+                        onchange="document.getElementById('importForm').submit()">
+                </form>
+
+                <div class="nav-category">รายงาน & การทำรายการ</div>
+                <a href="{{ url_for('monthly_report') }}" class="nav-link"><i class="fas fa-chart-pie text-warning"></i>
+                    รายงานประจำเดือน</a>
+                <a href="{{ url_for('print_all_qrs') }}" target="_blank" class="nav-link"><i
+                        class="fas fa-qrcode text-warning"></i> พิมพ์ QR ทั้งหมด</a>
+
+                <div class="nav-category">ระบบบุคลากร</div>
+                <a href="javascript:void(0)" class="nav-link" onclick="loadUserList()" data-bs-toggle="modal"
+                    data-bs-target="#userManagementModal">
+                    <i class="fas fa-user-cog text-primary"></i> จัดการพนักงาน
+                </a>
+                <a href="{{ url_for('manage_zombies') }}" class="nav-link"><i
+                        class="fas fa-user-clock text-primary"></i> ตรวจสอบพนักงานค้าง</a>
             </div>
-            <div class="card-body p-0 table-responsive">
-                <table class="table table-hover mb-0 align-middle">
-                    <thead class="table-light">
-                        <tr>
-                            <th>เวลา</th>
-                            <th>ผู้เบิก</th>
-                            <th>รายการของในระบบ</th>
-                            <th class="text-center">จำนวน</th>
-                            <th class="text-center">จัดการ</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for log in pending_logs %}
-                        <tr>
-                            <td class="small">{{ log['timestamp'] }}</td>
-                            <td>
-                                <div class="fw-medium">{{ log['emp_name'] }}</div>
-                                <small class="text-muted">{{ log['department'] }}</small>
-                            </td>
-                            <td>{{ log['product_name'] }} <small class="text-muted">({{ log['unit'] }})</small></td>
-                            <td class="text-center fw-bold text-primary">{{ log['qty'] }}</td>
-                            <td class="text-center">
-                                <a href="{{ url_for('approve_request', log_id=log['id']) }}"
-                                    class="btn btn-sm btn-success rounded-pill px-3 me-1">
-                                    <i class="fas fa-check"></i> อนุมัติ
-                                </a>
-                                <a href="{{ url_for('reject_request', log_id=log['id']) }}"
-                                    class="btn btn-sm btn-outline-danger rounded-pill px-3">
-                                    <i class="fas fa-times"></i> ปฏิเสธ
-                                </a>
-                            </td>
-                        </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="5" class="text-center py-4 text-muted">ไม่มีรายการรออนุมัติ</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+
+            <div class="px-4 py-3 mt-auto border-top border-secondary">
+                <a href="/admin/logout" class="btn btn-outline-danger w-100 rounded-pill fw-bold">
+                    <i class="fas fa-sign-out-alt me-2"></i> ออกจากระบบ
+                </a>
             </div>
         </div>
-        <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-success text-white py-3">
-                <div class="row align-items-center">
-                    <div class="col-md-4 fw-medium"><i class="fas fa-boxes me-2"></i>จัดการสต็อก</div>
-                    <div class="col-md-8">
-                        <div class="d-flex gap-2 justify-content-end">
-                            <a href="{{ url_for('print_all_qrs') }}" target="_blank" class="btn btn-warning btn-sm">
-                                <i class="fas fa-print me-1"></i>พิมพ์ QR ทั้งหมด
-                            </a>
-                            <select id="stockCatSelector" class="form-select form-select-sm" style="max-width: 150px;">
-                                <option value="">ทุกหมวดหมู่</option>
-                                {% for cat in categories %}
-                                <option value="{{ cat['category'] }}">{{ cat['category'] }}</option>
-                                {% endfor %}
-                            </select>
-                            <input type="text" id="stockSearchInput" class="form-control form-control-sm"
-                                placeholder="ค้นหารหัส หรือ ชื่อ..." style="max-width: 200px;">
-                        </div>
-                    </div>
+    </div>
+
+    <main class="content-wrapper py-4">
+        <div class="container-fluid px-3 px-md-4 px-lg-5">
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            {% for category, message in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm mb-4 border-0 rounded-3">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            {% endfor %}
+            {% endif %}
+            {% endwith %}
+
+            <div class="card border-0 shadow-sm mb-4">
+                <div
+                    class="card-header bg-warning text-dark fw-bold py-3 d-flex justify-content-between align-items-center border-0">
+                    <span><i class="fas fa-bell me-2"></i>รายการขอเบิกใหม่ (รออนุมัติ)</span>
+                    <span class="badge bg-dark rounded-pill px-3">{{ pending_logs|length }} รายการ</span>
                 </div>
-            </div>
-            <div class="card-body p-0 table-responsive" style="max-height: 400px;">
-                <table class="table table-hover mb-0 font-monospace-numbers">
-                    <thead class="table-light sticky-top">
-                        <tr>
-                            <th>Code</th>
-                            <th>ชื่อของ</th>
-                            <th>หมวดหมู่</th>
-                            <th class="text-end">คงเหลือ</th>
-                            <th class="text-end">Safety</th>
-                            <th class="text-center">QR</th>
-                            <th class="text-center">แก้ไข</th>
-                        </tr>
-                    </thead>
-                    <tbody id="stockTableBody">
-                        {% for item in items %}
-                        <tr class="align-middle">
-                            <td><code class="text-primary fw-bold">{{ item['code'] }}</code></td>
-                            <td>{{ item['name'] }}</td>
-                            <td><span class="badge bg-light text-dark">{{ item['category'] }}</span></td>
-                            <td
-                                class="text-end {{ 'text-danger fw-bold' if item['stock'] <= item['safety_stock'] else '' }}">
-                                {{ item['stock'] }}
-                            </td>
-                            <td class="text-end text-muted">{{ item['safety_stock'] }}</td>
-                            <td class="text-center">
-                                <a href="{{ url_for('generate_qr', code=item['code']) }}" target="_blank"
-                                    class="btn btn-sm btn-outline-info" title="ดู QR Code">
-                                    <i class="fas fa-qrcode"></i>
-                                </a>
-                            </td>
-                            <td class="text-center">
-                                <button class="btn btn-sm btn-outline-secondary"
-                                    onclick="editProductModal('{{ item['code'] }}')">
-                                    <i class="fas fa-edit"></i>
-                                </button>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        <div class="row g-4 mb-4">
-            <div class="col-lg-7">
-                <div class="card border-0 shadow-sm h-100">
-                    <div class="card-header bg-white py-3">
-                        <h6 class="mb-0 fw-bold text-dark"><i
-                                class="fas fa-chart-bar me-2 text-primary"></i>สัดส่วนการเบิกจ่ายรายแผนก (30 วันล่าสุด)
-                        </h6>
-                    </div>
-                    <div class="card-body">
-                        <div style="position: relative; height: 320px;">
-                            <canvas id="deptChart"></canvas>
-                        </div>
-                    </div>
+                <div class="card-body p-0 table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-4">เวลา</th>
+                                <th>ผู้เบิก</th>
+                                <th>รายการของในระบบ</th>
+                                <th class="text-center">จำนวน</th>
+                                <th class="text-center">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in pending_logs %}
+                            <tr>
+                                <td class="small text-muted ps-4">{{ log['timestamp'] }}</td>
+                                <td>
+                                    <div class="fw-medium text-dark">{{ log['emp_name'] }}</div>
+                                    <small class="text-muted">{{ log['department'] }}</small>
+                                </td>
+                                <td>{{ log['product_name'] }} <small class="text-muted">({{ log['unit'] }})</small></td>
+                                <td class="text-center fw-bold text-primary">{{ log['qty'] }}</td>
+                                <td class="text-center">
+                                    <a href="{{ url_for('approve_request', log_id=log['id']) }}"
+                                        class="btn btn-sm btn-success rounded-pill px-3 me-1 shadow-sm"><i
+                                            class="fas fa-check me-1"></i>อนุมัติ</a>
+                                    <a href="{{ url_for('reject_request', log_id=log['id']) }}"
+                                        class="btn btn-sm btn-outline-danger rounded-pill px-3 shadow-sm"><i
+                                            class="fas fa-times me-1"></i>ปฏิเสธ</a>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center py-5 text-muted">
+                                    <i class="fas fa-inbox fa-3x mb-3 opacity-25 d-block"></i>
+                                    ไม่มีรายการรออนุมัติ
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
-            <div class="col-lg-5">
-                <div class="card border-0 shadow-sm h-100">
-                    <div class="card-header bg-white py-3">
-                        <h6 class="mb-0 fw-bold text-dark"><i class="fas fa-fire me-2 text-orange"
-                                style="color:#fd7e14;"></i>ของเบิกสูงสุด (Top 5)</h6>
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-success text-white py-3 border-0">
+                    <div class="row align-items-center">
+                        <div class="col-md-4 fw-bold"><i class="fas fa-boxes me-2"></i>จัดการสต็อก</div>
+                        <div class="col-md-8 mt-3 mt-md-0">
+                            <div class="d-flex gap-2 justify-content-md-end flex-wrap">
+                                <a href="{{ url_for('print_all_qrs') }}" target="_blank"
+                                    class="btn btn-warning btn-sm fw-bold shadow-sm">
+                                    <i class="fas fa-print me-1"></i> พิมพ์ QR ทั้งหมด
+                                </a>
+                                <select id="stockCatSelector" class="form-select form-select-sm shadow-none"
+                                    style="max-width: 150px;">
+                                    <option value="">ทุกหมวดหมู่</option>
+                                    {% for cat in categories %}
+                                    <option value="{{ cat['category'] }}">{{ cat['category'] }}</option>
+                                    {% endfor %}
+                                </select>
+                                <input type="text" id="stockSearchInput"
+                                    class="form-control form-control-sm shadow-none"
+                                    placeholder="ค้นหารหัส หรือ ชื่อ..." style="max-width: 200px;">
+                            </div>
+                        </div>
                     </div>
-                    <div class="card-body p-0">
-                        <div class="list-group list-group-flush">
-                            {% if top_items and top_items|length > 0 %}
-                            {# 1. คำนวณค่าสูงสุดไว้สำหรับทำ Progress Bar #}
-                            {% set max_val = top_items[0]['total_qty'] if top_items[0]['total_qty'] > 0 else 1 %}
+                </div>
+                <div class="card-body p-0 table-responsive" style="max-height: 500px; overflow-y: auto;">
+                    <table class="table table-hover mb-0 font-monospace-numbers align-middle">
+                        <thead class="table-light sticky-top shadow-sm">
+                            <tr>
+                                <th class="ps-4">Code</th>
+                                <th>ชื่อของ</th>
+                                <th>หมวดหมู่</th>
+                                <th class="text-center">คงเหลือ</th>
+                                <th class="text-center">Safety</th>
+                                <th class="text-center">QR</th>
+                                <th class="text-center">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stockTableBody">
+                            {% for item in items %}
+                            <tr>
+                                <td class="ps-4"><code
+                                        class="text-primary fw-bold bg-primary-subtle px-2 py-1 rounded">{{ item['code'] }}</code>
+                                </td>
+                                <td class="fw-medium">{{ item['name'] }}</td>
+                                <td><span class="badge bg-light text-dark border">{{ item['category'] }}</span></td>
+                                <td
+                                    class="text-center fw-bold {{ 'text-danger' if item['stock'] <= item['safety_stock'] else 'text-success' }}">
+                                    {{ item['stock'] }}
+                                </td>
+                                <td class="text-center text-muted">{{ item['safety_stock'] }}</td>
+                                <td class="text-center">
+                                    <a href="{{ url_for('generate_qr', code=item['code']) }}" target="_blank"
+                                        class="btn btn-sm btn-outline-info rounded-circle" title="ดู QR Code">
+                                        <i class="fas fa-qrcode"></i>
+                                    </a>
+                                </td>
+                                <td class="text-center text-nowrap">
+    <button class="btn btn-sm btn-light text-success border shadow-sm rounded-circle me-1 hover-shadow" 
+            title="เพิ่มสต็อก (Add Lot)" 
+            onclick="openAddLotModal('{{ item['code'] }}')">
+        <i class="fas fa-plus"></i>
+    </button>
+    <button class="btn btn-sm btn-light text-warning border shadow-sm rounded-circle hover-shadow" 
+            title="แก้ไข" 
+            onclick="editProductModal('{{ item['code'] }}')">
+        <i class="fas fa-edit"></i>
+    </button>
+</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
 
-                            {% for item in top_items %}
-                            <div class="list-group-item border-0 py-3">
-                                <div class="d-flex justify-content-between align-items-center mb-2">
-                                    <span class="text-truncate fw-medium" style="max-width: 70%;">{{ item['name']
-                                        }}</span>
-                                    <span class="badge bg-primary rounded-pill">{{ item['total_qty'] }} {{ item['unit']
-                                        }}</span>
-                                </div>
-                                <div class="progress" style="height: 8px; background-color: #f0f0f0;">
-                                    <div class="progress-bar bg-info" role="progressbar"
-                                        style="width: {{ (item['total_qty'] / max_val * 100) }}%; border-radius: 10px;">
+            <div class="row g-4 mb-4">
+                <div class="col-lg-7">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-header bg-white py-3 border-0">
+                            <h6 class="mb-0 fw-bold text-dark"><i
+                                    class="fas fa-chart-bar me-2 text-primary"></i>สัดส่วนการเบิกจ่ายรายแผนก (30
+                                วันล่าสุด)</h6>
+                        </div>
+                        <div class="card-body">
+                            <div style="position: relative; height: 320px;"><canvas id="deptChart"></canvas></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-5">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-header bg-white py-3 border-0">
+                            <h6 class="mb-0 fw-bold text-dark"><i class="fas fa-fire me-2 text-danger"></i>ของเบิกสูงสุด
+                                (Top 5)</h6>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="list-group list-group-flush">
+                                {% if top_items and top_items|length > 0 %}
+                                {% set max_val = top_items[0]['total_qty'] if top_items[0]['total_qty'] > 0 else 1 %}
+                                {% for item in top_items %}
+                                <div class="list-group-item border-0 py-3">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <span class="text-truncate fw-medium" style="max-width: 70%;">{{ item['name']
+                                            }}</span>
+                                        <span class="badge bg-primary rounded-pill">{{ item['total_qty'] }} {{
+                                            item['unit'] }}</span>
+                                    </div>
+                                    <div class="progress" style="height: 8px; background-color: #f0f0f0;">
+                                        <div class="progress-bar bg-info rounded-pill" role="progressbar"
+                                            style="width: {{ (item['total_qty'] / max_val * 100) }}%;"></div>
                                     </div>
                                 </div>
+                                {% endfor %}
+                                {% else %}
+                                <div class="text-center py-5 text-muted small">
+                                    <i class="fas fa-inbox fa-3x mb-3 opacity-25"></i>
+                                    <p>ยังไม่มีข้อมูลการเบิกจ่าย</p>
+                                </div>
+                                {% endif %}
                             </div>
-                            {% endfor %}
-                            {% else %}
-                            {# 2. กรณีไม่มีข้อมูล ให้แสดงข้อความนี้อย่างเดียว #}
-                            <div class="text-center py-5 text-muted small">
-                                <i class="fas fa-inbox fa-3x mb-3 opacity-25"></i>
-                                <p>ยังไม่มีข้อมูลการเบิกจ่าย</p>
-                            </div>
-                            {% endif %}
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-danger text-white py-3 d-flex justify-content-between align-items-center">
-                <h6 class="mb-0 fw-bold"><i class="fas fa-exclamation-triangle me-2"></i>รายการของใกล้หมด (Low Stock)
-                </h6>
-                <div class="d-flex gap-2">
-                    <select id="lowStockCatSelector" class="form-select form-select-sm border-0 shadow-sm"
-                        style="width: 160px;">
+            <div class="card border-0 shadow-sm mb-4">
+                <div
+                    class="card-header bg-danger text-white py-3 d-flex justify-content-between align-items-center border-0">
+                    <h6 class="mb-0 fw-bold"><i class="fas fa-exclamation-triangle me-2"></i>รายการของใกล้หมด (Low
+                        Stock)</h6>
+                    <select id="lowStockCatSelector" class="form-select form-select-sm shadow-none w-auto">
                         <option value="">-- ทุกหมวดหมู่ --</option>
                         {% for cat in categories %}
                         <option value="{{ cat['category'] }}">{{ cat['category'] }}</option>
                         {% endfor %}
                     </select>
                 </div>
-            </div>
-            <div class="card-body p-0 table-responsive" style="max-height: 400px;">
-                <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light sticky-top">
-                        <tr>
-                            <th class="ps-4">รหัสของ</th>
-                            <th>ชื่อของ</th>
-                            <th class="text-center">คงเหลือปัจจุบัน</th>
-                            <th class="text-center">สถานะ</th>
-                        </tr>
-                    </thead>
-                    <tbody id="lowStockTableBody">
-                        {% include 'low_stock_row.html' %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <div class="card border-0 shadow-sm">
-        <div class="card-header bg-primary text-white fw-medium py-3 d-flex justify-content-between align-items-center">
-            <span>🕒 ประวัติการทำรายการ (Approved/Completed)</span>
-
-            {% if role == 'superadmin' %}
-            <div class="btn-group btn-group-sm bg-white rounded-pill p-1">
-                <button onclick="filterLogs('')" id="btn-log-all"
-                    class="btn btn-sm rounded-pill px-3 btn-primary">รวม</button>
-                <button onclick="filterLogs('PC1')" id="btn-log-pc1"
-                    class="btn btn-sm rounded-pill px-3 btn-light text-muted border-0">PC1</button>
-                <button onclick="filterLogs('CC')" id="btn-log-cc"
-                    class="btn btn-sm rounded-pill px-3 btn-light text-muted border-0">CC</button>
-            </div>
-            {% endif %}
-
-            <small class="text-white-50">หน้า {{ page }}</small>
-        </div>
-        <div class="card-body p-0">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th>เวลา</th>
-                            <th>ผู้ทำรายการ</th>
-                            <th>รายละเอียด</th>
-                            <th class="text-center">จำนวน</th>
-                            <th class="text-center">สถานะ</th>
-                        </tr>
-                    </thead>
-                    <tbody id="logTableBody">
-                        {% include 'admin_log_row.html' %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        {% if total_pages > 1 %}
-        <div class="card-footer bg-white py-3">
-            <nav>
-                <ul class="pagination pagination-sm justify-content-center mb-0">
-
-                    {% if page > 1 %}
-                    <li class="page-item">
-                        <a class="page-link"
-                            href="{{ url_for('admin_dashboard', page=page-1, log_loc=selected_loc) }}">ก่อนหน้า</a>
-                    </li>
-                    {% endif %}
-
-                    <li class="page-item active">
-                        <span class="page-link">{{ page }} / {{ total_pages }}</span>
-                    </li>
-
-                    {% if page < total_pages %} <li class="page-item">
-                        <a class="page-link"
-                            href="{{ url_for('admin_dashboard', page=page+1, log_loc=selected_loc) }}">ถัดไป</a>
-                        </li>
-                        {% endif %}
-
-                </ul>
-            </nav>
-        </div>
-        {% endif %}
-    </div>
-    </div>
-
-    <div class="modal fade" id="addProductModal" tabindex="-1" aria-labelledby="addProductModalLabel"
-        aria-hidden="true">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content bg-dark text-white border-secondary">
-                <div class="modal-header border-secondary">
-                    <h5 class="modal-title" id="addProductModalLabel"><i class="fas fa-plus-circle text-success"></i>
-                        เพิ่มของใหม่เข้าระบบ</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
-                        aria-label="Close"></button>
+                <div class="card-body p-0 table-responsive" style="max-height: 400px; overflow-y: auto;">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light sticky-top shadow-sm">
+                            <tr>
+                                <th class="ps-4">รหัสของ</th>
+                                <th>ชื่อของ</th>
+                                <th class="text-center">คงเหลือปัจจุบัน</th>
+                                <th class="text-center">สถานะ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="lowStockTableBody">
+                            {% include 'low_stock_row.html' %}
+                        </tbody>
+                    </table>
                 </div>
+            </div>
 
+            <div class="card border-0 shadow-sm mb-4">
+                <div
+                    class="card-header bg-primary text-white fw-bold py-3 d-flex flex-wrap justify-content-between align-items-center border-0 gap-2">
+                    <span><i class="fas fa-history me-2"></i>ประวัติการทำรายการ (Approved/Completed)</span>
+
+                    <div class="d-flex align-items-center gap-3">
+                        {% if role == 'superadmin' %}
+                        <div class="btn-group btn-group-sm bg-white rounded-pill p-1 shadow-sm">
+                            <button onclick="filterLogs('')" id="btn-log-all"
+                                class="btn btn-sm rounded-pill px-3 btn-primary fw-bold">รวม</button>
+                            <button onclick="filterLogs('PC1')" id="btn-log-pc1"
+                                class="btn btn-sm rounded-pill px-3 btn-light text-muted border-0 fw-medium">PC1</button>
+                            <button onclick="filterLogs('CC')" id="btn-log-cc"
+                                class="btn btn-sm rounded-pill px-3 btn-light text-muted border-0 fw-medium">CC</button>
+                        </div>
+                        {% endif %}
+                        <span class="badge bg-light text-primary rounded-pill px-3 py-2 shadow-sm">หน้า {{ page
+                            }}</span>
+                    </div>
+                </div>
+                <div class="card-body p-0 table-responsive">
+                    <table class="table table-striped table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-4">เวลา</th>
+                                <th>ผู้ทำรายการ</th>
+                                <th>รายละเอียด</th>
+                                <th class="text-center">จำนวน</th>
+                                <th class="text-center">สถานะ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logTableBody">
+                            {% include 'admin_log_row.html' %}
+                        </tbody>
+                    </table>
+                </div>
+                {% if total_pages > 1 %}
+                <div class="card-footer bg-white py-3 border-0">
+                    <nav>
+                        <ul
+                            class="pagination pagination-sm justify-content-center mb-0 shadow-sm rounded-pill overflow-hidden w-auto d-inline-flex mx-auto">
+                            {% if page > 1 %}
+                            <li class="page-item"><a class="page-link px-3"
+                                    href="{{ url_for('admin_dashboard', page=page-1, log_loc=selected_loc) }}">ก่อนหน้า</a>
+                            </li>
+                            {% endif %}
+                            <li class="page-item active"><span class="page-link px-4">{{ page }} / {{ total_pages
+                                    }}</span></li>
+                            {% if page < total_pages %} <li class="page-item"><a class="page-link px-3"
+                                    href="{{ url_for('admin_dashboard', page=page+1, log_loc=selected_loc) }}">ถัดไป</a>
+                                </li>
+                                {% endif %}
+                        </ul>
+                    </nav>
+                </div>
+                {% endif %}
+            </div>
+
+        </div>
+    </main>
+
+    <div class="modal fade" id="addProductModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-dark text-white border-0">
+                    <h5 class="modal-title fw-bold"><i
+                            class="fas fa-plus-circle text-success me-2"></i>เพิ่มของใหม่เข้าระบบ</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
                 <form action="/admin/add_product" method="POST">
-                    <div class="modal-body">
+                    <div class="modal-body p-4">
                         <div class="row g-3">
                             <div class="col-md-6">
-                                <label class="form-label">รหัสของ (Auto Generate) *</label>
-                                <input type="text" id="productCode" name="code"
-                                    class="form-control bg-secondary text-white" readonly required
-                                    placeholder="รอการสร้างรหัส...">
+                                <label class="form-label fw-medium text-muted small">รหัสของ (Auto Generate) *</label>
+                                <input type="text" id="productCode" name="code" class="form-control bg-light" readonly
+                                    required placeholder="รอการสร้างรหัส...">
                             </div>
-
                             <div class="col-md-6">
-                                <label class="form-label">หมวดหมู่ (Category)</label>
-                                <select id="productCategory" name="category" class="form-select" required
+                                <label class="form-label fw-medium text-muted small">หมวดหมู่ (Category)</label>
+                                <select id="productCategory" name="category" class="form-select shadow-none" required
                                     onchange="generateNextCode()">
                                     <option value="">-- เลือกหมวดหมู่ --</option>
                                     <option value="แม่บ้าน">แม่บ้าน</option>
@@ -388,10 +504,9 @@
                                     <option value="อื่นๆ">อื่นๆ</option>
                                 </select>
                             </div>
-
                             <div class="col-md-6">
-                                <label class="form-label">สถานที่เก็บ (Location)</label>
-                                <select id="productLocation" name="location" class="form-select" required
+                                <label class="form-label fw-medium text-muted small">สถานที่เก็บ (Location)</label>
+                                <select id="productLocation" name="location" class="form-select shadow-none" required
                                     onchange="generateNextCode()">
                                     {% if role == 'superadmin' %}
                                     <option value="PC1">PC1</option>
@@ -404,95 +519,96 @@
                                 </select>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">ชื่อของ (Name) *</label>
-                                <input type="text" name="name" class="form-control" required>
+                                <label class="form-label fw-medium text-muted small">ชื่อของ (Name) *</label>
+                                <input type="text" name="name" class="form-control shadow-none" required>
                             </div>
-
                             <div class="col-md-6">
-                                <label class="form-label">หน่วยนับ (Unit)</label>
-                                <input type="text" name="unit" class="form-control" required>
+                                <label class="form-label fw-medium text-muted small">หน่วยนับ (Unit)</label>
+                                <input type="text" name="unit" class="form-control shadow-none" required>
                             </div>
                             <div class="col-md-3">
-                                <label class="form-label">จุดสั่งซื้อ (Safety)</label>
-                                <input type="number" name="safety_stock" class="form-control" value="0">
+                                <label class="form-label fw-medium text-muted small">จุดสั่งซื้อ (Safety)</label>
+                                <input type="number" name="safety_stock" class="form-control shadow-none" value="0">
                             </div>
                             <div class="col-md-3">
-                                <label class="form-label">จำนวนเริ่มต้น</label>
-                                <input type="number" name="stock" class="form-control" value="0">
+                                <label class="form-label fw-medium text-muted small">จำนวนเริ่มต้น</label>
+                                <input type="number" name="stock" class="form-control shadow-none" value="0">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">วันที่รับเข้า (ระบบจะสร้าง Lot อัตโนมัติ)</label>
-                                <input type="date" name="received_date" class="form-control">
+                                <label class="form-label fw-medium text-muted small">วันที่รับเข้า (ระบบจะสร้าง Lot
+                                    อัตโนมัติ รูปแบบ DDMMYYYY)</label>
+                                <input type="date" name="received_date" class="form-control shadow-none">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">วันหมดอายุ (ถ้ามี)</label>
-                                <input type="date" name="expiry_date" class="form-control">
+                                <label class="form-label fw-medium text-muted small">วันหมดอายุ (ถ้ามี)</label>
+                                <input type="date" name="expiry_date" class="form-control shadow-none">
                             </div>
                         </div>
                     </div>
-                    <div class="modal-footer border-secondary">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
-                        <button type="button" class="btn btn-success" onclick="submitAddProduct()">บันทึก</button>
+                    <div class="modal-body border-top bg-light text-end">
+                        <button type="button" class="btn btn-secondary px-4 rounded-pill"
+                            data-bs-dismiss="modal">ยกเลิก</button>
+                        <button type="button" class="btn btn-success px-4 rounded-pill fw-bold"
+                            onclick="submitAddProduct()">บันทึกข้อมูล</button>
                     </div>
                 </form>
-
             </div>
         </div>
     </div>
 
     <div class="modal fade" id="editProductModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
-            <div class="modal-content bg-dark text-white border-secondary">
-                <div class="modal-header border-secondary">
-                    <h5 class="modal-title"><i class="fas fa-edit text-warning"></i> แก้ไขข้อมูล</h5>
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-dark text-white border-0">
+                    <h5 class="modal-title fw-bold"><i class="fas fa-edit text-warning me-2"></i>แก้ไขข้อมูลพัสดุ</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
-
-                <form action="/admin/edit_product" method="POST">
-                    <div class="modal-body row g-3">
+                <form id="editProductForm">
+                    <div class="modal-body row g-3 p-4">
                         <input type="hidden" id="edit_code" name="code">
-
                         <div class="col-md-6">
-                            <label>รหัสของ (แก้ไขไม่ได้)</label>
-                            <input type="text" id="edit_code_display" class="form-control bg-secondary text-white"
-                                disabled>
+                            <label class="form-label fw-medium text-muted small">รหัสของ (แก้ไขไม่ได้)</label>
+                            <input type="text" id="edit_code_display" class="form-control bg-light text-muted" disabled>
                         </div>
                         <div class="col-md-6">
-                            <label>ชื่อของ *</label>
-                            <input type="text" id="edit_name" name="name" class="form-control" required>
+                            <label class="form-label fw-medium text-muted small">ชื่อของ *</label>
+                            <input type="text" id="edit_name" name="name" class="form-control shadow-none" required>
                         </div>
                         <div class="col-md-6">
-                            <label>หมวดหมู่</label>
+                            <label class="form-label fw-medium text-muted small">หมวดหมู่</label>
                             <input type="hidden" id="edit_category" name="category">
-                            <input type="text" id="edit_category_display" class="form-control bg-secondary text-white"
+                            <input type="text" id="edit_category_display" class="form-control bg-light text-muted"
                                 disabled>
                         </div>
                         <div class="col-md-6">
-                            <label>หน่วยนับ</label>
-                            <input type="text" id="edit_unit" name="unit" class="form-control" required>
+                            <label class="form-label fw-medium text-muted small">หน่วยนับ</label>
+                            <input type="text" id="edit_unit" name="unit" class="form-control shadow-none" required>
                         </div>
                         <div class="col-md-6">
-                            <label>สถานที่เก็บ</label>
+                            <label class="form-label fw-medium text-muted small">สถานที่เก็บ</label>
                             <input type="hidden" id="edit_location" name="location">
-                            <input type="text" id="edit_location_display" class="form-control bg-secondary text-white"
+                            <input type="text" id="edit_location_display" class="form-control bg-light text-muted"
                                 disabled>
                         </div>
                         <div class="col-md-3">
-                            <label>จุดสั่งซื้อ (Safety)</label>
-                            <input type="number" id="edit_safety_stock" name="safety_stock" class="form-control">
+                            <label class="form-label fw-medium text-muted small">จุดสั่งซื้อ (Safety)</label>
+                            <input type="number" id="edit_safety_stock" name="safety_stock"
+                                class="form-control shadow-none">
                         </div>
                         <div class="col-md-3">
-                            <label>จำนวนคงเหลือ</label>
-                            <input type="number" id="edit_stock" name="stock" class="form-control">
+                            <label class="form-label fw-medium text-muted small">จำนวนคงเหลือ</label>
+                            <input type="number" id="edit_stock" name="stock" class="form-control shadow-none">
                         </div>
                         <div class="col-md-6">
-                            <label>วันหมดอายุ</label>
-                            <input type="date" id="edit_expiry_date" name="expiry_date" class="form-control">
+                            <label class="form-label fw-medium text-muted small">วันหมดอายุ</label>
+                            <input type="date" id="edit_expiry_date" name="expiry_date"
+                                class="form-control shadow-none">
                         </div>
                     </div>
-                    <div class="modal-footer border-secondary">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
-                        <button type="button" class="btn btn-warning"
+                    <div class="modal-body border-top bg-light text-end">
+                        <button type="button" class="btn btn-secondary px-4 rounded-pill"
+                            data-bs-dismiss="modal">ยกเลิก</button>
+                        <button type="button" class="btn btn-primary px-4 rounded-pill fw-bold"
                             onclick="submitEditProduct()">บันทึกการแก้ไข</button>
                     </div>
                 </form>
@@ -502,29 +618,41 @@
 
     <div class="modal fade" id="userManagementModal" tabindex="-1">
         <div class="modal-dialog modal-xl">
-            <div class="modal-content bg-dark text-white">
-                <div class="modal-header border-secondary">
-                    <h5 class="modal-title"><i class="fas fa-users"></i> รายชื่อพนักงานที่เข้าใช้งานได้</h5>
+            <div class="modal-content bg-white border-0 shadow-lg">
+                <div class="modal-header bg-dark text-white border-0">
+                    <h5 class="modal-title fw-bold"><i class="fas fa-users text-info me-2"></i>รายชื่อพนักงานในระบบ</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <form id="addUserForm" class="row g-2 mb-4 p-3 bg-secondary rounded shadow-sm">
-                        <div class="col-md-3">
-                            <input type="text" name="emp_id" class="form-control form-control-sm"
-                                placeholder="รหัสพนักงาน *" required>
+                <div class="modal-body p-4 bg-light">
+                    <form id="addUserForm" class="row g-3 mb-4 p-4 bg-white rounded-3 shadow-sm align-items-end border">
+                        <div class="col-12 mb-1">
+                            <h6 class="fw-bold text-primary border-bottom pb-2 m-0"><i
+                                    class="fas fa-user-plus me-2"></i>แบบฟอร์มพนักงาน</h6>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label fw-semibold small text-muted">รหัสพนักงาน *</label>
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-light text-muted border-end-0"><i
+                                        class="fas fa-id-card"></i></span>
+                                <input type="text" name="emp_id" class="form-control border-start-0 shadow-none"
+                                    placeholder="ระบุรหัส..." required>
+                            </div>
                         </div>
                         <div class="col-md-3">
-                            <input type="text" name="name" class="form-control form-control-sm"
-                                placeholder="ชื่อ-นามสกุล *" required>
+                            <label class="form-label fw-semibold small text-muted">ชื่อ-นามสกุล *</label>
+                            <input type="text" name="name" class="form-control form-control-sm shadow-none"
+                                placeholder="กรอกชื่อ..." required>
                         </div>
                         <div class="col-md-3">
-                            <label class="form-label text-white-50 small">แผนก</label>
-                            <select name="department" id="userDeptSelect" class="form-select form-select-sm" required>
-                                <option value="">-- กำลังโหลดแผนก... --</option>
+                            <label class="form-label fw-semibold small text-muted">แผนก</label>
+                            <select name="department" id="userDeptSelect" class="form-select form-select-sm shadow-none"
+                                required>
+                                <option value="">-- เลือกแผนก --</option>
                             </select>
                         </div>
                         <div class="col-md-2">
-                            <select name="location" class="form-select form-select-sm" required>
+                            <label class="form-label fw-semibold small text-muted">โรงงาน</label>
+                            <select name="location" class="form-select form-select-sm shadow-none" required>
                                 {% if role == 'superadmin' %}
                                 <option value="PC1">PC1</option>
                                 <option value="Coil Center">CC</option>
@@ -536,39 +664,87 @@
                             </select>
                         </div>
                         <div class="col-md-2" id="userSubmitBtnContainer">
-                            <button type="button" class="btn btn-success btn-sm w-100" onclick="submitAddUser()">
-                                <i class="fas fa-plus"></i> เพิ่มพนักงาน
+                            <button type="button" class="btn btn-success btn-sm w-100 fw-bold shadow-sm py-2"
+                                onclick="submitAddUser()">
+                                <i class="fas fa-plus-circle me-1"></i> เพิ่มพนักงาน
                             </button>
                         </div>
                     </form>
 
-                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-                        <table class="table table-sm table-dark table-striped table-hover mb-0">
-                            <thead style="position: sticky; top: 0; z-index: 100; background-color: #212529;">
-                                <tr class="text-warning">
-                                    <th style="width: 15%;">รหัสพนักงาน</th>
-                                    <th style="width: 30%;">ชื่อ-นามสกุล</th>
-                                    <th style="width: 25%;">แผนก</th>
-                                    <th style="width: 15%;">โรงงาน</th>
-                                    <th style="width: 15%;" class="text-center">จัดการ</th>
-                                </tr>
-                            </thead>
-                            <tbody id="userTableBody">
-                            </tbody>
-                        </table>
+                    <div class="card border-0 shadow-sm">
+                        <div class="table-responsive" style="max-height: 450px;">
+                            <table class="table table-hover mb-0 align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="ps-4" style="width: 15%;">รหัสพนักงาน</th>
+                                        <th style="width: 30%;">ชื่อ-นามสกุล</th>
+                                        <th style="width: 25%;">แผนก</th>
+                                        <th class="text-center" style="width: 15%;">โรงงาน</th>
+                                        <th class="text-center" style="width: 15%;">จัดการ</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="userTableBody">
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <div class="modal fade" id="addLotModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-success text-white border-0">
+                    <h5 class="modal-title fw-bold"><i class="fas fa-box-open me-2"></i>เพิ่มสต็อก (Add Lot)</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="addLotForm">
+                    <div class="modal-body p-4">
+                        <input type="hidden" id="addLot_product_id" name="product_id">
+                        
+                        <div class="mb-3">
+                            <label class="form-label text-muted small fw-bold">สินค้าที่ต้องการเพิ่ม</label>
+                            <input type="text" id="addLot_product_display" class="form-control bg-light fw-medium text-primary" readonly>
+                        </div>
+                        
+                        <div class="row g-3">
+                            <div class="col-sm-6">
+                                <label class="form-label text-muted small fw-bold">จำนวนที่เพิ่มเข้า *</label>
+                                <div class="input-group">
+                                    <input type="number" name="add_qty" class="form-control shadow-none border-success" required min="1" placeholder="ระบุจำนวน">
+                                </div>
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label text-muted small fw-bold">เลข Lot (ปล่อยว่างเพื่อ Auto)</label>
+                                <input type="text" id="addLot_number" name="lot_number" class="form-control shadow-none" placeholder="DDMMYYYY">
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label text-muted small fw-bold">วันที่รับเข้า</label>
+                                <input type="date" id="addLot_receive_date" name="receive_date" class="form-control shadow-none">
+                            </div>
+                            <div class="col-sm-6">
+                                <label class="form-label text-muted small fw-bold">วันหมดอายุ (ถ้ามี)</label>
+                                <input type="date" name="expire_date" class="form-control shadow-none">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer bg-light border-0">
+                        <button type="button" class="btn btn-secondary rounded-pill px-4" data-bs-dismiss="modal">ยกเลิก</button>
+                        <button type="button" class="btn btn-success rounded-pill px-4 fw-bold" onclick="submitAddLot()">
+                            <i class="fas fa-save me-1"></i> บันทึกสต็อก
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <script>
-        // ==========================================
-        // 1. ฟังก์ชัน Global (ใช้งานจาก HTML โดยตรง)
-        // ==========================================
+        // 1. ฟังก์ชันกรอง Log
         function filterLogs(loc) {
             fetch(`/admin/filter_logs?log_loc=${encodeURIComponent(loc)}`)
                 .then(response => response.text())
@@ -581,10 +757,11 @@
             const btns = { '': 'btn-log-all', 'PC1': 'btn-log-pc1', 'CC': 'btn-log-cc' };
             Object.keys(btns).forEach(key => {
                 const el = document.getElementById(btns[key]);
-                if (el) el.className = (key === loc) ? 'btn btn-sm rounded-pill px-3 btn-primary' : 'btn btn-sm rounded-pill px-3 btn-light text-muted border-0';
+                if (el) el.className = (key === loc) ? 'btn btn-sm rounded-pill px-3 btn-primary fw-bold' : 'btn btn-sm rounded-pill px-3 btn-light text-muted border-0 fw-medium';
             });
         }
 
+        // 2. ฟังก์ชัน Gen Code สินค้า
         function generateNextCode() {
             const category = document.getElementById('productCategory').value;
             const location = document.getElementById('productLocation').value;
@@ -600,71 +777,13 @@
                 .catch(error => console.error('Gen Code Error:', error));
         }
 
-        function submitEditProduct() {
-            // 1. รวบรวมข้อมูลจาก Form ใน Modal
-            const formData = new FormData();
-            formData.append('code', document.getElementById('edit_code').value);
-            formData.append('name', document.getElementById('edit_name').value);
-            formData.append('unit', document.getElementById('edit_unit').value);
-            formData.append('safety_stock', document.getElementById('edit_safety_stock').value);
-            formData.append('stock', document.getElementById('edit_stock').value);
-            formData.append('expiry_date', document.getElementById('edit_expiry_date').value);
-
-            // 2. ส่งข้อมูลไปที่ Server ด้วย Fetch (AJAX)
-            fetch('/admin/edit_product', {
-                method: 'POST',
-                body: formData
-            })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        // 3. ปิด Modal เมื่อบันทึกสำเร็จ
-                        const modalEl = document.getElementById('editProductModal');
-                        const modalInstance = bootstrap.Modal.getInstance(modalEl);
-                        modalInstance.hide();
-
-                        // 4. อัปเดตตารางของทันที (เรียกฟังก์ชันค้นหาที่มีอยู่แล้วเพื่อรีโหลดข้อมูลเฉพาะจุด)
-                        // วิธีที่ง่ายที่สุดคือสั่งให้ช่องค้นหาทำรายการใหม่
-                        const searchInput = document.getElementById('stockSearchInput');
-                        searchInput.dispatchEvent(new Event('input'));
-
-                        // (ถ้ามีระบบ Alert แบบไม่รีเฟรชหน้าสามารถใส่ตรงนี้ได้)
-                        console.log("บันทึกสำเร็จ: " + data.message);
-                    } else {
-                        alert('❌ เกิดข้อผิดพลาด: ' + data.message);
-                    }
-                })
-                .catch(error => {
-                    console.error('Submit Error:', error);
-                    alert('เกิดข้อผิดพลาดในการเชื่อมต่อ');
-                });
-        }
-
-        function submitAddProduct() {
-            const form = document.querySelector('#addProductModal form');
-            const formData = new FormData(form);
-
-            fetch('/admin/add_product', {
-                method: 'POST',
-                body: formData
-            })
-                .then(res => {
-                    // ปิด Modal
-                    const modalEl = document.getElementById('addProductModal');
-                    bootstrap.Modal.getInstance(modalEl).hide();
-                    // รีเฟรชตารางของ (ใช้ฟังก์ชันเดิมของคุณ)
-                    document.getElementById('stockSearchInput').dispatchEvent(new Event('input'));
-                    form.reset();
-                })
-                .catch(err => alert("Error: " + err));
-        }
-
+        // 3. ฟังก์ชันสินค้า (Edit & Submit)
         function editProductModal(code) {
             fetch('/admin/get_product/' + code)
                 .then(response => response.json())
                 .then(data => {
                     if (data.error) {
-                        alert('เกิดข้อผิดพลาด: ไม่พบข้อมูลของ');
+                        Swal.fire({ icon: 'error', title: 'ข้อผิดพลาด', text: 'ไม่พบข้อมูลของ' });
                         return;
                     }
                     document.getElementById('edit_code').value = data.code;
@@ -679,95 +798,132 @@
                     document.getElementById('edit_stock').value = data.stock;
                     document.getElementById('edit_expiry_date').value = data.expiry_date || '';
 
-                    var myModal = new bootstrap.Modal(document.getElementById('editProductModal'));
-                    myModal.show();
+                    new bootstrap.Modal(document.getElementById('editProductModal')).show();
                 })
                 .catch(error => console.error('Edit Modal Error:', error));
         }
 
-        function updateDeptDropdown() {
+        function submitEditProduct() {
+            const form = document.querySelector('#editProductModal form');
+            const formData = new FormData(form);
+
+            fetch('/admin/edit_product', { method: 'POST', body: formData })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        bootstrap.Modal.getInstance(document.getElementById('editProductModal')).hide();
+                        document.getElementById('stockSearchInput').dispatchEvent(new Event('input')); // รีโหลดตาราง
+                        Swal.fire({ icon: 'success', title: 'บันทึกสำเร็จ', text: data.message, showConfirmButton: false, timer: 1500 });
+                    } else {
+                        Swal.fire({ icon: 'error', title: 'ข้อผิดพลาด', text: data.message });
+                    }
+                })
+                .catch(error => console.error('Submit Error:', error));
+        }
+
+        function submitAddProduct() {
+            const form = document.querySelector('#addProductModal form');
+            const formData = new FormData(form);
+
+            fetch('/admin/add_product', { method: 'POST', body: formData })
+                .then(res => res.json()) // ตอนนี้จะอ่าน JSON สำเร็จแล้ว
+                .then(data => {
+                    if (data.success) {
+                        // ปิด Modal
+                        bootstrap.Modal.getInstance(document.getElementById('addProductModal')).hide();
+                        // รีเฟรชตาราง
+                        document.getElementById('stockSearchInput').dispatchEvent(new Event('input'));
+                        // ล้างฟอร์ม
+                        form.reset();
+                        // แจ้งเตือนสวยๆ
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'เพิ่มข้อมูลสำเร็จ',
+                            showConfirmButton: false,
+                            timer: 1500
+                        });
+                    } else {
+                        Swal.fire({ icon: 'error', title: 'ข้อผิดพลาด', text: data.message });
+                    }
+                })
+                .catch(err => {
+                    console.error('Submit Error:', err);
+                    Swal.fire({ icon: 'error', title: 'ระบบขัดข้อง', text: 'ไม่สามารถติดต่อ Server ได้' });
+                });
+        }
+        // 4. ฟังก์ชันพนักงาน (User Management)
+        function updateDeptDropdown(callback) {
             fetch('/admin/list_departments')
                 .then(res => res.json())
                 .then(depts => {
                     const select = document.getElementById('userDeptSelect');
                     if (!select) return;
-
-                    // ล้างตัวเลือกเก่าออกก่อน แล้วใส่ตัวเลือกเริ่มต้น
                     let html = '<option value="">-- เลือกแผนก --</option>';
-
-                    // วนลูปรายชื่อแผนกจาก Database มาสร้างเป็น <option>
-                    depts.forEach(d => {
-                        html += `<option value="${d.name}">${d.name}</option>`;
-                    });
-
+                    depts.forEach(d => { html += `<option value="${d.name}">${d.name}</option>`; });
                     select.innerHTML = html;
-                    console.log("✅ อัปเดตรายชื่อแผนกจาก DB แล้ว");
+                    if (callback) callback();
                 })
-                .catch(err => console.error("❌ ดึงข้อมูลแผนกไม่สำเร็จ:", err));
+                .catch(err => console.error("❌ ดึงแผนกไม่สำเร็จ:", err));
         }
 
-        // สั่งให้ทำงานทันทีที่เปิด Modal "จัดการพนักงาน"
         document.getElementById('userManagementModal').addEventListener('shown.bs.modal', function () {
-            updateDeptDropdown(); // โหลดแผนก
-            loadUserList();       // โหลดรายชื่อพนักงาน
+            updateDeptDropdown();
+            loadUserList();
         });
-        // --- 2. แก้ไขฟังก์ชัน editUser (เพื่อไม่ให้ Location หาย) ---
+
         function editUser(id, name, dept, loc) {
-            // โหลดแผนกก่อนเพื่อให้มั่นใจว่ามี List ให้เลือก
             updateDeptDropdown(() => {
                 const form = document.getElementById('addUserForm');
-
-                // เติมข้อมูล
                 form.querySelector('[name="emp_id"]').value = id;
                 form.querySelector('[name="emp_id"]').readOnly = true;
                 form.querySelector('[name="name"]').value = name;
 
-                // เลือกแผนก (ทำงานได้เพราะรันใน Callback หลังโหลด List เสร็จ)
-                document.getElementById('userDeptSelect').value = dept;
+                const deptSelect = document.getElementById('userDeptSelect');
+                deptSelect.value = dept || "";
 
-                // เลือก Location
                 const locSelect = form.querySelector('[name="location"]');
                 if (locSelect) locSelect.value = loc;
 
-                // เปลี่ยนปุ่ม (เปลี่ยนเฉพาะเนื้อหาใน Container ไม่ลบ Row)
                 const btnAction = document.getElementById('userSubmitBtnContainer');
                 btnAction.innerHTML = `
-            <button type="button" class="btn btn-primary btn-sm w-100" onclick="submitUpdateUser()">
-                <i class="fas fa-save"></i> บันทึกแก้ไข
-            </button>
-            <button type="button" class="btn btn-link btn-sm text-white-50 w-100 mt-1" onclick="resetUserForm()">ยกเลิก</button>
-        `;
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-primary btn-sm shadow-sm py-2 fw-bold" onclick="submitUpdateUser()">
+                            <i class="fas fa-save me-1"></i> บันทึกแก้ไข
+                        </button>
+                        <button type="button" class="btn btn-light border btn-sm fw-medium" onclick="resetUserForm()">ยกเลิก</button>
+                    </div>
+                `;
+                form.scrollIntoView({ behavior: 'smooth', block: 'center' });
             });
         }
 
-        // โหลดรายชื่อพนักงานทั้งหมด
         function loadUserList() {
             fetch('/admin/list_users')
                 .then(res => res.json())
                 .then(users => {
                     const tbody = document.getElementById('userTableBody');
-                    tbody.innerHTML = users.map(user => `
-                <tr>
-                    <td>${user.emp_id}</td>
-                    <td>${user.name}</td>
-                    <td>${user.department}</td>
-                    <td>${user.location}</td>
-                    <td class="text-center">
-                        <button class="btn btn-sm btn-warning me-1" onclick="editUser('${user.emp_id}', '${user.name}', '${user.department}', '${user.location}')">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteUser('${user.emp_id}')">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </td>
-                </tr>
-            `).join('');
+                    tbody.innerHTML = users.map(user => {
+                        const deptDisplay = (user.department && user.department.trim() !== "")
+                            ? user.department
+                            : '<span class="badge bg-secondary opacity-75">Boss / ไม่ระบุ</span>';
+                        return `
+                            <tr>
+                                <td class="ps-4 fw-medium text-primary"># ${user.emp_id}</td>
+                                <td class="fw-medium">${user.name}</td>
+                                <td>${deptDisplay}</td>
+                                <td class="text-center"><span class="badge bg-light text-dark border">${user.location}</span></td>
+                                <td class="text-center">
+                                    <div class="btn-group btn-group-sm shadow-sm">
+                                        <button class="btn btn-light border text-warning" title="แก้ไข" onclick="editUser('${user.emp_id}', '${user.name}', '${user.department || ""}', '${user.location}')"><i class="fas fa-edit"></i></button>
+                                        <button class="btn btn-light border text-danger" title="ลบ" onclick="deleteUser('${user.emp_id}')"><i class="fas fa-trash"></i></button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
                 });
-            updateDeptDropdown();
         }
 
-
-        // ฟังก์ชันส่งข้อมูลแก้ไขไป Server
         function submitUpdateUser() {
             const form = document.getElementById('addUserForm');
             const formData = new FormData(form);
@@ -776,9 +932,11 @@
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
-                        alert('✅ แก้ไขข้อมูลพนักงานเรียบร้อย');
-                        resetUserForm(); // ล้างฟอร์มและเปลี่ยนปุ่มกลับเป็น "เพิ่ม"
+                        Swal.fire({ icon: 'success', title: 'อัปเดตเรียบร้อย', showConfirmButton: false, timer: 1500 });
+                        resetUserForm();
                         loadUserList();
+                    } else {
+                        Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: data.message });
                     }
                 });
         }
@@ -787,17 +945,13 @@
             const form = document.getElementById('addUserForm');
             form.reset();
             form.querySelector('[name="emp_id"]').readOnly = false;
-
-            // คืนค่าปุ่มสีเขียว
-            const btnAction = document.getElementById('userSubmitBtnContainer');
-            btnAction.innerHTML = `
-        <button type="button" class="btn btn-success btn-sm w-100" onclick="submitAddUser()">
-            <i class="fas fa-plus"></i> เพิ่มพนักงาน
-        </button>
-    `;
+            document.getElementById('userSubmitBtnContainer').innerHTML = `
+                <button type="button" class="btn btn-success btn-sm w-100 fw-bold shadow-sm py-2" onclick="submitAddUser()">
+                    <i class="fas fa-plus-circle me-1"></i> เพิ่มพนักงาน
+                </button>
+            `;
         }
 
-        // เพิ่มพนักงานใหม่
         function submitAddUser() {
             const form = document.getElementById('addUserForm');
             const formData = new FormData(form);
@@ -807,29 +961,40 @@
                     if (data.success) {
                         form.reset();
                         loadUserList();
-                        alert('✅ เพิ่มพนักงานเรียบร้อย');
+                        Swal.fire({ icon: 'success', title: 'เพิ่มพนักงานเรียบร้อย', showConfirmButton: false, timer: 1500 });
                     } else {
-                        alert('❌ ' + data.message);
+                        Swal.fire({ icon: 'error', title: 'เพิ่มไม่สำเร็จ', text: data.message });
                     }
                 });
         }
-        // ลบพนักงาน
-        function deleteUser(emp_id) {
-            if (confirm(`ยืนยันการลบพนักงานรหัส ${emp_id}?`)) {
-                fetch(`/admin/delete_user/${emp_id}`, { method: 'POST' })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.success) loadUserList();
-                        else alert('❌ ' + data.message);
-                    });
-            }
-        }
-        // ==========================================
-        // 2. ส่วนที่ทำงานทันทีเมื่อโหลดหน้าเว็บ
-        // ==========================================
-        document.addEventListener('DOMContentLoaded', function () {
 
-            // [ป้องกันโปรแกรมแครช] แยกการวาดกราฟไว้ใน try...catch
+        function deleteUser(emp_id) {
+            Swal.fire({
+                title: 'ยืนยันการลบ?',
+                text: `ลบข้อมูลพนักงานรหัส ${emp_id} ใช่หรือไม่?`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#6c757d',
+                confirmButtonText: 'ลบเลย!',
+                cancelButtonText: 'ยกเลิก'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    fetch(`/admin/delete_user/${emp_id}`, { method: 'POST' })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                Swal.fire({ title: 'ลบเรียบร้อย!', icon: 'success', showConfirmButton: false, timer: 1000 });
+                                loadUserList();
+                            }
+                        });
+                }
+            });
+        }
+
+        // 5. โหลดเมื่อเข้าหน้าเว็บ (DOMContentLoaded)
+        document.addEventListener('DOMContentLoaded', function () {
+            // Chart
             try {
                 const ctx = document.getElementById('deptChart');
                 if (ctx) {
@@ -843,24 +1008,19 @@
                     datasets: [{
                         label: 'จำนวน (ชิ้น)',
                         data: values,
-                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                        borderColor: 'rgba(54, 162, 235, 1)',
-                        borderWidth: 1
+                        backgroundColor: 'rgba(13, 110, 253, 0.7)',
+                        borderColor: 'rgba(13, 110, 253, 1)',
+                        borderWidth: 1,
+                        borderRadius: 4
                     }]
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: { y: { beginAtZero: true } }
-                }
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
             });
         }
-            }
-        } catch (error) {
-            console.error("Chart Error: กราฟมีปัญหา แต่ระบบอื่นยังทำงานได้", error);
-        }
+                }
+            } catch (error) { console.error("Chart Error:", error); }
 
-        // --- AJAX ค้นหาสต็อกหลัก ---
+        // Filter Stock
         try {
             const catSelect = document.getElementById('stockCatSelector');
             const searchInput = document.getElementById('stockSearchInput');
@@ -869,74 +1029,115 @@
             function loadStock() {
                 if (!catSelect || !searchInput) return;
                 fetch(`/admin/filter_stock?cat=${encodeURIComponent(catSelect.value)}&search=${encodeURIComponent(searchInput.value)}`)
-                    .then(res => {
-                        if (res.status === 401) {
-                            window.location.href = "/admin_login";
-                            return Promise.reject("Session expired");
-                        }
-                        if (!res.ok) throw new Error("Server Error " + res.status);
-                        return res.text();
-                    })
+                    .then(res => res.text())
                     .then(html => { tableBody.innerHTML = html; })
                     .catch(err => console.error('Load Stock Error:', err));
             }
-
             if (catSelect) catSelect.addEventListener('change', loadStock);
             if (searchInput) searchInput.addEventListener('input', loadStock);
-        } catch (error) {
-            console.error("Main Stock Error:", error);
-        }
+        } catch (error) { }
 
-        // --- AJAX กรองของใกล้หมด (Low Stock) ---
+        // Filter Low Stock
         try {
             const lowStockCat = document.getElementById('lowStockCatSelector');
             const lowStockTable = document.getElementById('lowStockTableBody');
-
             if (lowStockCat) {
                 lowStockCat.addEventListener('change', function () {
                     fetch(`/admin/filter_low_stock?low_stock_cat=${encodeURIComponent(this.value)}`)
-                        .then(res => {
-                            if (res.status === 401) {
-                                window.location.href = "/admin_login";
-                                return Promise.reject("Session expired");
-                            }
-                            if (!res.ok) throw new Error("Server Error " + res.status);
-                            return res.text();
-                        })
-                        .then(html => {
-                            if (lowStockTable) lowStockTable.innerHTML = html;
-                        })
-                        .catch(err => console.error('Low Stock Filter Error:', err));
+                        .then(res => res.text())
+                        .then(html => { if (lowStockTable) lowStockTable.innerHTML = html; })
                 });
             }
-        } catch (error) {
-            console.error("Low Stock Error:", error);
-        }
-    });
+        } catch (error) { }
+        });
 
-        // ==========================================
-        // 3. ระบบ Auto-Logout เมื่อไม่มีการใช้งาน 60 นาที
-        // ==========================================
+        // 6. Auto-Logout (60 นาที)
         let idleTime = 0;
-        const maxIdleTime = 60; // นาที
-
-        function resetIdleTime() {
-            idleTime = 0;
-        }
-
+        const maxIdleTime = 60;
+        function resetIdleTime() { idleTime = 0; }
         document.addEventListener('mousemove', resetIdleTime);
         document.addEventListener('keypress', resetIdleTime);
         document.addEventListener('click', resetIdleTime);
         document.addEventListener('scroll', resetIdleTime);
-
         setInterval(function () {
             idleTime++;
             if (idleTime >= maxIdleTime) {
-                alert("เซสชันหมดอายุแล้ว (ไม่มีการใช้งาน 60 นาที) กรุณาเข้าสู่ระบบใหม่");
                 window.location.href = "/admin/logout";
             }
         }, 60000);
 
+    // ==========================================
+        // ฟังก์ชัน: เปิดหน้าต่างเพิ่มสต็อก (Add Lot)
+        // ==========================================
+        function openAddLotModal(code) {
+            fetch('/admin/get_product/' + code)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        Swal.fire({icon: 'error', title: 'ข้อผิดพลาด', text: 'ไม่พบข้อมูลสินค้า'});
+                        return;
+                    }
+                    
+                    // 1. ใส่ชื่อสินค้าโชว์ในช่อง
+                    document.getElementById('addLot_product_id').value = data.id;
+                    document.getElementById('addLot_product_display').value = `[${data.code}] ${data.name}`;
+                    
+                    // 2. สร้างวันที่ Auto (ดึงวันปัจจุบัน)
+                    const today = new Date();
+                    const yyyy = today.getFullYear();
+                    const mm = String(today.getMonth() + 1).padStart(2, '0');
+                    const dd = String(today.getDate()).padStart(2, '0');
+                    const dateString = `${yyyy}-${mm}-${dd}`;
+                    const lotString = `${dd}${mm}${yyyy}`; // สร้างเลข Lot แบบ DDMMYYYY
+                    
+                    document.getElementById('addLot_receive_date').value = dateString;
+                    document.getElementById('addLot_number').value = lotString;
+                    
+                    // 3. ล้างค่าจำนวนและวันหมดอายุเก่าทิ้ง
+                    document.querySelector('#addLotForm input[name="add_qty"]').value = '';
+                    document.querySelector('#addLotForm input[name="expire_date"]').value = '';
+                    
+                    // 4. เปิด Modal
+                    new bootstrap.Modal(document.getElementById('addLotModal')).show();
+                })
+                .catch(error => console.error('Add Lot Modal Error:', error));
+        }
+
+        // ==========================================
+        // ฟังก์ชัน: กดยืนยันบันทึกสต็อก
+        // ==========================================
+        function submitAddLot() {
+            const form = document.querySelector('#addLotForm');
+            const formData = new FormData(form);
+            
+            // ดักเช็คว่ากรอกจำนวนถูกต้องไหม
+            const qty = formData.get('add_qty');
+            if (!qty || parseInt(qty) <= 0) {
+                Swal.fire({icon: 'warning', title: 'แจ้งเตือน', text: 'กรุณาระบุจำนวนสินค้าที่มากกว่า 0'});
+                return;
+            }
+
+            // ส่งข้อมูลไปเซิร์ฟเวอร์
+            fetch('/admin/add_product_ajax', { method: 'POST', body: formData })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        // ปิดหน้าต่าง
+                        bootstrap.Modal.getInstance(document.getElementById('addLotModal')).hide();
+                        // รีโหลดข้อมูลในตาราง
+                        const searchInput = document.getElementById('stockSearchInput');
+                        if(searchInput) searchInput.dispatchEvent(new Event('input')); 
+                        
+                        Swal.fire({ icon: 'success', title: 'เพิ่มสต็อกเรียบร้อย!', text: data.message, showConfirmButton: false, timer: 1500 });
+                    } else {
+                        Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: data.message });
+                    }
+                })
+                .catch(err => {
+                    console.error('Submit Add Lot Error:', err);
+                    Swal.fire({ icon: 'error', title: 'ระบบขัดข้อง', text: 'ไม่สามารถเชื่อมต่อกับ Server ได้' });
+                });
+        }
     </script>
 </body>
 
