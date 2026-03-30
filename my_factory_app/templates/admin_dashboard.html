@@ -30,6 +30,10 @@
             --dark-bg: #212529 !important;
         }
 
+        .content-wrapper {
+            margin-left: 260px;
+        }
+
         .sidebar {
             background-color: var(--dark-bg);
             min-height: 100vh;
@@ -137,6 +141,45 @@
             padding: 12px 8px;
             vertical-align: middle;
         }
+
+        /* ทำให้ Icon มีความกว้างเท่ากัน เมนูจะได้ตรงกันสวยงาม */
+        .nav-link i {
+            width: 20px;
+            text-align: center;
+            font-size: 1.1rem;
+        }
+
+        /* เอฟเฟกต์ตอนเอาเมาส์ชี้ให้ Icon ขยับนิดๆ */
+        .nav-link:hover i {
+            transform: scale(1.2);
+            transition: 0.2s;
+        }
+
+        /* สีเฉพาะสำหรับ Icon ในโหมดปกติ (ถ้าไม่ได้ใช้ text-success/info) */
+        .nav-link i {
+            color: #adb5bd;
+        }
+
+        /* สี Icon เมื่อเมนูนั้นถูกเลือก (Active) */
+        .nav-link.active i {
+            color: #ffffff !important;
+        }
+
+        /* ใส่ในส่วน <style> */
+        .nav-link i {
+            display: inline-block;
+            /* บังคับให้แสดงผล */
+            width: 25px;
+            /* กำหนดความกว้างให้เท่ากันทุกเมนู */
+            text-align: center;
+            /* จัดให้อยู่กึ่งกลาง */
+            vertical-align: middle;
+        }
+
+        .text-warning {
+            color: #ffc107 !important;
+            /* บังคับสีเหลืองทอง */
+        }
     </style>
 </head>
 
@@ -159,35 +202,44 @@
             </div>
 
             <div class="flex-grow-1 overflow-auto">
-                <div class="nav-category">คลังสินค้า</div>
-                <a href="#" class="nav-link active"><i class="fas fa-boxes text-light"></i> หน้าหลักสต็อก</a>
+                <div class="nav-category text-white-50">คลังสินค้า</div>
+                <a href="#" class="nav-link active">
+                    <i class="fas fa-home me-2"></i> หน้าหลักสต็อก
+                </a>
                 <a href="javascript:void(0)" class="nav-link" data-bs-toggle="modal" data-bs-target="#addProductModal">
-                    <i class="fas fa-plus-circle text-success"></i> เพิ่มของใหม่
+                    <i class="fas fa-plus-circle me-2 text-success"></i> เพิ่มของใหม่
                 </a>
-                <a href="{{ url_for('export_excel') }}" class="nav-link"><i class="fas fa-file-excel text-info"></i>
-                    Export ข้อมูล</a>
+                <a href="{{ url_for('export_excel') }}" class="nav-link">
+                    <i class="fas fa-file-excel me-2 text-info"></i> Export ข้อมูล
+                </a>
                 <a href="javascript:void(0)" onclick="document.getElementById('importFile').click()" class="nav-link">
-                    <i class="fas fa-file-import text-info"></i> Import ข้อมูล
+                    <i class="fas fa-file-import me-2 text-info"></i> Import ข้อมูล
                 </a>
-                <form id="importForm" action="{{ url_for('import_excel') }}" method="POST" enctype="multipart/form-data"
-                    style="display:none;">
-                    <input type="file" id="importFile" name="file"
-                        onchange="document.getElementById('importForm').submit()">
-                </form>
 
-                <div class="nav-category">รายงาน & การทำรายการ</div>
-                <a href="{{ url_for('monthly_report') }}" class="nav-link"><i class="fas fa-chart-pie text-warning"></i>
-                    รายงานประจำเดือน</a>
-                <a href="{{ url_for('print_all_qrs') }}" target="_blank" class="nav-link"><i
-                        class="fas fa-qrcode text-warning"></i> พิมพ์ QR ทั้งหมด</a>
+                <div class="nav-category text-white-50">รายงาน & การทำรายการ</div>
+                <a href="{{ url_for('monthly_report') }}" class="nav-link">
+                    <i class="fas fa-chart-line me-2 text-warning"></i> รายงานประจำเดือน
+                </a>
+                <a href="{{ url_for('print_all_qrs') }}" target="_blank" class="nav-link">
+                    <i class="fas fa-qrcode me-2 text-warning"></i> พิมพ์ QR ทั้งหมด
+                </a>
 
-                <div class="nav-category">ระบบบุคลากร</div>
+                <div class="nav-category text-white-50">ระบบบุคลากร</div>
                 <a href="javascript:void(0)" class="nav-link" onclick="loadUserList()" data-bs-toggle="modal"
                     data-bs-target="#userManagementModal">
-                    <i class="fas fa-user-cog text-primary"></i> จัดการพนักงาน
+                    <i class="fas fa-users-cog me-2 text-primary"></i> จัดการพนักงาน
                 </a>
-                <a href="{{ url_for('manage_zombies') }}" class="nav-link"><i
-                        class="fas fa-user-clock text-primary"></i> ตรวจสอบพนักงานค้าง</a>
+                <a href="{{ url_for('manage_zombies') }}" class="nav-link">
+                    <i class="fas fa-user-clock me-2 text-primary"></i> ตรวจสอบพนักงานค้าง
+                </a>
+
+                {% if role == 'superadmin' %}
+                <div class="nav-category text-white-50">ระบบจัดการขั้นสูง</div>
+                <a href="javascript:void(0)" class="nav-link" data-bs-toggle="modal"
+                    data-bs-target="#alertSettingModal">
+                    <i class="fas fa-bell-cog me-2 text-warning"></i> ตั้งเวลาแจ้งเตือน LINE
+                </a>
+                {% endif %}
             </div>
 
             <div class="px-4 py-3 mt-auto border-top border-secondary">
@@ -318,17 +370,17 @@
                                     </a>
                                 </td>
                                 <td class="text-center text-nowrap">
-    <button class="btn btn-sm btn-light text-success border shadow-sm rounded-circle me-1 hover-shadow" 
-            title="เพิ่มสต็อก (Add Lot)" 
-            onclick="openAddLotModal('{{ item['code'] }}')">
-        <i class="fas fa-plus"></i>
-    </button>
-    <button class="btn btn-sm btn-light text-warning border shadow-sm rounded-circle hover-shadow" 
-            title="แก้ไข" 
-            onclick="editProductModal('{{ item['code'] }}')">
-        <i class="fas fa-edit"></i>
-    </button>
-</td>
+                                    <button
+                                        class="btn btn-sm btn-light text-success border shadow-sm rounded-circle me-1 hover-shadow"
+                                        title="เพิ่มสต็อก (Add Lot)" onclick="openAddLotModal('{{ item['code'] }}')">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                    <button
+                                        class="btn btn-sm btn-light text-warning border shadow-sm rounded-circle hover-shadow"
+                                        title="แก้ไข" onclick="editProductModal('{{ item['code'] }}')">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -456,17 +508,19 @@
                     <nav>
                         <ul
                             class="pagination pagination-sm justify-content-center mb-0 shadow-sm rounded-pill overflow-hidden w-auto d-inline-flex mx-auto">
-                            {% if page > 1 %}
-                            <li class="page-item"><a class="page-link px-3"
-                                    href="{{ url_for('admin_dashboard', page=page-1, log_loc=selected_loc) }}">ก่อนหน้า</a>
+                            <li class="page-item" id="prevPageItem">
+                                <button class="page-link px-3" id="prevPageBtn"
+                                    onclick="prevLogPage()">ก่อนหน้า</button>
                             </li>
-                            {% endif %}
-                            <li class="page-item active"><span class="page-link px-4">{{ page }} / {{ total_pages
-                                    }}</span></li>
-                            {% if page < total_pages %} <li class="page-item"><a class="page-link px-3"
-                                    href="{{ url_for('admin_dashboard', page=page+1, log_loc=selected_loc) }}">ถัดไป</a>
-                                </li>
-                                {% endif %}
+
+                            <li class="page-item active">
+                                <span class="page-link px-4"><span id="currentPageNum">{{ page }}</span> / <span
+                                        id="totalPageNum">{{ total_pages }}</span></span>
+                            </li>
+
+                            <li class="page-item" id="nextPageItem">
+                                <button class="page-link px-3" id="nextPageBtn" onclick="nextLogPage()">ถัดไป</button>
+                            </li>
                         </ul>
                     </nav>
                 </div>
@@ -703,26 +757,30 @@
                 <form id="addLotForm">
                     <div class="modal-body p-4">
                         <input type="hidden" id="addLot_product_id" name="product_id">
-                        
+
                         <div class="mb-3">
                             <label class="form-label text-muted small fw-bold">สินค้าที่ต้องการเพิ่ม</label>
-                            <input type="text" id="addLot_product_display" class="form-control bg-light fw-medium text-primary" readonly>
+                            <input type="text" id="addLot_product_display"
+                                class="form-control bg-light fw-medium text-primary" readonly>
                         </div>
-                        
+
                         <div class="row g-3">
                             <div class="col-sm-6">
                                 <label class="form-label text-muted small fw-bold">จำนวนที่เพิ่มเข้า *</label>
                                 <div class="input-group">
-                                    <input type="number" name="add_qty" class="form-control shadow-none border-success" required min="1" placeholder="ระบุจำนวน">
+                                    <input type="number" name="add_qty" class="form-control shadow-none border-success"
+                                        required min="1" placeholder="ระบุจำนวน">
                                 </div>
                             </div>
                             <div class="col-sm-6">
                                 <label class="form-label text-muted small fw-bold">เลข Lot (ปล่อยว่างเพื่อ Auto)</label>
-                                <input type="text" id="addLot_number" name="lot_number" class="form-control shadow-none" placeholder="DDMMYYYY">
+                                <input type="text" id="addLot_number" name="lot_number" class="form-control shadow-none"
+                                    placeholder="DDMMYYYY">
                             </div>
                             <div class="col-sm-6">
                                 <label class="form-label text-muted small fw-bold">วันที่รับเข้า</label>
-                                <input type="date" id="addLot_receive_date" name="receive_date" class="form-control shadow-none">
+                                <input type="date" id="addLot_receive_date" name="receive_date"
+                                    class="form-control shadow-none">
                             </div>
                             <div class="col-sm-6">
                                 <label class="form-label text-muted small fw-bold">วันหมดอายุ (ถ้ามี)</label>
@@ -731,8 +789,10 @@
                         </div>
                     </div>
                     <div class="modal-footer bg-light border-0">
-                        <button type="button" class="btn btn-secondary rounded-pill px-4" data-bs-dismiss="modal">ยกเลิก</button>
-                        <button type="button" class="btn btn-success rounded-pill px-4 fw-bold" onclick="submitAddLot()">
+                        <button type="button" class="btn btn-secondary rounded-pill px-4"
+                            data-bs-dismiss="modal">ยกเลิก</button>
+                        <button type="button" class="btn btn-success rounded-pill px-4 fw-bold"
+                            onclick="submitAddLot()">
                             <i class="fas fa-save me-1"></i> บันทึกสต็อก
                         </button>
                     </div>
@@ -740,10 +800,107 @@
             </div>
         </div>
     </div>
+    <div class="modal fade" id="alertSettingModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-dark text-white border-0">
+                    <h5 class="modal-title fw-bold">
+                        <i class="fas fa-bell text-warning me-2"></i>ตั้งเวลาแจ้งเตือน LINE
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+
+                <form id="alertSettingForm">
+                    <div class="modal-body p-4">
+                        <div class="text-center mb-4">
+                            <div class="bg-light d-inline-block rounded-circle p-4 mb-2">
+                                <i class="fas fa-clock fa-3x text-primary"></i>
+                            </div>
+                            <p class="text-muted small">กำหนดเวลาส่งรายงานรายงานสต็อกรายวัน</p>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-bold small text-muted">ระบุเวลา (24 ชม.)</label>
+                            <div class="input-group input-group-lg shadow-sm">
+                                <span class="input-group-text bg-white border-primary text-primary">
+                                    <i class="fas fa-history"></i>
+                                </span>
+
+                                <select id="alert_hour"
+                                    class="form-select border-primary text-center fw-bold shadow-none">
+                                    {% for h in range(24) %}
+                                    <option value="{{ '%02d'|format(h) }}">{{ '%02d'|format(h) }}</option>
+                                    {% endfor %}
+                                </select>
+
+                                <span class="input-group-text bg-white border-primary fw-bold">:</span>
+
+                                <select id="alert_minute"
+                                    class="form-select border-primary text-center fw-bold shadow-none">
+                                    {% for m in range(0, 60, 5) %}
+                                    <option value="{{ '%02d'|format(m) }}">{{ '%02d'|format(m) }}</option>
+                                    {% endfor %}
+                                </select>
+
+                                <span class="input-group-text bg-light border-primary fw-bold small">น.</span>
+                            </div>
+                            <div class="form-text mt-2">
+                                <i class="fas fa-info-circle me-1"></i> ระบบจะส่งข้อความแจ้งเตือนตามเวลานี้ทุกวัน
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="modal-footer bg-light border-0">
+                        <button type="button" class="btn btn-secondary px-4 rounded-pill" data-bs-dismiss="modal">
+                            ยกเลิก
+                        </button>
+                        <button type="button" class="btn btn-primary px-4 rounded-pill fw-bold"
+                            onclick="saveAlertTime()">
+                            <i class="fas fa-save me-1"></i> บันทึกการตั้งค่า
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <form id="importForm" action="{{ url_for('import_excel') }}" method="POST" enctype="multipart/form-data"
+        style="display: none;">
+        <input type="file" id="importFile" name="file" accept=".xlsx, .xls" onchange="submitImport()">
+    </form>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
+        function submitImport() {
+            const fileInput = document.getElementById('importFile');
+            if (fileInput.files.length > 0) {
+                // ใช้ SweetAlert เพื่อยืนยันการนำเข้า (ถ้าคุณลง Library ไว้แล้ว)
+                Swal.fire({
+                    title: 'ยืนยันการนำเข้าข้อมูล?',
+                    text: "ระบบจะอัปเดตสต็อกตามไฟล์ที่คุณเลือก",
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonColor: '#3085d6',
+                    cancelButtonColor: '#d33',
+                    confirmButtonText: 'ตกลง, นำเข้าเลย!',
+                    cancelButtonText: 'ยกเลิก'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        // แสดง Loading ระหว่างรอ
+                        Swal.fire({
+                            title: 'กำลังนำเข้าข้อมูล...',
+                            allowOutsideClick: false,
+                            didOpen: () => { Swal.showLoading(); }
+                        });
+                        // ส่งฟอร์ม
+                        document.getElementById('importForm').submit();
+                    } else {
+                        // ล้างค่าไฟล์ถ้ากดยกเลิก
+                        fileInput.value = '';
+                    }
+                });
+            }
+        }
         // 1. ฟังก์ชันกรอง Log
         function filterLogs(loc) {
             fetch(`/admin/filter_logs?log_loc=${encodeURIComponent(loc)}`)
@@ -1066,7 +1223,7 @@
             }
         }, 60000);
 
-    // ==========================================
+        // ==========================================
         // ฟังก์ชัน: เปิดหน้าต่างเพิ่มสต็อก (Add Lot)
         // ==========================================
         function openAddLotModal(code) {
@@ -1074,14 +1231,14 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.error) {
-                        Swal.fire({icon: 'error', title: 'ข้อผิดพลาด', text: 'ไม่พบข้อมูลสินค้า'});
+                        Swal.fire({ icon: 'error', title: 'ข้อผิดพลาด', text: 'ไม่พบข้อมูลสินค้า' });
                         return;
                     }
-                    
+
                     // 1. ใส่ชื่อสินค้าโชว์ในช่อง
                     document.getElementById('addLot_product_id').value = data.id;
                     document.getElementById('addLot_product_display').value = `[${data.code}] ${data.name}`;
-                    
+
                     // 2. สร้างวันที่ Auto (ดึงวันปัจจุบัน)
                     const today = new Date();
                     const yyyy = today.getFullYear();
@@ -1089,14 +1246,14 @@
                     const dd = String(today.getDate()).padStart(2, '0');
                     const dateString = `${yyyy}-${mm}-${dd}`;
                     const lotString = `${dd}${mm}${yyyy}`; // สร้างเลข Lot แบบ DDMMYYYY
-                    
+
                     document.getElementById('addLot_receive_date').value = dateString;
                     document.getElementById('addLot_number').value = lotString;
-                    
+
                     // 3. ล้างค่าจำนวนและวันหมดอายุเก่าทิ้ง
                     document.querySelector('#addLotForm input[name="add_qty"]').value = '';
                     document.querySelector('#addLotForm input[name="expire_date"]').value = '';
-                    
+
                     // 4. เปิด Modal
                     new bootstrap.Modal(document.getElementById('addLotModal')).show();
                 })
@@ -1109,11 +1266,11 @@
         function submitAddLot() {
             const form = document.querySelector('#addLotForm');
             const formData = new FormData(form);
-            
+
             // ดักเช็คว่ากรอกจำนวนถูกต้องไหม
             const qty = formData.get('add_qty');
             if (!qty || parseInt(qty) <= 0) {
-                Swal.fire({icon: 'warning', title: 'แจ้งเตือน', text: 'กรุณาระบุจำนวนสินค้าที่มากกว่า 0'});
+                Swal.fire({ icon: 'warning', title: 'แจ้งเตือน', text: 'กรุณาระบุจำนวนสินค้าที่มากกว่า 0' });
                 return;
             }
 
@@ -1126,8 +1283,8 @@
                         bootstrap.Modal.getInstance(document.getElementById('addLotModal')).hide();
                         // รีโหลดข้อมูลในตาราง
                         const searchInput = document.getElementById('stockSearchInput');
-                        if(searchInput) searchInput.dispatchEvent(new Event('input')); 
-                        
+                        if (searchInput) searchInput.dispatchEvent(new Event('input'));
+
                         Swal.fire({ icon: 'success', title: 'เพิ่มสต็อกเรียบร้อย!', text: data.message, showConfirmButton: false, timer: 1500 });
                     } else {
                         Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: data.message });
@@ -1138,6 +1295,136 @@
                     Swal.fire({ icon: 'error', title: 'ระบบขัดข้อง', text: 'ไม่สามารถเชื่อมต่อกับ Server ได้' });
                 });
         }
+
+        let currentLogPage = 1; // เก็บหน้าปัจจุบันไว้ในตัวแปร JS
+        let currentLogLoc = '';
+
+        function prevLogPage() {
+            if (currentLogPage > 1) {
+                currentLogPage--;
+                updateLogTable();
+            }
+        }
+
+        function nextLogPage() {
+            const totalPages = parseInt(document.getElementById('totalPageNum').innerText);
+            if (currentLogPage < totalPages) {
+                currentLogPage++;
+                updateLogTable();
+            }
+        }
+
+        function updateLogTable() {
+            const body = document.getElementById('logTableBody');
+            body.style.opacity = '0.5';
+
+            fetch(`/admin/filter_logs?page=${currentLogPage}&log_loc=${encodeURIComponent(currentLogLoc)}`)
+                .then(response => response.text())
+                .then(html => {
+                    body.innerHTML = html;
+                    body.style.opacity = '1';
+
+                    // อัปเดตตัวเลขหน้าบน UI
+                    document.getElementById('currentPageNum').innerText = currentLogPage;
+
+                    // จัดการสถานะปุ่ม (Disable/Enable)
+                    const totalPages = parseInt(document.getElementById('totalPageNum').innerText);
+
+                    // ปุ่มก่อนหน้า
+                    if (currentLogPage <= 1) {
+                        document.getElementById('prevPageItem').classList.add('disabled');
+                    } else {
+                        document.getElementById('prevPageItem').classList.remove('disabled');
+                    }
+
+                    // ปุ่มถัดไป
+                    if (currentLogPage >= totalPages) {
+                        document.getElementById('nextPageItem').classList.add('disabled');
+                    } else {
+                        document.getElementById('nextPageItem').classList.remove('disabled');
+                    }
+
+                    // เลื่อนจอกลับไปที่หัวตาราง
+                    document.querySelector('.card-header.bg-primary').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+        }
+
+        // แก้ฟังก์ชัน filter เดิมให้รีเซ็ตหน้าเป็น 1 เสมอ
+        function filterLogs(loc) {
+            currentLogLoc = loc;
+            currentLogPage = 1; // รีเซ็ตหน้า
+            updateLogTable();
+
+            // อัปเดตสีปุ่ม Filter
+            const btns = { '': 'btn-log-all', 'PC1': 'btn-log-pc1', 'CC': 'btn-log-cc' };
+            Object.keys(btns).forEach(key => {
+                const el = document.getElementById(btns[key]);
+                if (el) el.className = (key === loc) ? 'btn btn-sm rounded-pill px-3 btn-primary fw-bold' : 'btn btn-sm rounded-pill px-3 btn-light text-muted border-0 fw-medium';
+            });
+        }
+        // ฟังก์ชันบันทึกเวลา
+        function saveAlertTime() {
+            // 1. ดึงค่าจาก Select Box ทั้ง 2 ตัว (ชั่วโมง และ นาที)
+            const hr = document.getElementById('alert_hour').value;
+            const min = document.getElementById('alert_minute').value;
+
+            // 2. รวมร่างเป็นฟอร์แมต HH:mm (เช่น "15:30")
+            const fullTime = `${hr}:${min}`;
+
+            // 3. เตรียมข้อมูลส่งไปที่ Python (app.py)
+            const formData = new FormData();
+            formData.append('alert_time', fullTime);
+
+            // 4. แสดง Loading ระหว่างบันทึก
+            Swal.fire({
+                title: 'กำลังบันทึกตั้งค่า...',
+                allowOutsideClick: false,
+                didOpen: () => { Swal.showLoading(); }
+            });
+
+            // 5. ยิง Fetch API ไปที่หลังบ้าน
+            fetch('/admin/save_alert_time', {
+                method: 'POST',
+                body: formData
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        // ปิด Modal เมื่อสำเร็จ
+                        const modalEl = document.getElementById('alertSettingModal');
+                        const modalInstance = bootstrap.Modal.getInstance(modalEl);
+                        if (modalInstance) modalInstance.hide();
+
+                        // แจ้งเตือนความสำเร็จด้วย SweetAlert
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'บันทึกสำเร็จ!',
+                            text: `ระบบจะแจ้งเตือน LINE ทุกวันเวลา ${fullTime} น.`,
+                            confirmButtonColor: '#0d6efd'
+                        });
+                    } else {
+                        Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: data.message });
+                    }
+                })
+                .catch(err => {
+                    console.error('Save Alert Error:', err);
+                    Swal.fire({ icon: 'error', title: 'ระบบขัดข้อง', text: 'ไม่สามารถติดต่อเซิร์ฟเวอร์ได้' });
+                });
+        }
+
+        // ฟังก์ชันนี้จะทำงาน "ทุกครั้งที่กดเปิด Modal" เพื่อดึงค่าจาก DB มาโชว์
+        document.getElementById('alertSettingModal').addEventListener('shown.bs.modal', function () {
+            fetch('/admin/get_alert_time')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.time) {
+                        const [h, m] = data.time.split(':');
+                        // ตั้งค่าให้ Select Box เลือกตามเวลาที่ดึงมาได้
+                        document.getElementById('alert_hour').value = h;
+                        document.getElementById('alert_minute').value = m;
+                    }
+                });
+        });
     </script>
 </body>
 

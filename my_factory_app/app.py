@@ -358,6 +358,9 @@ def admin_dashboard():
     page = request.args.get('page', 1, type=int)
     per_page = 100
     offset = (page - 1) * per_page
+
+    log_per_page = 10 
+    log_offset = (page - 1) * log_per_page
     
     conn = get_db_connection()
 
@@ -411,7 +414,7 @@ def admin_dashboard():
     if stock_cat:
         stock_query += " AND category = ?"
         stock_params.append(stock_cat)
-    stock_query += f" LIMIT {per_page} OFFSET {offset}"
+    stock_query += " ORDER BY code ASC LIMIT 500" 
     all_stock = conn.execute(stock_query, stock_params).fetchall()
     
     categories = conn.execute(f"SELECT DISTINCT category FROM products WHERE 1=1 {product_loc_filter}").fetchall()
@@ -423,7 +426,7 @@ def admin_dashboard():
         LEFT JOIN products p ON l.product_id = p.id
         WHERE 1=1 {final_log_filter}
         ORDER BY l.timestamp DESC LIMIT ? OFFSET ?
-    ''', (per_page, offset)).fetchall()
+    ''', (log_per_page, log_offset)).fetchall()
 
     count_query = f'''
         SELECT COUNT(*) FROM transaction_logs l 
@@ -431,7 +434,7 @@ def admin_dashboard():
         WHERE 1=1 {final_log_filter}
     '''
     total_logs = conn.execute(count_query).fetchone()[0]
-    total_pages = math.ceil(total_logs / per_page)
+    total_pages = math.ceil(total_logs / log_per_page)
 
     low_stock_query = f"SELECT * FROM products WHERE stock < safety_stock {product_loc_filter}"
     low_stock = conn.execute(low_stock_query).fetchall()
@@ -774,58 +777,79 @@ def export_excel():
 def import_excel():
     if not session.get('admin_logged_in'): return redirect(url_for('admin_login'))
     file = request.files.get('file')
-    if file:
-        try:
-            df = pd.read_excel(file)
-            df.columns = df.columns.str.strip()
-            conn = get_db_connection()
-            updated_count = 0
-            inserted_count = 0
+    if not file: return redirect(url_for('admin_dashboard'))
 
-            for index, row in df.iterrows():
-                code_col = next((col for col in df.columns if col.lower() in ['code', 'รหัส', 'รหัสของ']), None)
-                if not code_col: continue
+    try:
+        df = pd.read_excel(file)
+        df.columns = df.columns.str.strip() # ล้างช่องว่างที่หัวตาราง
+        
+        conn = get_db_connection()
+        updated_count = 0
+        inserted_count = 0
 
-                code = str(row[code_col]).strip()
-                if not code or code.lower() == 'nan': continue
-                
-                name = row.get('Name', row.get('ชื่อของ', 'No Name'))
+        # ฟังก์ชันช่วยแปลงค่าเป็นตัวเลขแบบปลอดภัยที่สุด
+        def safe_int(value, default=0):
+            if pd.isna(value) or str(value).strip() == '':
+                return default
+            try:
+                # แปลงเป็น float ก่อนแล้วค่อย int (กันกรณี Excel เก็บเป็น 10.0)
+                return int(float(value))
+            except:
+                return default
 
-                try:
-                    stock = int(row.get('Qty', row.get('จำนวนคงเหลือ', 0)))
-                except:
-                    stock = 0
-                    
-                try:
-                    safety_stock = int(row.get('Safety Stock', row.get('จุดสั่งซื้อ', 0))) # ชื่อตัวแปร safety_stock (มี e)
-                except:
-                    safety_stock = 0
-
-                category = row.get('Category', row.get('หมวดหมู่', 'General'))
-                unit = row.get('Unit', row.get('หน่วยนับ', 'PCS'))
-                location = row.get('Location', row.get('สถานที่เก็บ (Location)', '-'))
-
-                existing = conn.execute('SELECT id FROM products WHERE code = ?', (code,)).fetchone()
-                
-                if existing:
-                    # แก้ไข safty_stock -> safety_stock
-                    conn.execute('UPDATE products SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=? WHERE id=?', 
-                                 (name, stock, safety_stock, category, unit, location, existing['id']))
-                    updated_count += 1
-                else:
-                    # แก้ไขเพิ่ม ? ให้ครบ 7 ตัว และแก้ safty_stock -> safety_stock
-                    conn.execute('''
-                        INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)
-                    ''', (code, name, stock, safety_stock, category, unit, location))
-                    inserted_count += 1
-
-            conn.commit()
-            conn.close()
-            flash(f'✅ นำเข้าข้อมูลสำเร็จ (อัปเดต {updated_count}, เพิ่มใหม่ {inserted_count})', 'success')
-        except Exception as e:
-            flash(f'❌ เกิดข้อผิดพลาด: {e}', 'danger')
+        for index, row in df.iterrows():
+            # 1. หาคอลัมน์รหัส (สำคัญที่สุด)
+            code_col = next((col for col in df.columns if col.lower() in ['code', 'รหัส', 'รหัสของ']), None)
+            if not code_col: continue
             
+            code = str(row[code_col]).strip()
+            if not code or code.lower() == 'nan': continue
+
+            # 2. หาคอลัมน์ชื่อ
+            name_col = next((col for col in df.columns if col.lower() in ['name', 'ชื่อ', 'ชื่อของ']), None)
+            name = str(row[name_col]) if name_col and pd.notna(row[name_col]) else 'No Name'
+
+            # 3. หาคอลัมน์สต็อก (Qty)
+            stock_col = next((col for col in df.columns if col.lower() in ['qty', 'stock', 'จำนวนคงเหลือ', 'จำนวน', 'คงเหลือปัจจุบัน']), None)
+            stock = safe_int(row[stock_col]) if stock_col else 0
+
+            # 4. หาคอลัมน์ Safety Stock (จุดสั่งซื้อ) **จุดที่พังบ่อย**
+            safety_col = next((col for col in df.columns if col.lower() in ['safety_stock', 'safety stock', 'safety', 'จุดสั่งซื้อ', 'จุดสั่งซื้อ (safety stock)']), None)
+            safety_stock = safe_int(row[safety_col]) if safety_col else 0
+
+            # 5. ข้อมูลประกอบอื่นๆ
+            cat_col = next((col for col in df.columns if col.lower() in ['category', 'หมวดหมู่']), None)
+            category = str(row[cat_col]) if cat_col and pd.notna(row[cat_col]) else 'General'
+
+            unit_col = next((col for col in df.columns if col.lower() in ['unit', 'หน่วยนับ', 'หน่วย']), None)
+            unit = str(row[unit_col]) if unit_col and pd.notna(row[unit_col]) else 'PCS'
+
+            loc_col = next((col for col in df.columns if col.lower() in ['location', 'สถานที่เก็บ', 'สถานที่']), None)
+            location = str(row[loc_col]) if loc_col and pd.notna(row[loc_col]) else '-'
+
+            # --- เริ่มการอัปเดต DB ---
+            existing = conn.execute('SELECT id FROM products WHERE code = ?', (code,)).fetchone()
+            
+            if existing:
+                conn.execute('''
+                    UPDATE products 
+                    SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=? 
+                    WHERE id=?
+                ''', (name, stock, safety_stock, category, unit, location, existing['id']))
+                updated_count += 1
+            else:
+                conn.execute('''
+                    INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)
+                ''', (code, name, stock, safety_stock, category, unit, location))
+                inserted_count += 1
+
+        conn.commit()
+        conn.close()
+        flash(f'✅ นำเข้าข้อมูลสำเร็จ (อัปเดต {updated_count}, เพิ่มใหม่ {inserted_count})', 'success')
+    except Exception as e:
+        flash(f'❌ เกิดข้อผิดพลาดร้ายแรง: {str(e)}', 'danger')
+        
     return redirect(url_for('admin_dashboard'))
 
 # 1. ดึงข้อมูลของเดิมมาแสดงในหน้าต่างแก้ไข
@@ -942,7 +966,7 @@ def filter_logs():
     role = session.get('admin_role', 'superadmin')
     log_loc = request.args.get('log_loc', '')
     page = request.args.get('page', 1, type=int)
-    per_page = 100
+    per_page = 10
     offset = (page - 1) * per_page
     
     conn = get_db_connection()
@@ -1398,7 +1422,94 @@ def scheduled_daily_alert():
             print("💤 ไม่มีรายการแจ้งเตือนที่ตรงเงื่อนไข")
     pass
 
-# --- 2. ตั้ง Job แบบใช้ฟังก์ชันธรรมดา (ย้ายมาไว้ตรงนี้) ---
+def update_scheduler_time(new_time):
+    """
+    new_time: รูปแบบ "HH:MM" (24 ชม.) เช่น "15:30"
+    """
+    try:
+        hour, minute = new_time.split(':')
+        
+        # ใช้ scheduler.scheduler เพื่อเข้าถึงเมธอดของ APScheduler โดยตรง
+        scheduler.scheduler.reschedule_job(
+            'Daily_Alert_Job', 
+            trigger='cron', 
+            hour=int(hour), 
+            minute=int(minute),
+            timezone='Asia/Bangkok'
+        )
+        print(f"⏰ [SUCCESS] เปลี่ยนเวลาแจ้งเตือนเป็น: {new_time} น. (ระบบ 24 ชม.)")
+        return True
+    except Exception as e:
+        # หาก Job ยังไม่ถูกสร้าง (หา ID ไม่เจอ) ให้ใช้ add_job แทน
+        print(f"⚠️ [INFO] กำลังสร้าง Job ใหม่เนื่องจากไม่พบ ID เดิม: {e}")
+        try:
+            hour, minute = new_time.split(':')
+            scheduler.add_job(
+                id='Daily_Alert_Job',
+                func=scheduled_daily_alert,
+                trigger='cron',
+                hour=int(hour),
+                minute=int(minute),
+                timezone='Asia/Bangkok',
+                replace_existing=True
+            )
+            return True
+        except Exception as ex:
+            print(f"❌ [ERROR] ไม่สามารถอัปเดต Scheduler ได้เลย: {ex}")
+            return False
+
+# 1. API ดึงเวลาปัจจุบันมาโชว์ในช่อง Input
+@app.route('/admin/get_alert_time')
+def get_alert_time():
+    if not session.get('admin_logged_in'): return jsonify({'error': 'Unauthorized'}), 401
+    
+    conn = get_db_connection()
+    # ดึงค่า daily_alert_time จากตาราง settings
+    row = conn.execute("SELECT value FROM settings WHERE key = 'daily_alert_time'").fetchone()
+    conn.close()
+    
+    # ถ้าไม่มีข้อมูลใน DB ให้ส่งค่าพื้นฐานไป (เช่น 08:30)
+    current_time = row['value'] if row else "08:30"
+    return jsonify({'time': current_time})
+
+# 2. API บันทึกเวลาใหม่
+@app.route('/admin/save_alert_time', methods=['POST'])
+def save_alert_time():
+    if session.get('admin_role') != 'superadmin': return jsonify({'success': False, 'message': 'No Permission'})
+    new_time = request.form.get('alert_time')
+    
+    conn = get_db_connection()
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('daily_alert_time', ?)", (new_time,))
+    conn.commit()
+    conn.close()
+
+    # 💡 จุดสำคัญ: สั่งให้ Scheduler อัปเดตเวลาทำงานใหม่ทันที
+    update_scheduler_time(new_time)
+    
+    return jsonify({'success': True, 'message': f'เปลี่ยนเวลาเป็น {new_time} น. เรียบร้อย'})
+
+def init_settings_db():
+    conn = get_db_connection()
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    ''')
+    # ตั้งค่าเวลาเริ่มต้นเป็น 08:30 น. ถ้ายังไม่มีข้อมูล
+    conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_alert_time', '08:30')")
+    conn.commit()
+    conn.close()
+
+@app.route('/setup_settings')
+def setup_settings():
+    try:
+        init_settings_db()
+        return "✅ ตาราง settings ถูกสร้างและตั้งค่าเริ่มต้นเรียบร้อยแล้ว!"
+    except Exception as e:
+        return f"❌ เกิดข้อผิดพลาด: {str(e)}"
+
+# --- 2. ตั้ง Job แบบใช้ฟังก์ชันธรรมดา ---
 @scheduler.task('cron', id='Daily_Alert_Job', hour=14, minute=45, timezone='Asia/Bangkok')
 def scheduled_daily_alert_task():
     # บังคับให้ใช้ App Context เพื่อให้ดึง DB ได้บน Codespaces
@@ -1413,13 +1524,31 @@ def test_alert():
     scheduled_daily_alert()
     return "🚀 สั่งรันระบบแจ้งเตือนเรียบร้อย! เช็ค LINE และ Terminal"
 
-# --- 4. ส่วนการรัน (ปรับให้ Codespaces ยอมรับ) ---
 if __name__ == '__main__':
-    # ตรวจสอบเพื่อไม่ให้ Scheduler รันซ้อนกัน (Prevent double execution)
+    # 1. เริ่มต้นระบบจัดการ Job
     if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         scheduler.init_app(app)
-        scheduler.start()
-        print("🚀 [STATUS] Scheduler is ACTIVE and WAITING...")
+        
+        # 2. ดึงเวลาจาก Database มาตั้งค่าเริ่มต้น
+        conn = get_db_connection()
+        saved_time = conn.execute("SELECT value FROM settings WHERE key = 'daily_alert_time'").fetchone()
+        conn.close()
+        
+        alert_time = saved_time['value'] if saved_time else "08:30"
+        h, m = alert_time.split(':')
 
-    # ตั้งค่าให้เหมาะสมกับ Codespaces
+        # 3. เพิ่ม Job เข้าไปในระบบ (ถ้ามีอยู่แล้วให้ทับของเก่า)
+        scheduler.add_job(
+            id='Daily_Alert_Job',
+            func=scheduled_daily_alert, # ชื่อฟังก์ชันส่ง LINE ที่คุณมีอยู่แล้ว
+            trigger='cron',
+            hour=int(h),
+            minute=int(m),
+            timezone='Asia/Bangkok',
+            replace_existing=True
+        )
+        
+        scheduler.start()
+        print(f"🚀 [STATUS] Scheduler ACTIVE at {alert_time} น.")
+
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
