@@ -86,26 +86,31 @@ def index():
             is_locked = user['is_locked']
             last_seen_str = user['last_seen']
             
-            # ถ้า Locked อยู่ แต่เวลา last_seen นานเกิน 5 นาที ให้ถือว่าหลุดไปแล้ว -> ปลดล็อคให้เข้าใหม่ได้
             if is_locked == 1 and last_seen_str:
-                last_seen = datetime.strptime(last_seen_str, '%Y-%m-%d %H:%M:%S')
-                if datetime.now() - last_seen > timedelta(minutes=5):
-                    is_locked = 0 # ปลดล็อคอัตโนมัติ
+                try:
+                    last_seen = datetime.strptime(last_seen_str, '%Y-%m-%d %H:%M:%S')
+                    if datetime.now() - last_seen > timedelta(minutes=5):
+                        is_locked = 0 
+                except:
+                    is_locked = 0
 
             if is_locked == 1:
-                flash(f'❌ รหัส {emp_id} กำลังใช้งานอยู่ (ต้อง Logout ก่อน หรือรอ 5 นาที)', 'danger')
+                # ✅ เปลี่ยน category เป็น 'user_error'
+                flash(f'❌ รหัส {emp_id} กำลังใช้งานอยู่ (ต้อง Logout หรือรอ 5 นาที)', 'user_error')
                 conn.close()
-                return redirect(url_for('index'))
+                return render_template('index.html') # 👈 ใช้ render เพื่อให้ Flash แสดงทันที
             
-            # ล็อกสถานะ User เป็น Online และอัปเดตเวลา
+            # ล็อกสถานะ User เป็น Online
             conn.execute('UPDATE users SET is_locked = 1, last_seen = CURRENT_TIMESTAMP WHERE emp_id = ?', (emp_id,))
             conn.commit()
             conn.close()
-            
             return redirect(url_for('menu', emp_id=emp_id))
         else:
             conn.close()
-            flash(f'❌ ไม่พบรหัสพนักงาน: {emp_id}', 'danger')
+            # ✅ เปลี่ยน category เป็น 'user_error'
+            flash(f'❌ ไม่พบรหัสพนักงาน: {emp_id}', 'user_error')
+            return render_template('index.html') # 👈 ใช้ render เพื่อความชัวร์
+            
     return render_template('index.html')
 
 @app.route('/logout_user/<emp_id>')
@@ -312,23 +317,24 @@ def admin_login():
         admin = conn.execute('SELECT * FROM admins WHERE username = ?', (username,)).fetchone()
         conn.close()
         
-        # ใช้ check_password_hash ในการตรวจสอบ
+        # ตรวจสอบรหัสผ่าน
         if admin and check_password_hash(admin['password'], password):
             session['admin_logged_in'] = True
             session['admin_name'] = admin['name']
             session['admin_role'] = admin['role']
-            # ตั้งเวลาหมดอายุของ Session (Security Improvement)
             session.permanent = True
-            app.permanent_session_lifetime = timedelta(minutes=60) # ให้ Login ค้างไว้ได้ 60 นาที
-            
+            # แก้ไข: ย้ายการตั้งค่า lifetime ไปไว้ที่ตอน config app จะดีกว่า 
+            # แต่ถ้าจะไว้ตรงนี้ให้ใช้ timedelta(minutes=60)
             return redirect(url_for('admin_dashboard'))
         
-        flash('❌ ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', 'danger')
-    return render_template('admin_login.html')
+        flash('❌ ชื่อผู้ใช้หรือรหัสผ่านแอดมินไม่ถูกต้อง', 'admin_error')
+        
+    # สำคัญ: ต้อง render_template กลับไปหน้า index.html (หน้าที่มีทั้ง 2 ฟอร์ม)
+    return render_template('index.html')
 
 @app.route('/admin')
 def admin_dashboard():
-    if not session.get('admin_logged_in'): return redirect(url_for('admin_login'))
+    if not session.get('admin_logged_in'): return redirect(url_for('index'))
     
     role = session.get('admin_role', 'superadmin')
     
@@ -505,7 +511,7 @@ def daily_alert():
 
 @app.route('/admin/approve/<int:log_id>') # ฟังก์ชันนี้จะถูกเรียกเมื่อแอดมินกดอนุมัติการเบิก
 def approve_request(log_id):
-    if not session.get('admin_logged_in'): return redirect(url_for('admin_login'))
+    if not session.get('admin_logged_in'): return redirect(url_for('index'))
     
     conn = get_db_connection()
     # 1. ดึงข้อมูลรายการเบิกที่รออนุมัติ
@@ -693,7 +699,7 @@ def add_product():
 
 @app.route('/admin/reset_lock')
 def reset_lock():
-    if not session.get('admin_logged_in'): return redirect(url_for('admin_login'))
+    if not session.get('admin_logged_in'): return redirect(url_for('index'))
     conn = get_db_connection()
     conn.execute('UPDATE users SET is_locked = 0')
     conn.commit()
@@ -704,7 +710,7 @@ def reset_lock():
 @app.route('/admin/export')
 def export_excel():
     if not session.get('admin_logged_in'): 
-        return redirect(url_for('admin_login'))
+        return redirect(url_for('index'))
     
     role = session.get('admin_role', 'superadmin')
     conn = get_db_connection()
@@ -775,59 +781,49 @@ def export_excel():
 
 @app.route('/admin/import', methods=['POST'])
 def import_excel():
-    if not session.get('admin_logged_in'): return redirect(url_for('admin_login'))
+    if not session.get('admin_logged_in'): return redirect(url_for('index'))
     file = request.files.get('file')
     if not file: return redirect(url_for('admin_dashboard'))
 
     try:
         df = pd.read_excel(file)
-        df.columns = df.columns.str.strip() # ล้างช่องว่างที่หัวตาราง
+        # ล้างช่องว่างหัวตาราง
+        df.columns = df.columns.astype(str).str.strip()
         
         conn = get_db_connection()
         updated_count = 0
         inserted_count = 0
 
-        # ฟังก์ชันช่วยแปลงค่าเป็นตัวเลขแบบปลอดภัยที่สุด
-        def safe_int(value, default=0):
-            if pd.isna(value) or str(value).strip() == '':
-                return default
-            try:
-                # แปลงเป็น float ก่อนแล้วค่อย int (กันกรณี Excel เก็บเป็น 10.0)
-                return int(float(value))
-            except:
-                return default
+        def safe_int(value):
+            if pd.isna(value) or str(value).strip() == '': return 0
+            try: return int(float(value))
+            except: return 0
 
         for index, row in df.iterrows():
-            # 1. หาคอลัมน์รหัส (สำคัญที่สุด)
-            code_col = next((col for col in df.columns if col.lower() in ['code', 'รหัส', 'รหัสของ']), None)
+            # --- ดึงรหัสสินค้า (ใช้ชื่อตามรูปของคุณ) ---
+            code_col = next((col for col in df.columns if 'รหัสของ' in col or 'code' in col.lower()), None)
             if not code_col: continue
-            
             code = str(row[code_col]).strip()
             if not code or code.lower() == 'nan': continue
 
-            # 2. หาคอลัมน์ชื่อ
-            name_col = next((col for col in df.columns if col.lower() in ['name', 'ชื่อ', 'ชื่อของ']), None)
-            name = str(row[name_col]) if name_col and pd.notna(row[name_col]) else 'No Name'
+            # --- ดึงข้อมูลตามชื่อคอลัมน์ในรูปภาพ ---
+            # ใช้การเช็คแบบ "ถ้ามีคำนี้อยู่ในชื่อคอลัมน์" เพื่อป้องกันเรื่องคอลัมน์ซ้ำหรือเว้นวรรค
+            name_col = next((col for col in df.columns if 'ชื่อของ' in col), None)
+            cat_col = next((col for col in df.columns if 'หมวดหมู่' in col), None)
+            unit_col = next((col for col in df.columns if 'หน่วยนับ' in col), None)
+            loc_col = next((col for col in df.columns if 'สถานที่เก็บ' in col or 'Location' in col), None)
+            safe_col = next((col for col in df.columns if 'จุดสั่งซื้อ' in col or 'Safety Stock' in col), None)
+            stock_col = next((col for col in df.columns if 'จำนวนคงเหลือ' in col), None)
 
-            # 3. หาคอลัมน์สต็อก (Qty)
-            stock_col = next((col for col in df.columns if col.lower() in ['qty', 'stock', 'จำนวนคงเหลือ', 'จำนวน', 'คงเหลือปัจจุบัน']), None)
+            # กำหนดค่าตัวแปร
+            name = str(row[name_col]).strip() if name_col and pd.notna(row[name_col]) else "No Name"
+            category = str(row[cat_col]).strip() if cat_col and pd.notna(row[cat_col]) else "General"
+            unit = str(row[unit_col]).strip() if unit_col and pd.notna(row[unit_col]) else "PCS"
+            location = str(row[loc_col]).strip() if loc_col and pd.notna(row[loc_col]) else "-"
+            safety_stock = safe_int(row[safe_col]) if safe_col else 0
             stock = safe_int(row[stock_col]) if stock_col else 0
 
-            # 4. หาคอลัมน์ Safety Stock (จุดสั่งซื้อ) **จุดที่พังบ่อย**
-            safety_col = next((col for col in df.columns if col.lower() in ['safety_stock', 'safety stock', 'safety', 'จุดสั่งซื้อ', 'จุดสั่งซื้อ (safety stock)']), None)
-            safety_stock = safe_int(row[safety_col]) if safety_col else 0
-
-            # 5. ข้อมูลประกอบอื่นๆ
-            cat_col = next((col for col in df.columns if col.lower() in ['category', 'หมวดหมู่']), None)
-            category = str(row[cat_col]) if cat_col and pd.notna(row[cat_col]) else 'General'
-
-            unit_col = next((col for col in df.columns if col.lower() in ['unit', 'หน่วยนับ', 'หน่วย']), None)
-            unit = str(row[unit_col]) if unit_col and pd.notna(row[unit_col]) else 'PCS'
-
-            loc_col = next((col for col in df.columns if col.lower() in ['location', 'สถานที่เก็บ', 'สถานที่']), None)
-            location = str(row[loc_col]) if loc_col and pd.notna(row[loc_col]) else '-'
-
-            # --- เริ่มการอัปเดต DB ---
+            # --- บันทึกลง Database ---
             existing = conn.execute('SELECT id FROM products WHERE code = ?', (code,)).fetchone()
             
             if existing:
@@ -846,9 +842,11 @@ def import_excel():
 
         conn.commit()
         conn.close()
-        flash(f'✅ นำเข้าข้อมูลสำเร็จ (อัปเดต {updated_count}, เพิ่มใหม่ {inserted_count})', 'success')
+        flash(f'✅ นำเข้าสำเร็จ: อัปเดต {updated_count}, เพิ่มใหม่ {inserted_count}', 'success')
     except Exception as e:
-        flash(f'❌ เกิดข้อผิดพลาดร้ายแรง: {str(e)}', 'danger')
+        flash(f'❌ ผิดพลาด: {str(e)}', 'danger')
+        
+    return redirect(url_for('admin_dashboard'))
         
     return redirect(url_for('admin_dashboard'))
 
@@ -1005,7 +1003,7 @@ def filter_logs():
 @app.route('/admin/logout')
 def admin_logout():
     session.clear()
-    return redirect(url_for('admin_login'))
+    return redirect(url_for('index'))
 
 # --- ฟังก์ชันเบิกของแบบ FIFO ---
 def withdraw_fifo_logic(product_id, qty_to_withdraw, emp_id):
@@ -1075,7 +1073,7 @@ def add_product_ajax():
 
 @app.route('/admin/monthly_report')
 def monthly_report():
-    if not session.get('admin_logged_in'): return redirect(url_for('admin_login'))
+    if not session.get('admin_logged_in'): return redirect(url_for('index'))
     
     conn = get_db_connection()
     # ดึงข้อมูลการเบิกจ่ายที่ Approved แล้วในเดือนปัจจุบัน
@@ -1184,7 +1182,7 @@ def scan_product(product_code):
 @app.route('/admin/manage_zombies')
 def manage_zombies():
     if not session.get('admin_logged_in'): 
-        return redirect(url_for('admin_login'))
+        return redirect(url_for('index'))
     
     conn = get_db_connection()
     # ดึงรายชื่อพนักงานที่ is_locked = 1 เรียงตามเวลาล่าสุดที่ใช้งาน
@@ -1204,7 +1202,7 @@ def manage_zombies():
 @app.route('/admin/unlock_user/<emp_id>')
 def unlock_user(emp_id):
     if not session.get('admin_logged_in'): 
-        return redirect(url_for('admin_login'))
+        return redirect(url_for('index'))
     
     conn = get_db_connection()
     conn.execute("UPDATE users SET is_locked = 0 WHERE emp_id = ?", (emp_id,))
@@ -1551,4 +1549,5 @@ if __name__ == '__main__':
         scheduler.start()
         print(f"🚀 [STATUS] Scheduler ACTIVE at {alert_time} น.")
 
-    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=True) #สำหรับเขียนโค้ด
+    #app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False) #สำหรับใช้งาน

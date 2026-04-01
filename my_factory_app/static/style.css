@@ -1,58 +1,38 @@
-/* static/style.css */
-
+/* --- Global Styles --- */
 body {
     background-color: #f8f9fa;
     font-family: "Mitr", sans-serif;
-    /* แนะนำหาฟอนต์สวยๆ มาใส่เพิ่มได้ */
+    color: #212529;
 }
 
-/* ปรับแต่งตาราง Dark Mode */
-.table-dark {
-    background-color: #1e1e1e;
-}
-
-.table-qr-preview {
-    background: linear-gradient(135deg, #17a2b8 0%, #117a8b 100%);
-    color: white;
-    border: none;
-    border-radius: 20px;
-    padding: 5px 15px;
-    transition: 0.3s;
-}
-
-.btn-qr-preview {
-    background-color: #343a40;
-    color: #17a2b8;
-    border: 1px solid #17a2b8;
-    border-radius: 50px;
-    padding: 4px 12px;
-    font-size: 0.85rem;
-}
-
-.btn-qr-preview:hover {
-    background-color: #17a2b8;
-    color: white;
-    box-shadow: 0 0 10px rgba(23, 162, 184, 0.5);
-}
-
-/* ทำให้รหัสสินค้าดูเด่น */
+/* --- Badge & Tag Styles (บังคับใช้ตามที่คุณต้องการ) --- */
 code {
-    font-size: 1rem;
-    background: #2d2d2d;
-    padding: 2px 8px;
-    border-radius: 4px;
+    font-size: 0.9rem !important;
+    background-color: #e3f2fd !important; /* พื้นหลังสีฟ้าอ่อน */
+    color: #0d6efd !important; /* ตัวหนังสือสีน้ำเงิน */
+    padding: 4px 10px !important;
+    border-radius: 6px !important;
+    font-weight: 600 !important;
+    border: 1px solid #b6d4fe !important;
+    display: inline-block !important;
+    font-family: monospace;
 }
 
-.btn-outline-info {
-    border-radius: 8px;
-    padding: 2px 8px;
+.stock-tag {
+    font-size: 0.85rem;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background-color: #f1f3f5;
+    color: #495057;
+    font-weight: 500;
 }
 
-.btn-outline-info:hover {
-    box-shadow: 0 0 8px rgba(23, 162, 184, 0.4);
+.badge.bg-info {
+    background-color: #e3f2fd !important;
+    color: #0d47a1 !important;
 }
 
-/* การ์ดสินค้า */
+/* --- Card & Item Styles --- */
 .item-card {
     background: white;
     border: 1px solid #e9ecef;
@@ -69,105 +49,6 @@ code {
     border-color: #0d6efd;
 }
 
-/* ป้ายแสดงรหัสสินค้า */
-.code-tag {
-    font-family: monospace;
-    font-weight: bold;
-    color: #0d6efd;
-    background-color: #e7f1ff;
-    padding: 2px 8px;
-    border-radius: 6px;
-    font-size: 0.9rem;
-}
-
-/* ป้ายแสดงสต็อก */
-.stock-tag {
-    font-size: 0.85rem;
-    padding: 4px 10px;
-    border-radius: 20px;
-    background-color: #f1f3f5;
-    color: #495057;
-    font-weight: 500;
-}
-
-/* หน้า Login */
-.login-container {
-    height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(135deg, #eef2f3 0%, #8e9eab 100%);
-}
-
-.login-card {
-    width: 100%;
-    max-width: 420px;
-    padding: 2.5rem;
-    border-radius: 20px;
-    background: white;
-    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-}
-
-.logo-icon {
-    font-size: 4rem;
-    margin-bottom: 1rem;
-    display: block;
-}
-
-/* Tabs */
-.nav-pills .nav-link {
-    color: #495057;
-    border-radius: 50px;
-    padding: 8px 24px;
-    font-weight: 500;
-}
-
-.nav-pills {
-    background-color: #0d6efd;
-    color: white;
-    box-shadow: 0 4px 10px rgba(13, 110, 253, 0.3);
-}
-
-/* Modal */
-.modal-header {
-    border-top-left-radius: 12px;
-    border-top-right-radius: 12px;
-}
-
-/* static/style.css เพิ่มต่อท้าย */
-
-.input-group-text {
-    background-color: white;
-    border-right: none;
-}
-
-.input-group .form-control {
-    border-left: none;
-}
-
-.input-group .form-control:focus {
-    box-shadow: none;
-    border-color: #ced4da;
-    /* สีขอบปกติ ไม่ให้เป็นสีฟ้า */
-}
-
-/* ทำให้ปุ่มหมวดหมู่ดูนุ่มนวล */
-.btn-outline-secondary:hover {
-    background-color: #e2e6ea;
-    color: #000;
-    border-color: #6c757d;
-}
-
-.hover-shadow {
-    transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.hover-shadow:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1) !important;
-}
-
-/* static/style.css */
 .item-row {
     transition: all 0.3s cubic-bezier(.25, .8, .25, 1);
     border-radius: 15px !important;
@@ -180,18 +61,32 @@ code {
     border-color: #0d6efd !important;
 }
 
+/* --- Button Styles --- */
+.btn-qr-preview {
+    background-color: #343a40;
+    color: #17a2b8;
+    border: 1px solid #17a2b8;
+    border-radius: 50px;
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    transition: 0.3s;
+}
+
+.btn-qr-preview:hover {
+    background-color: #17a2b8;
+    color: white;
+    box-shadow: 0 0 10px rgba(23, 162, 184, 0.5);
+}
+
 .btn-warning {
     background: #ffc107;
     color: #212529;
     font-weight: 700;
 }
 
-.badge.bg-info {
-    background-color: #e3f2fd !important;
-    color: #0d47a1 !important;
-}
+/* --- Table & Modal Management --- */
+.table-dark { background-color: #1e1e1e; }
 
-/* Table Management Inside Modal */
 #userManagementModal thead th {
     position: sticky;
     top: 0;
@@ -205,14 +100,39 @@ code {
     background-color: rgba(13, 110, 253, 0.05) !important;
 }
 
-/* บังคับให้ป้ายรหัสสินค้า (Code) เป็นสีฟ้าอ่อนทั้งหมดเสมอ */
-code {
-    font-size: 0.9rem !important;
-    background-color: #e3f2fd !important; /* พื้นหลังสีฟ้าอ่อน */
-    color: #0d6efd !important; /* ตัวหนังสือสีน้ำเงิน (ให้อ่านง่าย) */
-    padding: 4px 10px !important;
-    border-radius: 6px !important;
-    font-weight: 600 !important;
-    border: 1px solid #b6d4fe !important; /* ขอบสีฟ้าให้ดูมีมิติ */
-    display: inline-block !important;
+/* --- Layout Utility --- */
+.hover-shadow {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.hover-shadow:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* --- Login System (Sliding Fix) --- */
+/* ส่วนนี้จะช่วยลบเส้นขอบที่บั๊กในหน้า Login */
+.auth-container .input-group-text {
+    background-color: transparent !important;
+    border: none !important;
+}
+
+.auth-container .form-control {
+    border: none !important;
+    background-color: transparent !important;
+}
+
+.auth-container .form-control:focus {
+    box-shadow: none !important;
+}
+
+/* ส่วนหัวตาราง Nav Pills */
+.nav-pills {
+    background-color: transparent;
+    box-shadow: none;
+}
+
+.nav-pills .nav-link.active {
+    background-color: #0d6efd;
+    box-shadow: 0 4px 10px rgba(13, 110, 253, 0.3);
 }

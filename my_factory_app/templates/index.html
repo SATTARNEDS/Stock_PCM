@@ -4,87 +4,334 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>เข้าสู่ระบบ - Stock System</title>
+    <title>Stock System - Login</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@200;300;400;500;600;700&display=swap"
-        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@300;400;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
     <style>
+        :root {
+            --primary: #0d6efd;
+            --admin-dark: #1e293b;
+            --white: #ffffff;
+            --transition: all 0.6s cubic-bezier(0.7, 0, 0.2, 1);
+        }
+
         body {
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            height: 100vh;
+            background: #f1f5f9;
+            min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             font-family: 'Mitr', sans-serif;
+            margin: 0;
+            padding: 15px;
         }
 
-        .login-card {
-            background: white;
-            padding: 2.5rem;
-            border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        /* Container หลัก - แก้ไขความสูงและความกว้างให้สมดุล */
+        .auth-container {
+            position: relative;
+            background: var(--white);
+            width: 900px;
+            max-width: 100%;
+            min-height: 580px;
+            border-radius: 32px;
+            box-shadow: 0 25px 70px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            display: flex;
+        }
+
+        /* ฝั่งฟอร์ม (สีขาว) */
+        .form-box {
+            width: 50%;
+            padding: 40px;
+            transition: var(--transition);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1;
+        }
+
+        .form-content {
             width: 100%;
-            max-width: 400px;
+            max-width: 340px;
+            /* คุมความกว้างฟอร์ม */
+            animation: fadeIn 0.5s ease forwards;
         }
 
-        .logo-icon {
-            font-size: 4rem;
-            margin-bottom: 1rem;
+        /* แผงด้านข้าง (สีน้ำเงิน/มืด) */
+        .side-panel {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            width: 50%;
+            height: 100%;
+            background: linear-gradient(135deg, #0d6efd 0%, #084298 100%);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 40px;
+            transition: var(--transition);
+            z-index: 2;
+        }
+
+        /* สลับฝั่งเมื่อเป็น Admin */
+        @media (min-width: 768px) {
+            .auth-container.is-admin .form-box {
+                transform: translateX(100%);
+            }
+
+            .auth-container.is-admin .side-panel {
+                transform: translateX(-100%);
+                background: var(--admin-dark);
+            }
+        }
+
+        /* Mobile Responsive - แก้ไขให้ซ้อนกันแนวตั้ง */
+        @media (max-width: 767px) {
+            .auth-container {
+                flex-direction: column;
+                width: 100%;
+                max-width: 420px;
+                min-height: auto;
+            }
+
+            .form-box {
+                width: 100%;
+                padding: 40px 25px;
+                order: 2;
+            }
+
+            .side-panel {
+                position: relative;
+                left: 0;
+                width: 100%;
+                height: auto;
+                padding: 40px 20px;
+                order: 1;
+            }
+
+            .auth-container.is-admin .side-panel {
+                background: var(--admin-dark);
+            }
+
+            .auth-container.is-admin .form-box {
+                transform: none;
+            }
+        }
+
+        /* Input Styling - แก้ไขบั๊กขอบและ Padding */
+        .input-group-modern {
+            background: #f8fafc;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 16px;
+            margin-bottom: 15px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            width: 100%;
+            transition: 0.3s;
+        }
+
+        .input-group-modern:focus-within {
+            border-color: var(--primary);
+            background: white;
+        }
+
+        .input-group-modern .input-group-text {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            padding-left: 18px;
+        }
+
+        .input-group-modern .form-control {
+            border: none !important;
+            background: transparent !important;
+            padding: 14px 12px;
+            box-shadow: none !important;
+        }
+
+        /* Button Styling */
+        .btn-main {
+            background: var(--primary);
+            color: white;
+            border-radius: 16px;
+            padding: 14px;
+            font-weight: 600;
+            border: none;
+            width: 100%;
+            transition: 0.3s;
+            margin-top: 10px;
+        }
+
+        .btn-main:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(13, 110, 253, 0.2);
+        }
+
+        .is-admin .btn-main {
+            background: var(--admin-dark);
+        }
+
+        .btn-outline-white {
+            background: transparent;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            color: white;
+            border-radius: 16px;
+            padding: 10px 30px;
+            margin-top: 15px;
+            transition: 0.3s;
+        }
+
+        .btn-outline-white:hover {
+            background: white;
+            color: var(--primary);
+            border-color: white;
+        }
+
+        /* Alert Styling - แก้ไขบั๊กแถบแดงยาวเกินไป */
+        .alert-mini {
+            padding: 12px 16px;
+            font-size: 0.85rem;
+            border-radius: 14px;
+            margin-bottom: 20px;
+            border: none;
+            display: flex;
+            align-items: center;
+            background-color: #fee2e2;
+            color: #b91c1c;
+            width: 100%;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
     </style>
 </head>
 
 <body>
 
-    <div class="login-container w-100 px-3">
-        <div class="login-card mx-auto text-center">
-            <div class="logo-icon">🏭</div>
-            <h4 class="fw-bold mb-2">Stock System</h4>
-            <p class="text-muted mb-4 small">PPE, Medicine, Maid Equipment, Stationary, IT stock</p>
+    <div class="auth-container" id="authContainer">
 
-            {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-            {% for category, message in messages %}
-            <div class="alert alert-{{ category }} shadow-sm rounded-3 small text-start">{{ message }}</div>
-            {% endfor %}
-            {% endif %}
-            {% endwith %}
-            <div class="card-body p-4">
-                <form action="/" method="POST">
-                    <div class="mb-3">
-                        <label class="form-label">รหัสพนักงาน</label>
-                        <input type="text" name="emp_id" class="form-control form-control-lg rounded-pill text-center"
-                            placeholder="กรอกรหัสพนักงาน" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-lg w-100 rounded-pill mb-3">
-                        เข้าสู่ระบบเบิกของ
-                    </button>
-                </form>
-                <!--
-                <div class="text-center">
-                    <div class="hr-text text-muted mb-3">หรือ</div>
-                    <a href="{{ url_for('scanner_page') }}" class="btn btn-dark btn-lg w-100 rounded-pill shadow-sm">
-                        <i class="fas fa-camera me-2 text-warning"></i>สแกน QR Code สินค้า
-                    </a>
+        <div class="form-box">
+
+            <div class="form-content" id="userForm">
+                <h2 class="text-center fw-bold mb-1">ยินดีต้อนรับ</h2>
+                <p class="text-muted text-center mb-4 small">ระบุรหัสพนักงานเพื่อเข้าสู่ระบบ</p>
+
+                {% with messages = get_flashed_messages(category_filter=['user_error']) %}
+                {% if messages %}
+                {% for message in messages %}
+                <div class="alert-mini shadow-sm mb-3">
+                    <i class="fas fa-exclamation-circle me-2"></i> {{ message }}
                 </div>
-                -->
+                {% endfor %}
+                {% endif %}
+                {% endwith %}
+
+                <form action="/" method="POST" id="loginFormUser">
+                    <div class="input-group-modern">
+                        <span class="input-group-text"><i class="fas fa-id-card"></i></span>
+                        <input type="text" name="emp_id" class="form-control" placeholder="Employee ID" autofocus
+                            autocomplete="off">
+                    </div>
+                    <button type="submit" class="btn-main">เข้าสู่ระบบเบิกของ</button>
+                </form>
             </div>
 
-            <div class="mt-4 pt-3 border-top">
-                <a href="/admin_login" class="text-decoration-none text-secondary small">
-                    <i class="fas fa-lock me-1"></i> สำหรับผู้ดูแลระบบ (Admin)
-                </a>
+            <div class="form-content" id="adminForm" style="display: none;">
+                <h2 class="text-center fw-bold mb-1">Admin Access</h2>
+                <p class="text-muted text-center mb-4 small">ลงชื่อเข้าใช้สิทธิ์ผู้ดูแลระบบ</p>
+
+                {% with messages = get_flashed_messages(category_filter=['admin_error']) %}
+                {% if messages %}
+                {% for message in messages %}
+                <div class="alert-mini shadow-sm mb-3">
+                    <i class="fas fa-shield-alt me-2"></i> {{ message }}
+                </div>
+                {% endfor %}
+                {% endif %}
+                {% endwith %}
+
+                <form action="/admin_login" method="POST" id="loginFormAdmin">
+                    <div class="input-group-modern">
+                        <span class="input-group-text"><i class="fas fa-user"></i></span>
+                        <input type="text" name="username" class="form-control" placeholder="Username"
+                            autocomplete="off">
+                    </div>
+                    <div class="input-group-modern">
+                        <span class="input-group-text"><i class="fas fa-key"></i></span>
+                        <input type="password" name="password" class="form-control" placeholder="Password">
+                    </div>
+                    <button type="submit" class="btn-main">ลงชื่อเข้าใช้ระบบ</button>
+                </form>
             </div>
         </div>
+
+        <div class="side-panel">
+            <div id="sideContentUser">
+                <div style="font-size: 3.5rem; margin-bottom: 1rem;">🏭</div>
+                <h3 class="fw-bold">STOCK SYSTEM</h3>
+                <p class="small opacity-75 px-3">ระบบจัดการเบิกจ่ายพัสดุอุปกรณ์<br>PPE, Medicine, Maid Equipment, Stationary, IT stock</p>
+                <button class="btn-outline-white" onclick="toggleMode(true)">แอดมินระบบ?</button>
+            </div>
+
+            <div id="sideContentAdmin" style="display: none;">
+                <div style="font-size: 3.5rem; margin-bottom: 1rem;"><i class="fas fa-user-shield"></i></div>
+                <h3 class="fw-bold">ADMIN MODE</h3>
+                <p class="small opacity-75 px-3">เข้าถึงสิทธิ์การจัดการหลังบ้าน<br>และดูรายงานสรุปทั้งหมด</p>
+                <button class="btn-outline-white" onclick="toggleMode(false)">ไปหน้าพนักงาน</button>
+            </div>
+        </div>
+
     </div>
 
     <script>
-        document.addEventListener("DOMContentLoaded", function () {
-            const empInput = document.getElementById('empIdInput');
-            if (empInput) empInput.focus();
-        });
+        function toggleMode(isAdmin) {
+            const container = document.getElementById('authContainer');
+            const sideUser = document.getElementById('sideContentUser');
+            const sideAdmin = document.getElementById('sideContentAdmin');
+            const userForm = document.getElementById('userForm');
+            const adminForm = document.getElementById('adminForm');
+
+            if (isAdmin) {
+                container.classList.add('is-admin');
+                setTimeout(() => {
+                    sideUser.style.display = 'none'; sideAdmin.style.display = 'block';
+                    userForm.style.display = 'none'; adminForm.style.display = 'block';
+                }, 300);
+            } else {
+                container.classList.remove('is-admin');
+                setTimeout(() => {
+                    sideUser.style.display = 'block'; sideAdmin.style.display = 'none';
+                    userForm.style.display = 'block'; adminForm.style.display = 'none';
+                }, 300);
+            }
+        }
+
+        // เช็ค Error จากฝั่ง Admin เพื่อพลิกหน้าอัตโนมัติ
+        window.onload = () => {
+            const hasAdminError = {{ 'true' if get_flashed_messages(category_filter = ['admin_error']) else 'false'
+        }};
+        if (hasAdminError || window.location.search.includes('admin')) {
+            toggleMode(true);
+        }
+        }
     </script>
 </body>
 
