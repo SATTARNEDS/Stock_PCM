@@ -1,6 +1,5 @@
 import sqlite3
 import pandas as pd
-import requests
 import qrcode
 import io
 import pytz
