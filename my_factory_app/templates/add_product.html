@@ -139,11 +139,11 @@
                                     {% for lot in active_lots %}
                                     <tr>
                                         <td class="ps-3">
-                                            <div class="fw-bold">{{ lot['code'] }}</div>
+                                            <div class="fw-medium">{{ lot['code'] }}</div>
                                             <div class="small text-muted">{{ lot['name'] }}</div>
                                         </td>
                                         <td><span class="badge bg-secondary">{{ lot['lot_number'] }}</span></td>
-                                        <td class="text-center fw-bold text-primary">{{ lot['qty'] }}</td>
+                                        <td class="text-center fw-medium text-primary">{{ lot['qty'] }}</td>
                                         <td>{{ lot['received_date'] }}</td>
                                         <td>{{ lot['expiry_date'] if lot['expiry_date'] else '-' }}</td>
                                         <td>

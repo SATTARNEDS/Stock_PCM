@@ -1,27 +1,46 @@
 {% for item in items %}
-<tr class="align-middle">
+<tr class="align-middle {% if item['is_active'] == 0 %}table-secondary opacity-75{% endif %}">
     <td class="ps-4"><code>{{ item['code'] }}</code></td>
-    <td class="fw-medium">{{ item['name'] }}</td>
+    <td class="fw-medium">
+        {{ item['name'] }}
+        {% if item['is_active'] == 0 %}
+        <span class="badge bg-danger ms-1" style="font-size: 0.6rem;">ปิดใช้งาน</span>
+        {% endif %}
+    </td>
     <td><span class="badge bg-light text-dark border">{{ item['category'] }}</span></td>
-    <td class="text-center fw-bold {{ 'text-danger' if item['stock'] <= item['safety_stock'] else 'text-success' }}">
+    <td class="text-center fw-medium {{ 'text-danger' if item['stock'] <= item['safety_stock'] else 'text-success' }}">
         {{ item['stock'] }}
     </td>
     <td class="text-center text-muted">{{ item['safety_stock'] }}</td>
     <td class="text-center">
-        <a href="{{ url_for('generate_qr', code=item['code']) }}" target="_blank" class="btn btn-sm btn-outline-info rounded-circle" title="ดู QR Code">
+        <a href="{{ url_for('generate_qr', code=item['code']) }}" target="_blank"
+            class="btn btn-sm btn-outline-info rounded-circle" title="ดู QR Code">
             <i class="fas fa-qrcode"></i>
         </a>
     </td>
     <td class="text-center text-nowrap">
-        <button class="btn btn-sm btn-light text-success border shadow-sm rounded-circle me-1 hover-shadow" 
-                title="เพิ่มสต็อก (Add Lot)" 
-                onclick="openAddLotModal('{{ item['code'] }}')">
+        <button
+            class="btn btn-sm {% if item['is_active'] == 1 %}btn-light text-danger{% else %}btn-danger text-white{% endif %} border shadow-sm rounded-circle"
+            title="เปิด/ปิดใช้งาน"
+            onclick="toggleProductStatus('{{ item['id'] }}', '{{ item['name'] }}', {{ item['is_active'] }})">
+            <i class="fas {% if item['is_active'] == 1 %}fa-eye-slash{% else %}fa-eye{% endif %}"></i>
+        </button>
+
+        <button class="btn btn-sm btn-light text-success border shadow-sm rounded-circle me-1 hover-shadow"
+            title="เพิ่มสต็อก (Add Lot)" onclick="openAddLotModal('{{ item['code'] }}')" {% if item['is_active']==0 %}
+            disabled style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
             <i class="fas fa-plus"></i>
         </button>
-        <button class="btn btn-sm btn-light text-warning border shadow-sm rounded-circle hover-shadow" 
-                title="แก้ไข" 
-                onclick="editProductModal('{{ item['code'] }}')">
+
+        <button class="btn btn-sm btn-light text-warning border shadow-sm rounded-circle hover-shadow" title="แก้ไข"
+            onclick="editProductModal('{{ item['code'] }}')" {% if item['is_active']==0 %} disabled
+            style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
             <i class="fas fa-edit"></i>
+        </button>
+
+        <button class="btn btn-sm btn-light text-danger border shadow-sm rounded-circle me-1"
+            title="ตัดจำหน่ายสินค้า (Scrap)" onclick="openWriteOffModal('{{ item.code }}')">
+            <i class="fas fa-trash-alt"></i>
         </button>
     </td>
 </tr>
