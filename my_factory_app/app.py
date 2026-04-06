@@ -6,7 +6,7 @@ import qrcode
 import io
 import pytz
 from io import BytesIO
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_apscheduler import APScheduler
@@ -57,12 +57,19 @@ def get_thailand_time():
     tz = pytz.timezone('Asia/Bangkok')
     return datetime.now(tz)
 
-def standardize_date(date_str):
+def standardize_date(date_value):
     """แปลงวันที่ให้เป็น YYYY-MM-DD เสมอก่อนลง Database"""
+    if date_value is None:
+        return ""
+    if isinstance(date_value, float) and math.isnan(date_value):
+        return ""
+    if isinstance(date_value, (datetime, date)):
+        return date_value.strftime('%Y-%m-%d')
+
+    date_str = str(date_value).strip()
     if not date_str:
         return ""
-    
-    date_str = date_str.strip()
+
     # ถ้ามีเครื่องหมาย / แปลว่าเป็น DD/MM/YYYY ให้สลับตำแหน่ง
     if '/' in date_str:
         try:
@@ -72,6 +79,7 @@ def standardize_date(date_str):
                 return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
         except:
             pass
+
     return date_str # ถ้าเป็น YYYY-MM-DD อยู่แล้ว หรือแปลงไม่ได้ ก็คืนค่าเดิมไป
 
 # ==========================================
@@ -379,6 +387,8 @@ def api_search_products():
     emp_id = request.args.get('emp_id')
     search_query = request.args.get('search', '').strip()
     category_filter = request.args.get('category', '').strip()
+    page = request.args.get('page', 1, type=int)
+    per_page = 30
 
     conn = get_db_connection()
     user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
@@ -391,29 +401,71 @@ def api_search_products():
         elif 'CC' in user['location'] or 'Coil Center' in user['location']:
             location_condition = " AND (location LIKE '%Coil Center%' OR location LIKE '%CC%' OR location = 'General' OR location IS NULL)"
 
-    query = f'SELECT * FROM products WHERE 1=1 AND is_active = 1 {location_condition}'
-    params = []
-    
-    if search_query:
-        query += ' AND (name LIKE ? OR code LIKE ?)'
-        params.extend([f'%{search_query}%', f'%{search_query}%'])
     if category_filter:
-        query += ' AND category = ?'
-        params.append(category_filter)
-
-    products_list = conn.execute(query, params).fetchall()
-    
-    # จัดกลุ่มสินค้าตามหมวดหมู่
-    products_by_category = {}
-    for item in products_list:
-        cat = item['category']
-        if cat not in products_by_category: products_by_category[cat] = []
-        products_by_category[cat].append(item)
+        # Pagination ในหมวดหมู่เฉพาะ
+        base_query = f'SELECT * FROM products WHERE category = ? AND is_active = 1 {location_condition}'
+        count_query = f'SELECT COUNT(*) as count FROM products WHERE category = ? AND is_active = 1 {location_condition}'
+        params = [category_filter]
+        count_params = [category_filter]
+        
+        if search_query:
+            base_query += ' AND (name LIKE ? OR code LIKE ?)'
+            count_query += ' AND (name LIKE ? OR code LIKE ?)'
+            params.extend([f'%{search_query}%', f'%{search_query}%'])
+            count_params.extend([f'%{search_query}%', f'%{search_query}%'])
+        
+        total_count = conn.execute(count_query, count_params).fetchone()['count']
+        offset = (page - 1) * per_page
+        paged_query = f"{base_query} ORDER BY code ASC LIMIT ? OFFSET ?"
+        params.extend([per_page, offset])
+        
+        products_list = conn.execute(paged_query, params).fetchall()
+        products_by_category = {category_filter: products_list}
+        has_more = offset + per_page < total_count
+        
+    elif search_query:
+        # Pagination ในผลการค้นหา
+        base_query = f'SELECT * FROM products WHERE is_active = 1 {location_condition} AND (name LIKE ? OR code LIKE ?)'
+        count_query = f'SELECT COUNT(*) as count FROM products WHERE is_active = 1 {location_condition} AND (name LIKE ? OR code LIKE ?)'
+        params = [f'%{search_query}%', f'%{search_query}%']
+        count_params = [f'%{search_query}%', f'%{search_query}%']
+        
+        total_count = conn.execute(count_query, count_params).fetchone()['count']
+        offset = (page - 1) * per_page
+        paged_query = f"{base_query} ORDER BY code ASC LIMIT ? OFFSET ?"
+        params.extend([per_page, offset])
+        
+        products_list = conn.execute(paged_query, params).fetchall()
+        # จัดกลุ่มตามหมวดหมู่
+        products_by_category = {}
+        for item in products_list:
+            cat = item['category']
+            if cat not in products_by_category: products_by_category[cat] = []
+            products_by_category[cat].append(item)
+        has_more = offset + per_page < total_count
+        
+    else:
+        # หมวดหมู่ต่อหน้า (เมื่อเลือก "ทั้งหมด")
+        categories = conn.execute(f"SELECT DISTINCT category FROM products WHERE is_active = 1 {location_condition} ORDER BY category").fetchall()
+        categories_list = [row['category'] for row in categories]
+        
+        if page > len(categories_list):
+            conn.close()
+            return jsonify({'html': '', 'has_more': False, 'next_page': page})
+        
+        selected_category = categories_list[page - 1]
+        query = f'SELECT * FROM products WHERE category = ? AND is_active = 1 {location_condition} ORDER BY code ASC'
+        products_list = conn.execute(query, [selected_category]).fetchall()
+        products_by_category = {selected_category: products_list}
+        has_more = page < len(categories_list)
 
     conn.close()
-    
-    # ส่งกลับไปที่ไฟล์ template ย่อย (ที่เราจะสร้างใหม่)
-    return render_template('product_list_partial.html', products=products_by_category, user=user)
+    html = render_template('product_list_partial.html', products=products_by_category, user=user)
+    return jsonify({
+        'html': html,
+        'has_more': has_more,
+        'next_page': page + 1
+    })
 
 # ==========================================
 # 🔐 ส่วนของแอดมิน (ADMIN)
@@ -817,24 +869,27 @@ def add_product():
     conn = get_db_connection()
 
     try:
-        # 2. เพิ่มสินค้าลงตารางหลัก ***(จุดสำคัญ: บังคับให้ expiry_date เป็นค่าว่าง)***
-        cursor = conn.execute('''
-            INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, '')
-        ''', (code, name, category, unit, location, safety_stock, stock))
+        # 2. เพิ่มสินค้าลงตารางหลัก พร้อมบันทึกข้อมูล Lot ถ้ามี
+        if stock > 0:
+            from datetime import datetime
+            lot_number = datetime.now().strftime('%d%m%Y') + "-NEW"
+            receive_date = datetime.now().strftime('%Y-%m-%d')
+            cursor = conn.execute('''
+                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_no, received_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_number, receive_date))
+        else:
+            cursor = conn.execute('''
+                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (code, name, category, unit, location, safety_stock, stock, ''))
         
         product_id = cursor.lastrowid
 
         # 3. ถ้ามีการใส่สต็อกเริ่มต้นมาด้วย ให้สร้าง "Lot แรก" อัตโนมัติ
         if stock > 0:
-            from datetime import datetime
-            # สร้างเลข Lot อัตโนมัติจากวันที่ เช่น 06042026-NEW
-            lot_number = datetime.now().strftime('%d%m%Y') + "-NEW"
-            receive_date = datetime.now().strftime('%Y-%m-%d')
-            
-            # *** เอาวันหมดอายุมาใส่ในตาราง Lot แทน ***
             conn.execute('''
-                INSERT INTO product_lots (product_id, lot_number, qty, receive_date, expiry_date)
+                INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
                 VALUES (?, ?, ?, ?, ?)
             ''', (product_id, lot_number, stock, receive_date, expiry_date))
 
@@ -884,23 +939,25 @@ def export_excel():
         location_filter = "" # ดึงทั้งหมด
         filename = "Inventory_ALL.xlsx"
         
-    # 2. Query ดึงข้อมูลจากตารางของ (Inventory)
+    # 2. Query ดึงข้อมูลสินค้าและ Lot ที่เกี่ยวข้อง
     query = f'''
         SELECT 
-            code as 'รหัสของ',
-            name as 'ชื่อของ',
-            category as 'หมวดหมู่',
-            unit as 'หน่วยนับ',
-            location as 'สถานที่เก็บ (Location)',
-            safety_stock as 'จุดสั่งซื้อ (Safety Stock)',
-            stock as 'จำนวนคงเหลือ',
-            CASE WHEN is_active = 1 THEN 'เปิดใช้งาน' ELSE 'ปิดใช้งาน' END as 'สถานะการใช้งาน', -- เพิ่มส่วนนี้
-            lot_no as 'Lot No.',
-            received_date as 'วันที่รับเข้า',
-            expiry_date as 'วันหมดอายุ'
-        FROM products
+            p.code as 'รหัสของ',
+            p.name as 'ชื่อของ',
+            p.category as 'หมวดหมู่',
+            p.unit as 'หน่วยนับ',
+            p.location as 'สถานที่เก็บ (Location)',
+            p.safety_stock as 'จุดสั่งซื้อ (Safety Stock)',
+            p.stock as 'จำนวนคงเหลือ',
+            CASE WHEN p.is_active = 1 THEN 'เปิดใช้งาน' ELSE 'ปิดใช้งาน' END as 'สถานะการใช้งาน',
+            COALESCE(pl.lot_number, p.lot_no, '') as 'Lot No.',
+            COALESCE(pl.received_date, p.received_date, '') as 'วันที่รับเข้า',
+            COALESCE(pl.expiry_date, p.expiry_date, '') as 'วันหมดอายุ',
+            COALESCE(pl.qty, 0) as 'จำนวนใน Lot'
+        FROM products p
+        LEFT JOIN product_lots pl ON pl.product_id = p.id
         {location_filter}
-        ORDER BY location ASC, code ASC
+        ORDER BY p.location ASC, p.code ASC, pl.received_date ASC
     '''
     
     # อ่านข้อมูลเข้า Pandas
@@ -981,6 +1038,17 @@ def import_excel():
             safety_stock = safe_int(row[safe_col]) if safe_col else 0
             stock = safe_int(row[stock_col]) if stock_col else 0
 
+            # --- ดึงข้อมูล Lot / วันที่รับเข้า / วันหมดอายุ ---
+            lot_col = next((col for col in df.columns if 'lot' in col.lower()), None)
+            received_col = next((col for col in df.columns if 'วันที่รับเข้า' in col or 'received_date' in col.lower() or 'received date' in col.lower()), None)
+            expiry_col = next((col for col in df.columns if 'วันหมดอายุ' in col or 'expiry_date' in col.lower() or 'expiry date' in col.lower()), None)
+            lot_qty_col = next((col for col in df.columns if 'จำนวนใน lot' in col.lower() or 'lot qty' in col.lower() or 'lot quantity' in col.lower()), None)
+
+            lot_no = str(row[lot_col]).strip() if lot_col and pd.notna(row[lot_col]) else ''
+            received_date = standardize_date(row[received_col]) if received_col and pd.notna(row[received_col]) else ''
+            expiry_date = standardize_date(row[expiry_col]) if expiry_col and pd.notna(row[expiry_col]) else ''
+            lot_qty = safe_int(row[lot_qty_col]) if lot_qty_col and pd.notna(row[lot_qty_col]) else None
+
             # --- ส่วนการเช็คสถานะการใช้งาน ---
             active_col = next((col for col in df.columns if 'สถานะ' in col), None)
             is_active = 1 # ค่าเริ่มต้น
@@ -994,16 +1062,34 @@ def import_excel():
             if existing:
                 conn.execute('''
                     UPDATE products 
-                    SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=? 
+                    SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?, lot_no=?, received_date=?, expiry_date=? 
                     WHERE id=?
-                ''', (name, stock, safety_stock, category, unit, location, is_active, existing['id']))
+                ''', (name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date, existing['id']))
+                product_id = existing['id']
                 updated_count += 1
             else:
-                conn.execute('''
-                    INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock, is_active) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
-                ''', (code, name, stock, safety_stock, category, unit, location, is_active))
+                cursor = conn.execute('''
+                    INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock, is_active, lot_no, received_date, expiry_date) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
+                ''', (code, name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date))
+                product_id = cursor.lastrowid
                 inserted_count += 1
+
+            # --- จัดการ product_lots ถ้ามี Lot No. ---
+            if lot_no:
+                lot_qty = stock if lot_qty is None else lot_qty
+                existing_lot = conn.execute('SELECT id FROM product_lots WHERE product_id = ? AND lot_number = ?', (product_id, lot_no)).fetchone()
+                if existing_lot:
+                    conn.execute('''
+                        UPDATE product_lots
+                        SET qty = ?, received_date = ?, expiry_date = ?
+                        WHERE id = ?
+                    ''', (lot_qty, received_date, expiry_date, existing_lot['id']))
+                else:
+                    conn.execute('''
+                        INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (product_id, lot_no, lot_qty, received_date, expiry_date))
 
         conn.commit()
         conn.close()

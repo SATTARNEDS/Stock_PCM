@@ -1,10 +1,13 @@
 {% for item in items %}
-<tr class="align-middle {% if item['is_active'] == 0 %}table-secondary opacity-75{% endif %}">
+<tr class="align-middle {% if item['stock'] <= 0 %}table-danger{% elif item['is_active'] == 0 %}table-secondary opacity-75 text-muted{% endif %}">
     <td class="ps-4"><code>{{ item['code'] }}</code></td>
-    <td class="fw-medium">
+    <td class="fw-medium {% if item['is_active'] == 0 %}text-muted{% endif %}">
         {{ item['name'] }}
         {% if item['is_active'] == 0 %}
         <span class="badge bg-danger ms-1" style="font-size: 0.6rem;">ปิดใช้งาน</span>
+        {% endif %}
+        {% if item['stock'] <= 0 %}
+        <span class="badge bg-danger ms-1" style="font-size: 0.6rem;">หมดสต็อก</span>
         {% endif %}
     </td>
     <td><span class="badge bg-light text-dark border">{{ item['category'] }}</span></td>
@@ -26,20 +29,20 @@
             <i class="fas {% if item['is_active'] == 1 %}fa-eye-slash{% else %}fa-eye{% endif %}"></i>
         </button>
 
-        <button class="btn btn-sm btn-light text-success border shadow-sm rounded-circle me-1 hover-shadow"
-            title="เพิ่มสต็อก (Add Lot)" onclick="openAddLotModal('{{ item['code'] }}')" {% if item['is_active']==0 %}
+        <button class="btn btn-sm btn-light text-success border shadow-sm rounded-circle me-1 hover-shadow {% if item['is_active'] == 0 %}disabled{% endif %}"
+            title="เพิ่มสต็อก (Add Lot)" onclick="{% if item['is_active'] == 1 %}openAddLotModal('{{ item['code'] }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %}
             disabled style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
             <i class="fas fa-plus"></i>
         </button>
 
-        <button class="btn btn-sm btn-light text-warning border shadow-sm rounded-circle hover-shadow" title="แก้ไข"
-            onclick="editProductModal('{{ item['code'] }}')" {% if item['is_active']==0 %} disabled
+        <button class="btn btn-sm btn-light text-warning border shadow-sm rounded-circle hover-shadow {% if item['is_active'] == 0 %}disabled{% endif %}" title="แก้ไข"
+            onclick="{% if item['is_active'] == 1 %}editProductModal('{{ item['code'] }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %} disabled
             style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
             <i class="fas fa-edit"></i>
         </button>
 
-        <button class="btn btn-sm btn-light text-danger border shadow-sm rounded-circle me-1"
-            title="ตัดจำหน่ายสินค้า (Scrap)" onclick="openWriteOffModal('{{ item.code }}')">
+        <button class="btn btn-sm btn-light text-danger border shadow-sm rounded-circle me-1 {% if item['is_active'] == 0 %}disabled{% endif %}"
+            title="ตัดจำหน่ายสินค้า (Scrap)" onclick="{% if item['is_active'] == 1 %}openWriteOffModal('{{ item['code'] }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %} disabled style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
             <i class="fas fa-trash-alt"></i>
         </button>
     </td>

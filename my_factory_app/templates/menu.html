@@ -147,13 +147,11 @@
                     data-bs-target="#historyModal">
                     <i class="fas fa-history me-1"></i> ประวัติ
                 </button>
-                <button onclick="filterCategory('')"
-                    class="btn btn-sm rounded-pill px-3 cat-btn {% if not current_category %}btn-dark{% else %}btn-outline-dark{% endif %}">
+                <button type="button" data-category="" class="btn btn-sm rounded-pill px-3 cat-btn {% if not current_category %}btn-dark{% else %}btn-outline-dark{% endif %}">
                     ทั้งหมด
                 </button>
                 {% for cat in all_categories %}
-                <button onclick="filterCategory('{{ cat }}')"
-                    class="btn btn-sm rounded-pill px-3 cat-btn {% if current_category == cat %}btn-primary{% else %}btn-outline-primary{% endif %}">
+                <button type="button" data-category="{{ cat|e }}" class="btn btn-sm rounded-pill px-3 cat-btn {% if current_category == cat %}btn-primary{% else %}btn-outline-primary{% endif %}">
                     {{ cat }}
                 </button>
                 {% endfor %}
@@ -172,6 +170,10 @@
 
         <div class="row g-3" id="productDisplayArea">
             {% include 'product_list_partial.html' %}
+        </div>
+
+        <div class="text-center mt-3" id="loadMoreSection" style="display: none;">
+            <button id="loadMoreBtn" type="button" class="btn btn-outline-primary px-4">โหลดเพิ่ม</button>
         </div>
     </div>
 
@@ -258,20 +260,27 @@
                 </div>
                 <div class="modal-body p-0">
                     <div class="list-group list-group-flush">
-                        {% for h in history %}
-                        <div class="list-group-item p-3">
-                            <div class="d-flex justify-content-between align-items-start">
-                                <div>
-                                    <div class="fw-medium">{{ h['product_name'] }}</div>
-                                    <small class="text-muted">{{ h['timestamp'] }}</small>
+                        {% if history %}
+                            {% for h in history %}
+                            <div class="list-group-item p-3">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <div class="fw-medium">{{ h['product_name'] }}</div>
+                                        <small class="text-muted">{{ h['timestamp'] }}</small>
+                                    </div>
+                                    <span
+                                        class="badge {% if h['status'] == 'Approved' %}bg-success{% elif h['status'] == 'Pending' %}bg-warning text-dark{% else %}bg-danger{% endif %} rounded-pill">
+                                        {{ h['qty'] }} {{ h['unit'] }}
+                                    </span>
                                 </div>
-                                <span
-                                    class="badge {% if h['status'] == 'Approved' %}bg-success{% elif h['status'] == 'Pending' %}bg-warning text-dark{% else %}bg-danger{% endif %} rounded-pill">
-                                    {{ h['qty'] }} {{ h['unit'] }}
-                                </span>
                             </div>
-                        </div>
-                        {% endfor %}
+                            {% endfor %}
+                        {% else %}
+                            <div class="text-center p-4 text-muted">
+                                <i class="fas fa-clock fa-2x mb-2"></i>
+                                <div>ยังไม่มีประวัติล่าสุด</div>
+                            </div>
+                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -283,56 +292,87 @@
     <script>
         const searchInput = document.getElementById('realTimeSearch');
         const displayArea = document.getElementById('productDisplayArea');
+        const loadMoreSection = document.getElementById('loadMoreSection');
+        const loadMoreBtn = document.getElementById('loadMoreBtn');
         const empId = "{{ user['emp_id'] }}";
-        let currentCategory = "";
+        let currentCategory = {{ current_category|default('')|tojson }};
+        if (!currentCategory) currentCategory = '';
         let timeout = null;
+        let currentPage = 1;
+        const categoryButtons = document.querySelectorAll('.cat-btn');
 
         // Real-time Search Logic
         searchInput.addEventListener('input', () => {
             clearTimeout(timeout);
-            timeout = setTimeout(() => fetchProducts(), 300);
+            timeout = setTimeout(() => {
+                currentPage = 1;
+                fetchProducts(true);
+            }, 300);
         });
+
+        // Set button listeners once
+        categoryButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                filterCategory(btn.dataset.category || '');
+            });
+        });
+
+        function updateCategoryButtons() {
+            categoryButtons.forEach(btn => {
+                const btnCategory = btn.dataset.category || '';
+                btn.classList.remove('btn-dark', 'btn-primary', 'btn-outline-dark', 'btn-outline-primary');
+
+                if (currentCategory === '' && btnCategory === '') {
+                    btn.classList.add('btn-dark');
+                } else if (currentCategory !== '' && btnCategory === currentCategory) {
+                    btn.classList.add('btn-primary');
+                } else if (btnCategory === '') {
+                    btn.classList.add('btn-outline-dark');
+                } else {
+                    btn.classList.add('btn-outline-primary');
+                }
+            });
+        }
 
         // Category Filter Logic
         function filterCategory(cat) {
             currentCategory = cat;
+            currentPage = 1;
+            updateCategoryButtons();
+            fetchProducts(true);
+        }
 
-            // เลือกปุ่มหมวดหมู่ทั้งหมด
-            const buttons = document.querySelectorAll('.cat-btn');
-
-            buttons.forEach(btn => {
-                // ล้างคลาสสีเดิมออกทั้งหมดเพื่อเริ่มใหม่
-                btn.classList.remove('btn-dark', 'btn-primary', 'btn-outline-dark', 'btn-outline-primary');
-
-                // ตรวจสอบว่าเป็นปุ่ม "ทั้งหมด" หรือปุ่ม "หมวดหมู่เฉพาะ"
-                const isAllBtn = btn.getAttribute('onclick').includes("('')");
-                const isCurrentCat = btn.getAttribute('onclick').includes(`('${cat}')`);
-
-                if (cat === "" && isAllBtn) {
-                    // ถ้าเลือก "ทั้งหมด" ให้ปุ่มนั้นเป็นสีดำ
-                    btn.classList.add('btn-dark');
-                } else if (isCurrentCat && cat !== "") {
-                    // ถ้าเลือกหมวดหมู่เฉพาะ ให้ปุ่มนั้นเป็นสีฟ้า
-                    btn.classList.add('btn-primary');
-                } else {
-                    // ปุ่มที่ไม่ได้ถูกเลือก ให้เป็นแบบ Outline (โปร่งแสง)
-                    if (isAllBtn) {
-                        btn.classList.add('btn-outline-dark');
+        function fetchProducts(reset = false) {
+            const query = encodeURIComponent(searchInput.value.trim());
+            const category = encodeURIComponent(currentCategory || '');
+            fetch(`/api/search_products?page=${currentPage}&emp_id=${encodeURIComponent(empId)}&search=${query}&category=${category}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (reset) {
+                        displayArea.innerHTML = data.html;
                     } else {
-                        btn.classList.add('btn-outline-primary');
+                        displayArea.insertAdjacentHTML('beforeend', data.html);
                     }
-                }
-            });
 
-            fetchProducts(); // เรียกฟังก์ชันโหลดสินค้าแบบ Real-time
+                    if (data.has_more) {
+                        loadMoreSection.style.display = 'block';
+                        currentPage = data.next_page;
+                    } else {
+                        loadMoreSection.style.display = 'none';
+                    }
+                });
         }
 
-        function fetchProducts() {
-            const query = searchInput.value;
-            fetch(`/api/search_products?emp_id=${empId}&search=${query}&category=${currentCategory}`)
-                .then(res => res.text())
-                .then(html => { displayArea.innerHTML = html; });
-        }
+        loadMoreBtn.addEventListener('click', () => {
+            fetchProducts(false);
+        });
+
+        window.onload = () => {
+            updateCategoryButtons();
+            if (new URLSearchParams(window.location.search).get('open_cart') === 'true') {
+                new bootstrap.Modal(document.getElementById('cartModal')).show();
+            }
+        };
 
         // Update Qty in Cart
         function updateQty(cartId, delta, empId) {
@@ -371,6 +411,8 @@
 
         // Auto-open cart if needed
         window.onload = () => {
+            updateCategoryButtons();
+            fetchProducts(true);
             if (new URLSearchParams(window.location.search).get('open_cart') === 'true') {
                 new bootstrap.Modal(document.getElementById('cartModal')).show();
             }
