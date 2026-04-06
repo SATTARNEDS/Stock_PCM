@@ -9,7 +9,7 @@ import io
 import pytz
 from io import BytesIO
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_apscheduler import APScheduler
 
@@ -30,6 +30,23 @@ DB_NAME = 'factory_stock.db'
 def get_thailand_time():
     tz = pytz.timezone('Asia/Bangkok')
     return datetime.now(tz)
+
+def standardize_date(date_str):
+    """แปลงวันที่ให้เป็น YYYY-MM-DD เสมอก่อนลง Database"""
+    if not date_str:
+        return ""
+    
+    date_str = date_str.strip()
+    # ถ้ามีเครื่องหมาย / แปลว่าเป็น DD/MM/YYYY ให้สลับตำแหน่ง
+    if '/' in date_str:
+        try:
+            parts = date_str.split('/')
+            if len(parts) == 3:
+                d, m, y = parts
+                return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+        except:
+            pass
+    return date_str # ถ้าเป็น YYYY-MM-DD อยู่แล้ว หรือแปลงไม่ได้ ก็คืนค่าเดิมไป
 
 # ==========================================
 # 📲 ตั้งค่า LINE Messaging API
@@ -69,7 +86,18 @@ def update_last_seen():
             conn.close()
         except:
             pass
+@app.after_request
+def add_header(response):
+    # สั่งให้ Browser ไม่เก็บ Cache ของหน้าเว็บ
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
+app.permanent_session_lifetime = timedelta(minutes=15) # บังคับให้ Logout หากไม่มีการเคลื่อนไหวใน 15 นาที
+@app.before_request
+def make_session_permanent():
+    session.permanent = True # ทำให้ทุก Session มีวันหมดอายุตามที่ตั้งไว้
 # ==========================================
 # 👤 ส่วนของพนักงาน (USER & CART SYSTEM)
 # ==========================================
@@ -82,6 +110,9 @@ def index():
         user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
         
         if user:
+            # เพิ่มการเช็ค: ถ้าเป็นคนเดิมที่ถือ Session อยู่ ให้เข้าได้เลยไม่ติด Lock
+            if session.get('user_id') == emp_id:
+                return redirect(url_for('menu', emp_id=emp_id))
             # 4. ป้องกันล็อกอินซ้ำ (ปรับปรุงใหม่: เช็คเวลา last_seen)
             is_locked = user['is_locked']
             last_seen_str = user['last_seen']
@@ -100,8 +131,9 @@ def index():
                 conn.close()
                 return render_template('index.html') # 👈 ใช้ render เพื่อให้ Flash แสดงทันที
             
-            # ล็อกสถานะ User เป็น Online
-            conn.execute('UPDATE users SET is_locked = 1, last_seen = CURRENT_TIMESTAMP WHERE emp_id = ?', (emp_id,))
+            # ถ้าผ่าน ให้ตั้งค่า Session และ Lock
+            session['user_id'] = emp_id 
+            conn.execute("UPDATE users SET is_locked = 1, last_seen = datetime('now', '+7 hours') WHERE emp_id = ?", (emp_id,))
             conn.commit()
             conn.close()
             return redirect(url_for('menu', emp_id=emp_id))
@@ -119,6 +151,8 @@ def logout_user(emp_id):
     conn.execute('UPDATE users SET is_locked = 0 WHERE emp_id = ?', (emp_id,))
     conn.commit()
     conn.close()
+
+    session.clear()
     return redirect(url_for('index'))
 
 @app.route('/menu')
@@ -127,6 +161,12 @@ def menu():
     search_query = request.args.get('search', '').strip()
     category_filter = request.args.get('category', '').strip()
     open_cart = request.args.get('open_cart')
+
+    # --- ส่วนที่เพิ่ม: ถ้าไม่มี Session หรือรหัสไม่ตรงกัน ให้เด้งกลับหน้า Login ---
+    if not session.get('user_id') or session.get('user_id') != emp_id:
+        flash('⚠️ กรุณาเข้าสู่ระบบใหม่', 'user_error')
+        return redirect(url_for('index'))
+    # ------------------------------------------------------------------
 
     conn = get_db_connection()
     user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
@@ -141,13 +181,14 @@ def menu():
     elif user['location'] and ('Coil Center' in user['location'] or 'CC' in user['location']):
         location_condition = " AND (location LIKE '%Coil Center%' OR location LIKE '%CC%' OR location = 'General' OR location IS NULL)"
     
-    # ดึงหมวดหมู่ (กรองตาม Location ด้วย)
-    cat_query = f'SELECT DISTINCT category FROM products WHERE stock > 0 {location_condition}'
+    # --- แก้ไขจุดที่ 1: ดึงหมวดหมู่ทั้งหมดโดยไม่สนว่าสต็อกเป็น 0 หรือไม่ ---
+    cat_query = f'SELECT DISTINCT category FROM products WHERE 1=1 AND is_active = 1 {location_condition}'
     cat_rows = conn.execute(cat_query).fetchall()
     all_categories = [row['category'] for row in cat_rows]
 
-    # Query ของ (กรองตาม Location ด้วย)
-    query = f'SELECT * FROM products WHERE stock > 0 {location_condition}'
+    # --- แก้ไขจุดที่ 2: ดึงสินค้าทั้งหมด (รวมที่สต็อกเป็น 0) ---
+    # เดิม: query = f'SELECT * FROM products WHERE stock > 0 {location_condition}'
+    query = f'SELECT * FROM products WHERE 1=1 AND is_active = 1 {location_condition}' 
     params = []
     
     if search_query:
@@ -175,6 +216,15 @@ def menu():
     cart_list = [dict(row) for row in cart_items]
     session['cart'] = cart_list 
 
+    # การดึงประวัติการเบิก (History)
+    history = conn.execute('''
+        SELECT l.*, p.name as product_name, p.unit 
+        FROM transaction_logs l 
+        JOIN products p ON l.product_id = p.id 
+        WHERE l.emp_id = ? 
+        ORDER BY l.timestamp DESC LIMIT 5
+    ''', (emp_id,)).fetchall()
+
     conn.close()
     return render_template('menu.html', 
                            user=user, 
@@ -182,7 +232,8 @@ def menu():
                            all_categories=all_categories,
                            current_category=category_filter,
                            cart_items=cart_list,
-                           open_cart=open_cart)
+                           open_cart=open_cart,
+                           history=history)
 
 @app.route('/add_to_cart', methods=['POST'])
 def add_to_cart():
@@ -246,7 +297,7 @@ def confirm_withdrawal():
     
     msg_list = [f"🚀 *มีคำขอเบิกใหม่* 🚀\n👤 ผู้เบิก: {user['name']}\n📍 แผนก: {user['department']} ({user['location']})"]
     
-    thai_now = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
+    thai_now = get_thailand_time().strftime('%d/%m/%Y %H:%M:%S')
     
     for item in cart_items:
         item_name = item['name']
@@ -295,6 +346,76 @@ def confirm_withdrawal():
     flash('✅ ส่งคำขอเรียบร้อย! ระบบบันทึกรอบการเบิกหมวกเซฟตี้ให้คุณแล้ว', 'success')
     return redirect(url_for('menu', emp_id=emp_id))
  
+ # --- เพิ่ม Route สำหรับอัปเดตจำนวนในตะกร้า (AJAX) ---
+@app.route('/update_cart_qty', methods=['POST'])
+def update_cart_qty():
+    cart_id = request.form.get('cart_id')
+    new_qty = int(request.form.get('qty', 1))
+    emp_id = request.form.get('emp_id')
+
+    conn = get_db_connection()
+    # ดึงข้อมูลเดิมเพื่อคำนวณส่วนต่างสต็อก
+    item = conn.execute('SELECT * FROM carts WHERE id = ?', (cart_id,)).fetchone()
+    if item:
+        product = conn.execute('SELECT stock, reserved_stock FROM products WHERE id = ?', (item['product_id'],)).fetchone()
+        diff = new_qty - item['qty']
+        
+        # เช็คว่าสต็อกจริงพอให้ปรับเพิ่มไหม
+        if product['stock'] >= diff:
+            conn.execute('UPDATE carts SET qty = ? WHERE id = ?', (new_qty, cart_id))
+            conn.execute('UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ?', 
+                         (diff, diff, item['product_id']))
+            conn.commit()
+            res = {'success': True}
+        else:
+            res = {'success': False, 'message': 'สินค้าในคลังไม่พอ'}
+    else:
+        res = {'success': False, 'message': 'ไม่พบรายการในตะกร้า'}
+    
+    conn.close()
+    return jsonify(res)
+
+@app.route('/api/search_products')
+def api_search_products():
+    emp_id = request.args.get('emp_id')
+    search_query = request.args.get('search', '').strip()
+    category_filter = request.args.get('category', '').strip()
+
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
+    
+    # Logic การกรอง Location (ยกมาจาก menu เดิมของคุณ)
+    location_condition = ""
+    if user and user['location']:
+        if 'PC1' in user['location']:
+            location_condition = " AND (location LIKE '%PC1%' OR location = 'General' OR location IS NULL)"
+        elif 'CC' in user['location'] or 'Coil Center' in user['location']:
+            location_condition = " AND (location LIKE '%Coil Center%' OR location LIKE '%CC%' OR location = 'General' OR location IS NULL)"
+
+    query = f'SELECT * FROM products WHERE 1=1 AND is_active = 1 {location_condition}'
+    params = []
+    
+    if search_query:
+        query += ' AND (name LIKE ? OR code LIKE ?)'
+        params.extend([f'%{search_query}%', f'%{search_query}%'])
+    if category_filter:
+        query += ' AND category = ?'
+        params.append(category_filter)
+
+    products_list = conn.execute(query, params).fetchall()
+    
+    # จัดกลุ่มสินค้าตามหมวดหมู่
+    products_by_category = {}
+    for item in products_list:
+        cat = item['category']
+        if cat not in products_by_category: products_by_category[cat] = []
+        products_by_category[cat].append(item)
+
+    conn.close()
+    
+    # ส่งกลับไปที่ไฟล์ template ย่อย (ที่เราจะสร้างใหม่)
+    return render_template('product_list_partial.html', products=products_by_category, user=user)
+
 # ==========================================
 # 🔐 ส่วนของแอดมิน (ADMIN)
 # ==========================================
@@ -500,7 +621,7 @@ def daily_alert():
         alert_triggered = True
         message += "\n👷 [ครบกำหนดเปลี่ยนหมวกเซฟตี้]\n"
         for alert in helmet_alerts:
-            message += f"👤 คุณ{alert['emp_name']} ({alert['department']})\n📅 เบิกเมื่อ: {alert['timestamp']}\n"
+            message += f"👤 คุณ{alert['emp_name']} ({alert['department']})\n📦 {alert['product_name']}\n📅 เบิกเมื่อ: {alert['timestamp']}\n"
 
     # ถ้ามีรายการผิดปกติ ให้ส่ง LINE ทันที
     if alert_triggered:
@@ -508,6 +629,36 @@ def daily_alert():
         return f"Alert sent: {message}", 200
     else:
         return "No alerts today", 200
+
+@app.route('/api/admin/pending_requests')
+def get_pending_requests():
+    if not session.get('admin_logged_in'):
+        return "Unauthorized", 401
+    
+    role = session.get('admin_role', 'superadmin')
+    conn = get_db_connection()
+    
+    # กรองตามสิทธิ์ Admin (PC1 / CC)
+    role_log_filter = ""
+    if role == 'admin_pc1':
+        role_log_filter = " AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')"
+    elif role == 'admin_cc':
+        role_log_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')"
+
+    query = f'''
+        SELECT l.*, u.name as emp_name, u.department, p.name as product_name, p.unit
+        FROM transaction_logs l
+        LEFT JOIN users u ON l.emp_id = u.emp_id
+        LEFT JOIN products p ON l.product_id = p.id
+        WHERE l.status = 'Pending' {role_log_filter} 
+        ORDER BY l.timestamp ASC
+    '''
+    
+    pending_logs = conn.execute(query).fetchall()
+    conn.close()
+    
+    # ส่งกลับเป็น HTML เฉพาะส่วนของแถวตาราง (Partial)
+    return render_template('pending_requests_partial.html', pending_logs=pending_logs)
 
 @app.route('/admin/approve/<int:log_id>') # ฟังก์ชันนี้จะถูกเรียกเมื่อแอดมินกดอนุมัติการเบิก
 def approve_request(log_id):
@@ -546,7 +697,10 @@ def approve_request(log_id):
 
         # 4. อัปเดตตารางหลัก
         # บันทึก lot_id ล่าสุด และใช้เวลาไทยจาก Python แทน SQL เพื่อความแม่นยำ
-        thai_now = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
+        # เปลี่ยนจาก:
+        # thai_now = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
+        # เป็น:
+        thai_now = get_thailand_time().strftime('%d/%m/%Y %H:%M:%S')
         conn.execute('''
             UPDATE transaction_logs 
             SET status = "Approved", lot_id = ?, timestamp = ? 
@@ -630,70 +784,77 @@ def get_next_code():
     
     return jsonify({'next_code': new_code})
 
+@app.route('/admin/toggle_product_status/<int:product_id>', methods=['POST'])
+def toggle_product_status(product_id):
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+    
+    conn = get_db_connection()
+    # ดึงสถานะปัจจุบันมาเช็ค
+    product = conn.execute('SELECT is_active FROM products WHERE id = ?', (product_id,)).fetchone()
+    if product:
+        new_status = 0 if product['is_active'] == 1 else 1
+        conn.execute('UPDATE products SET is_active = ? WHERE id = ?', (new_status, product_id))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'new_status': new_status})
+    conn.close()
+    return jsonify({'success': False, 'message': 'ไม่พบสินค้า'})
+
 @app.route('/admin/add_product', methods=['POST'])
 def add_product():
-    if not session.get('admin_logged_in'): 
-        return jsonify({'success': False, 'message': 'Unauthorized'})
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    admin_name = 'ADMIN:' + session.get('admin_name', 'Unknown')
     
+    # 1. รับค่าจากฟอร์ม (อ้างอิงตามชื่อ name ใน HTML)
     code = request.form.get('code')
     name = request.form.get('name')
     category = request.form.get('category')
     unit = request.form.get('unit')
     location = request.form.get('location')
-    safety_stock = int(request.form.get('safety_stock') or 0)
-    stock = int(request.form.get('stock') or 0)
-    expiry_date = request.form.get('expiry_date', '').strip()
-    
-    # ✅ 1. จัดการเรื่องวันที่รับเข้า (ถ้าว่าง ให้ใช้วันนี้)
-    received_date = request.form.get('received_date', '').strip()
-    if not received_date:
-        received_date = get_thailand_time().strftime('%Y-%m-%d')
-
-    # ✅ 2. จัดการเรื่อง Lot No (อิงจาก received_date)
-    lot_no = request.form.get('lot_no', '').strip()
-    if not lot_no:
-        try:
-            date_obj = datetime.strptime(received_date, '%Y-%m-%d')
-            lot_no = date_obj.strftime('%d%m%Y')
-        except:
-            lot_no = get_thailand_time().strftime('%d%m%Y')
-        else:
-            lot_no = get_thailand_time().strftime('%d%m%Y')
+    safety_stock = request.form.get('safety_stock', 0, type=int)
+    stock = request.form.get('stock', 0, type=int)
+    expiry_date = standardize_date(request.form.get('expiry_date', ''))
 
     conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        
-        # 1. บันทึกข้อมูลลงตารางหลัก (products)
-        cursor.execute('''
-            INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, received_date, lot_no)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (code, name, category, unit, location, safety_stock, stock, expiry_date, received_date, lot_no))
-        
-        # ดึง ID ของสินค้าที่เพิ่งถูกสร้างขึ้นมาสดๆ ร้อนๆ
-        new_product_id = cursor.lastrowid 
 
-        # 2. ถ้าใส่จำนวนเริ่มต้นมาด้วย ให้บันทึกลงตาราง product_lots ทันที (เป็น Lot ที่ 1)
+    try:
+        # 2. เพิ่มสินค้าลงตารางหลัก ***(จุดสำคัญ: บังคับให้ expiry_date เป็นค่าว่าง)***
+        cursor = conn.execute('''
+            INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, '')
+        ''', (code, name, category, unit, location, safety_stock, stock))
+        
+        product_id = cursor.lastrowid
+
+        # 3. ถ้ามีการใส่สต็อกเริ่มต้นมาด้วย ให้สร้าง "Lot แรก" อัตโนมัติ
         if stock > 0:
-            cursor.execute('''
-                INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (new_product_id, lot_no, stock, received_date, expiry_date))
+            from datetime import datetime
+            # สร้างเลข Lot อัตโนมัติจากวันที่ เช่น 06042026-NEW
+            lot_number = datetime.now().strftime('%d%m%Y') + "-NEW"
+            receive_date = datetime.now().strftime('%Y-%m-%d')
             
-            # 3. แอบบันทึกประวัติ (Log) ไว้ด้วยว่าแอดมินนำเข้าเป็น Lot แรก
-            admin_name = session.get('admin_name')
-            thai_now = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
-            cursor.execute('''
-                INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp) 
-                VALUES (?, ?, ?, ?, 'Completed', ?)
-            ''', (f"ADMIN:{admin_name}", new_product_id, f"รับเข้า Lot แรก: {lot_no}", stock, thai_now))
+            # *** เอาวันหมดอายุมาใส่ในตาราง Lot แทน ***
+            conn.execute('''
+                INSERT INTO product_lots (product_id, lot_number, qty, receive_date, expiry_date)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (product_id, lot_number, stock, receive_date, expiry_date))
+
+            # 4. บันทึกประวัติ
+            conn.execute('''
+                INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp)
+                VALUES (?, ?, ?, ?, 'Approved', datetime('now', '+7 hours'))
+            ''', (admin_name, product_id, f'รับเข้า Lot แรก: {lot_number}', stock))
 
         conn.commit()
-        return jsonify({'success': True, 'message': 'เพิ่มข้อมูลสินค้าและสร้าง Lot สำเร็จ'})
+        return jsonify({'success': True})
         
+    except sqlite3.IntegrityError:
+        return jsonify({'success': False, 'message': 'รหัสสินค้านี้มีซ้ำในระบบแล้ว'})
     except Exception as e:
-        print(f"Error adding product: {e}")
-        return jsonify({'success': False, 'message': f"เกิดข้อผิดพลาด: {e}"})
+        return jsonify({'success': False, 'message': str(e)})
     finally:
         conn.close()
 
@@ -737,6 +898,7 @@ def export_excel():
             location as 'สถานที่เก็บ (Location)',
             safety_stock as 'จุดสั่งซื้อ (Safety Stock)',
             stock as 'จำนวนคงเหลือ',
+            CASE WHEN is_active = 1 THEN 'เปิดใช้งาน' ELSE 'ปิดใช้งาน' END as 'สถานะการใช้งาน', -- เพิ่มส่วนนี้
             lot_no as 'Lot No.',
             received_date as 'วันที่รับเข้า',
             expiry_date as 'วันหมดอายุ'
@@ -823,21 +985,28 @@ def import_excel():
             safety_stock = safe_int(row[safe_col]) if safe_col else 0
             stock = safe_int(row[stock_col]) if stock_col else 0
 
+            # --- ส่วนการเช็คสถานะการใช้งาน ---
+            active_col = next((col for col in df.columns if 'สถานะ' in col), None)
+            is_active = 1 # ค่าเริ่มต้น
+            if active_col and pd.notna(row[active_col]):
+                status_text = str(row[active_col]).strip()
+                is_active = 1 if status_text == 'เปิดใช้งาน' else 0
+
             # --- บันทึกลง Database ---
             existing = conn.execute('SELECT id FROM products WHERE code = ?', (code,)).fetchone()
-            
+            # -- เพิ่ม is_active ----
             if existing:
                 conn.execute('''
                     UPDATE products 
-                    SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=? 
+                    SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=? 
                     WHERE id=?
-                ''', (name, stock, safety_stock, category, unit, location, existing['id']))
+                ''', (name, stock, safety_stock, category, unit, location, is_active, existing['id']))
                 updated_count += 1
             else:
                 conn.execute('''
-                    INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)
-                ''', (code, name, stock, safety_stock, category, unit, location))
+                    INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock, is_active) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+                ''', (code, name, stock, safety_stock, category, unit, location, is_active))
                 inserted_count += 1
 
         conn.commit()
@@ -871,7 +1040,7 @@ def edit_product():
     unit = request.form.get('unit')
     safety_stock = request.form.get('safety_stock', 0)
     stock = request.form.get('stock', 0)
-    expiry_date = request.form.get('expiry_date', '')
+    expiry_date = standardize_date(request.form.get('expiry_date', ''))
 
     conn = get_db_connection()
     try:
@@ -890,7 +1059,8 @@ def edit_product():
 
 @app.route('/admin/filter_low_stock')
 def filter_low_stock():
-    if not session.get('admin_logged_in'): return "Unauthorized", 401
+    if not session.get('admin_logged_in'):
+        return "Unauthorized", 401  # <--- สำคัญมาก: คืนค่า 401
     
     role = session.get('admin_role', 'superadmin')
     # ต้องดึงค่า low_stock_cat ที่ส่งมาจาก JavaScript
@@ -921,22 +1091,23 @@ def filter_low_stock():
 
 @app.route('/admin/filter_stock')
 def filter_stock():
-    if not session.get('admin_logged_in'): return "Unauthorized", 401
+    if not session.get('admin_logged_in'):
+        return "Unauthorized", 401
     
-    role = session.get('admin_role', 'superadmin')
     cat = request.args.get('cat', '')
     search = request.args.get('search', '')
+    role = session.get('admin_role', 'superadmin')
     
     conn = get_db_connection()
     
-    # 1. กรองสิทธิ์ตาม Role (เหมือนเดิม)
+    # 1. กรองสิทธิ์สถานที่ตาม Role ของแอดมิน
     loc_filter = ""
     if role == 'admin_pc1':
         loc_filter = " AND (location LIKE '%PC1%')"
     elif role == 'admin_cc':
         loc_filter = " AND (location LIKE '%Coil Center%' OR location LIKE '%CC%')"
 
-    # 2. สร้าง Query
+    # 2. สร้างคำสั่ง SQL ค้นหา
     sql = f"SELECT * FROM products WHERE 1=1 {loc_filter}"
     params = []
     
@@ -948,18 +1119,19 @@ def filter_stock():
         sql += " AND (name LIKE ? OR code LIKE ?)"
         params.extend([f'%{search}%', f'%{search}%'])
         
-    # จำกัดผลลัพธ์ 100 รายการเพื่อให้โหลดไว (เพราะเป็น Real-time search)
-    sql += " ORDER BY code ASC LIMIT 500" 
+    sql += " ORDER BY code ASC"
     
     rows = conn.execute(sql, params).fetchall()
     conn.close()
     
-    # ส่งกลับไปเฉพาะส่วนตาราง
+    # ส่งกลับไปที่ Template ย่อยสำหรับแสดงแถวตาราง
     return render_template('stock_row.html', items=rows)
 
 @app.route('/admin/filter_logs')
 def filter_logs():
-    if not session.get('admin_logged_in'): return "Unauthorized", 401
+    # 1. ตรวจสอบ Session
+    if not session.get('admin_logged_in'):
+        return "Unauthorized", 401
     
     role = session.get('admin_role', 'superadmin')
     log_loc = request.args.get('log_loc', '')
@@ -969,7 +1141,7 @@ def filter_logs():
     
     conn = get_db_connection()
     
-    # 1. Logic การกรอง (เหมือนใน admin_dashboard)
+    # 2. สร้าง Filter (ใช้โค้ดเดิมของคุณ)
     role_log_filter = ""
     if role == 'admin_pc1':
         role_log_filter = " AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')"
@@ -985,20 +1157,45 @@ def filter_logs():
     
     final_log_filter = role_log_filter + super_admin_filter
 
-    # 2. Query ข้อมูล
-    logs = conn.execute(f'''
-        SELECT l.*, u.name as emp_name, u.department, u.location, p.name as product_name, p.unit
+    # --- ส่วนที่เพิ่ม: นับจำนวนหน้าใหม่ให้สัมพันธ์กับ Filter ---
+    count_query = f'''
+        SELECT COUNT(*) 
         FROM transaction_logs l
-        LEFT JOIN users u ON l.emp_id = u.emp_id
+        LEFT JOIN users u ON (
+            CASE 
+                WHEN l.emp_id LIKE 'ADMIN:%' THEN SUBSTR(l.emp_id, 7) = u.name
+                ELSE l.emp_id = u.emp_id 
+            END
+        )
+        WHERE 1=1 {final_log_filter}
+    '''
+    total_logs = conn.execute(count_query).fetchone()[0]
+    total_pages = math.ceil(total_logs / per_page) #
+
+    # 3. Query ข้อมูล (ใช้โค้ดเดิมของคุณ)
+    query = f'''
+        SELECT l.*, 
+               COALESCE(u.name, SUBSTR(l.emp_id, 7)) as emp_name, 
+               u.department, u.location, p.name as product_name, p.unit
+        FROM transaction_logs l
+        LEFT JOIN users u ON (
+            CASE 
+                WHEN l.emp_id LIKE 'ADMIN:%' THEN SUBSTR(l.emp_id, 7) = u.name
+                ELSE l.emp_id = u.emp_id 
+            END
+        )
         LEFT JOIN products p ON l.product_id = p.id
         WHERE 1=1 {final_log_filter}
         ORDER BY l.timestamp DESC LIMIT ? OFFSET ?
-    ''', (per_page, offset)).fetchall()
+    '''
     
+    logs = conn.execute(query, (per_page, offset)).fetchall()
     conn.close()
     
-    # ส่งกลับไปเฉพาะส่วนแถวตาราง
-    return render_template('admin_log_row.html', logs=logs)
+    # 4. ส่ง HTML พร้อมค่า total_pages กลับไปทาง Header
+    response = make_response(render_template('admin_log_row.html', logs=logs))
+    response.headers['X-Total-Pages'] = total_pages # ส่งเลขหน้าใหม่ไปให้ JS
+    return response
 
 @app.route('/admin/logout')
 def admin_logout():
@@ -1044,7 +1241,7 @@ def add_product_ajax():
     lot_number = request.form.get('lot_number')
     qty = int(request.form.get('add_qty', 0))
     receive_date = request.form.get('receive_date')
-    expire_date = request.form.get('expire_date')
+    expire_date = standardize_date(request.form.get('expire_date', ''))
 
     conn = get_db_connection()
     try:
@@ -1066,6 +1263,109 @@ def add_product_ajax():
 
         conn.commit()
         return jsonify({'success': True, 'message': 'เพิ่ม Lot ของสำเร็จ!'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+    finally:
+        conn.close()
+
+@app.route('/admin/write_off_ajax', methods=['POST'])
+def write_off_ajax():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    admin_name = 'ADMIN:' + session.get('admin_name', 'Unknown')
+    product_id = request.form.get('product_id')
+    qty = request.form.get('qty', type=int)
+    reason = request.form.get('reason', 'หมดอายุ')
+
+    if not qty or qty <= 0:
+        return jsonify({'success': False, 'message': 'จำนวนต้องมากกว่า 0'})
+
+    conn = get_db_connection()
+    product = conn.execute("SELECT stock FROM products WHERE id = ?", (product_id,)).fetchone()
+
+    if not product or product['stock'] < qty:
+        conn.close()
+        return jsonify({'success': False, 'message': 'จำนวนสต็อกไม่เพียงพอให้ตัดจำหน่าย'})
+
+    remaining_qty = qty
+
+    # --- 1. ไล่ตัดสต็อกจากตาราง Lot แบบ FIFO ---
+    # (เพิ่มการดึง lot_number ออกมาด้วยเพื่อเอาไปเขียนใน Log)
+    lots = conn.execute('''
+        SELECT id, qty, lot_number 
+        FROM product_lots 
+        WHERE product_id = ? AND qty > 0
+        ORDER BY 
+            CASE 
+                WHEN expiry_date LIKE '%/%/%' THEN substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2)
+                ELSE expiry_date 
+            END ASC
+    ''', (product_id,)).fetchall()
+
+    for lot in lots:
+        if remaining_qty <= 0:
+            break
+        
+        cut_qty = min(lot['qty'], remaining_qty)
+        
+        # 1.1 อัปเดตจำนวนในตาราง product_lots
+        conn.execute("UPDATE product_lots SET qty = qty - ? WHERE id = ?", (cut_qty, lot['id']))
+        
+        # 1.2 บันทึกประวัติลง transaction_logs (แยกตาม Lot ที่ถูกตัด)
+        # นำเลข Lot มาโชว์ในช่อง action ด้วยเพื่อให้แอดมินอ่านง่าย และเก็บ lot_id ลงฐานข้อมูล
+        action_text = f"ตัดจำหน่าย (Scrap) - {reason} [Lot: {lot['lot_number']}]"
+        conn.execute('''
+            INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, status, timestamp)
+            VALUES (?, ?, ?, ?, ?, 'Approved', datetime('now', '+7 hours'))
+        ''', (admin_name, product_id, lot['id'], action_text, cut_qty))
+
+        remaining_qty -= cut_qty
+
+    # --- 2. อัปเดตสต็อกรวมในตารางหลัก (products) ---
+    conn.execute("UPDATE products SET stock = stock - ? WHERE id = ?", (qty, product_id))
+
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True})
+
+@app.route('/admin/clear_system_data', methods=['POST'])
+def clear_system_data():
+    # 1. เช็คสิทธิ์ ต้องเป็น superadmin เท่านั้น
+    if session.get('admin_role') != 'superadmin':
+        return jsonify({'success': False, 'message': 'ไม่อนุญาต! ฟีเจอร์นี้สำหรับ Super Admin เท่านั้น'}), 403
+
+    target = request.form.get('target')
+    password = request.form.get('password')
+
+    # ========================================================
+    # 🎯 ตั้งค่า "รหัสผ่านพิเศษ" สำหรับล้างข้อมูลตรงนี้ครับ
+    # (เปลี่ยนเป็นรหัสที่คุณต้องการได้เลย)
+    # ========================================================
+    SECURE_CLEAR_PASSWORD = "pcm_admin"
+
+    # 2. ตรวจสอบรหัสผ่านพิเศษ
+    if password != SECURE_CLEAR_PASSWORD:
+        return jsonify({'success': False, 'message': 'รหัสผ่านยืนยันไม่ถูกต้อง!'})
+
+    conn = get_db_connection()
+    try:
+        if target == 'logs':
+            # ล้างประวัติการเบิกจ่าย
+            conn.execute("DELETE FROM transaction_logs")
+            # รีเซ็ตเลข Auto Increment ID ให้กลับไปเริ่มที่ 1 ใหม่
+            conn.execute("DELETE FROM sqlite_sequence WHERE name='transaction_logs'")
+            
+        elif target == 'lots':
+            # 1. ล้างตาราง Lot
+            conn.execute("DELETE FROM product_lots")
+            conn.execute("DELETE FROM sqlite_sequence WHERE name='product_lots'")
+            # 2. รีเซ็ตจำนวนสินค้าและวันหมดอายุในตารางหลักให้กลับเป็นศูนย์
+            conn.execute("UPDATE products SET stock = 0, expiry_date = ''")
+
+        conn.commit()
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
     finally:
@@ -1198,6 +1498,25 @@ def manage_zombies():
     role = session.get('admin_role', 'superadmin')
     return render_template('manage_zombies.html', zombie_users=zombie_users, role=role)
 
+# 1. API สำหรับดึงรายชื่อพนักงานค้างเป็น JSON
+@app.route('/admin/list_zombies_json')
+def list_zombies_json():
+    if not session.get('admin_logged_in'): return jsonify([]), 401
+    conn = get_db_connection()
+    users = conn.execute('SELECT emp_id, name, department, location, last_seen FROM users WHERE is_locked = 1').fetchall()
+    conn.close()
+    return jsonify([dict(u) for u in users])
+
+# 2. API สำหรับปลดล็อกแบบ AJAX
+@app.route('/admin/unlock_user_ajax/<emp_id>', methods=['POST'])
+def unlock_user_ajax(emp_id):
+    if not session.get('admin_logged_in'): return jsonify({'success': False}), 401
+    conn = get_db_connection()
+    conn.execute("UPDATE users SET is_locked = 0 WHERE emp_id = ?", (emp_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
 # --- 2. ฟังก์ชันปลดล็อกรายบุคคล ---
 @app.route('/admin/unlock_user/<emp_id>')
 def unlock_user(emp_id):
@@ -1210,12 +1529,21 @@ def unlock_user(emp_id):
     conn.close()
     
     flash(f'✅ ปลดล็อกรหัส {emp_id} เรียบร้อยแล้ว', 'success')
-    return redirect(url_for('manage_zombies'))    
+    return redirect(url_for('manage_zombies'))
+    
+# --- เพิ่ม API สำหรับดึงจำนวนพนักงานที่ออนไลน์อยู่จริง ---
+# แก้ไข Route ที่เกี่ยวข้องกับ API ทั้งหมด (ตัวอย่าง)
+@app.route('/api/admin/online_count')
+def get_online_count():
+    if not session.get('admin_logged_in'):
+        return "Unauthorized", 401  # <--- สำคัญมาก: คืนค่า 401
+    
+    conn = get_db_connection()
+    count = conn.execute('SELECT COUNT(*) FROM users WHERE is_locked = 1').fetchone()[0]
+    conn.close()
+    return jsonify({'count': count})
 
-app.permanent_session_lifetime = timedelta(minutes=30) # บังคับให้ Logout หากไม่มีการเคลื่อนไหวใน 30 นาที
-@app.before_request
-def make_session_permanent():
-    session.permanent = True # ทำให้ทุก Session มีวันหมดอายุตามที่ตั้งไว้
+# ทำแบบเดียวกันใน /admin/filter_stock และ /admin/filter_logs
 
 @app.route('/admin/list_users')
 def list_users():
@@ -1353,72 +1681,113 @@ def list_departments():
 # ฟังก์ชันที่จะให้ทำงานอัตโนมัติ (Background Task)
 def scheduled_daily_alert():
     with app.app_context():
-        print(f"🔔 [SYSTEM] เริ่มรัน Job อัตโนมัติ: {get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')}")
-        
+        print(f"🔔 [SYSTEM] เริ่มรัน Job อัตโนมัติ...")
         conn = get_db_connection()
         
-      # --- ส่วนที่ 1: เช็คของใกล้หมดอายุ ---
+        # ==========================================
+        # 1. แจ้งเตือนของใกล้หมดอายุ (ครอบคลุมของเก่าและ Lot ใหม่)
+        # ==========================================
+        # ใช้ Subquery แปลงวันที่ให้เป็น YYYY-MM-DD ก่อน แล้วค่อยเอามาเปรียบเทียบ
         expiry_query = '''
-            SELECT name, expiry_date 
-            FROM products 
-            WHERE expiry_date IS NOT NULL AND expiry_date != '' 
-            AND expiry_date <= date('now', '+30 days')
-            AND (category LIKE '%ยา%' OR name LIKE '%Helmet%' OR name LIKE '%Coffee%')
+            SELECT name, formatted_expiry AS expiry_date, category FROM (
+                -- ส่วนที่ 1: ของเก่าจากตารางหลัก (products)
+                SELECT 
+                    name, 
+                    CASE 
+                        WHEN expiry_date LIKE '%/%/%' THEN substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2)
+                        ELSE trim(expiry_date)
+                    END AS formatted_expiry, 
+                    category 
+                FROM products 
+                WHERE stock > 0 
+                AND expiry_date IS NOT NULL AND trim(expiry_date) != ''
+                AND (category LIKE '%ยา%' OR name LIKE '%Helmet%' OR name LIKE '%Coffee%')
+                
+                UNION
+                
+                -- ส่วนที่ 2: ของใหม่จากตาราง Lot (product_lots)
+                SELECT 
+                    p.name, 
+                    CASE 
+                        WHEN pl.expiry_date LIKE '%/%/%' THEN substr(pl.expiry_date, 7, 4) || '-' || substr(pl.expiry_date, 4, 2) || '-' || substr(pl.expiry_date, 1, 2)
+                        ELSE trim(pl.expiry_date)
+                    END AS formatted_expiry, 
+                    p.category 
+                FROM product_lots pl
+                JOIN products p ON pl.product_id = p.id
+                WHERE pl.qty > 0 
+                AND pl.expiry_date IS NOT NULL AND trim(pl.expiry_date) != ''
+                AND (p.category LIKE '%ยา%' OR p.name LIKE '%Helmet%' OR p.name LIKE '%Coffee%')
+            )
+            -- กรองเอาเฉพาะอันที่หมดอายุหรือใกล้หมดอายุ (ภายใน 30 วัน)
+            WHERE formatted_expiry <= date('now', '+7 hours', '+30 days')
+            ORDER BY formatted_expiry ASC
         '''
-        # มั่นใจว่าได้ใช้ conn.row_factory = sqlite3.Row ใน get_db_connection() แล้ว
         expiring_items = conn.execute(expiry_query).fetchall()
 
-        # --- 2. เช็คหมวกเซฟตี้ (เพิ่มคอลัมน์ที่ขาดไป) ---
+        # ==========================================
+        # 2. เช็คหมวกเซฟตี้ (แยกตามพนักงาน, สินค้า และ Lot)
+        # ==========================================
         helmet_query = '''
             SELECT 
                 u.name AS emp_name, 
                 u.department, 
                 u.location, 
-                l.action AS product_name, 
-                l.timestamp
+                p.name AS product_name,
+                l.lot_id, -- ดึง Lot ID ออกมาด้วย
+                MAX(
+                    CASE 
+                        WHEN l.timestamp LIKE '%/%/%' THEN 
+                            substr(l.timestamp, 7, 4) || '-' || substr(l.timestamp, 4, 2) || '-' || substr(l.timestamp, 1, 2) || substr(l.timestamp, 11)
+                        ELSE l.timestamp 
+                    END
+                ) AS last_timestamp
             FROM transaction_logs l
             JOIN users u ON l.emp_id = u.emp_id
-            WHERE (l.action LIKE '%หมวก%' OR l.action LIKE '%Helmet%')
+            JOIN products p ON l.product_id = p.id
+            WHERE (p.name LIKE '%หมวก%' OR p.name LIKE '%Helmet%' OR l.action LIKE '%หมวก%')
             AND l.status = 'Approved'
-            AND strftime('%Y-%m', l.timestamp) <= strftime('%Y-%m', 'now', '+7 hours', '-23 months')
+            GROUP BY u.emp_id, p.id, l.lot_id  -- 🎯 จุดสำคัญ: สั่งให้แยกการเช็คอายุตาม คน + สินค้า + Lot
+            HAVING last_timestamp <= datetime('now', '+7 hours', '-23 months')
         '''
         helmet_alerts = conn.execute(helmet_query).fetchall()
-        
-        # --- ส่วนของ DEBUG (ดูใน Terminal) ---
-        print(f"🔎 [DEBUG SQL] ดึงข้อมูลได้ทั้งหมด: {len(helmet_alerts)} รายการ")
-        for row in helmet_alerts:
-            print(f"👤 พบพนักงาน: {row['emp_name']} | วันที่เบิก: {row['timestamp']}")
-        # ------------------------------------
-
         conn.close()
         
-       # --- 3. รวมข้อความและส่งเข้า LINE (ปรับฟอร์มตามรูปภาพ) ---
+        # ==========================================
+        # 3. รวมข้อความและส่งเข้า LINE
+        # ==========================================
         message = ""
         
-        # ส่วนของของใกล้หมดอายุ (ถ้ามี)
         if expiring_items:
             message += "⚠️ [แจ้งเตือนของใกล้หมดอายุ]\n"
             for item in expiring_items:
-                message += f"📦 {item['name']}\n📅 หมดอายุ: {item['expiry_date']}\n"
-            message += "--------------------------\n"
+                # 🎯 สลับตำแหน่งวันที่จาก YYYY-MM-DD เป็น DD/MM/YYYY
+                date_parts = item['expiry_date'].split('-')
+                show_date = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}" if len(date_parts) == 3 else item['expiry_date']
 
-        # ส่วนของหมวกเซฟตี้ (ฟอร์มตามที่คุณต้องการ)
+                message += f"📦 {item['name']} ({item['category']})\n"
+                message += f"🗓️ หมดอายุ: {show_date}\n"
+                message += "--------------------------\n"
+
         if helmet_alerts:
+            if message != "": message += "\n" 
             message += "👷 [ครบกำหนดเปลี่ยนหมวกเซฟตี้]\n"
             for alert in helmet_alerts:
-                # ดึงชื่อและแผนกมาแสดงในบรรทัดเดียวกัน
                 emp_info = f"{alert['emp_name']} ({alert['department']} - {alert['location']})"
+                lot_text = f" [Lot: {alert['lot_id']}]" if alert['lot_id'] else ""
                 
-                message += f"👤 คุณ{emp_info}\n"
-                message += f"🗓️ เบิกเมื่อ: {alert['timestamp']}\n"
+                # 🎯 ตัดเวลาทิ้งแล้วสลับตำแหน่งวันที่จาก YYYY-MM-DD เป็น DD/MM/YYYY
+                last_date = alert['last_timestamp'][:10]
+                date_parts = last_date.split('-')
+                show_date = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}" if len(date_parts) == 3 else last_date
+                
+                message += f"👤 {emp_info}\n"
+                message += f"📦 รายการ: {alert['product_name']}{lot_text}\n"
+                message += f"🗓️ เบิกล่าสุด: {show_date}\n"
+                message += "--------------------------\n"
             
-        # ถ้ามีข้อความให้ส่งเข้า LINE
         if message:
             send_line_message(message.strip())
-            print("✅ ส่งแจ้งเตือนฟอร์มใหม่เข้า LINE เรียบร้อย")
-        else:
-            print("💤 ไม่มีรายการแจ้งเตือนที่ตรงเงื่อนไข")
-    pass
 
 def update_scheduler_time(new_time):
     """
@@ -1459,16 +1828,16 @@ def update_scheduler_time(new_time):
 # 1. API ดึงเวลาปัจจุบันมาโชว์ในช่อง Input
 @app.route('/admin/get_alert_time')
 def get_alert_time():
-    if not session.get('admin_logged_in'): return jsonify({'error': 'Unauthorized'}), 401
+    if not session.get('admin_logged_in'): 
+        return jsonify({'error': 'Unauthorized'}), 401
     
     conn = get_db_connection()
-    # ดึงค่า daily_alert_time จากตาราง settings
+    # ดึงค่าจากตาราง settings
     row = conn.execute("SELECT value FROM settings WHERE key = 'daily_alert_time'").fetchone()
     conn.close()
     
-    # ถ้าไม่มีข้อมูลใน DB ให้ส่งค่าพื้นฐานไป (เช่น 08:30)
     current_time = row['value'] if row else "08:30"
-    return jsonify({'time': current_time})
+    return jsonify({'time': current_time}) #
 
 # 2. API บันทึกเวลาใหม่
 @app.route('/admin/save_alert_time', methods=['POST'])
@@ -1522,6 +1891,74 @@ def test_alert():
     scheduled_daily_alert()
     return "🚀 สั่งรันระบบแจ้งเตือนเรียบร้อย! เช็ค LINE และ Terminal"
 
+@app.route('/admin/get_monthly_report_data')
+def get_monthly_report_data():
+    if not session.get('admin_logged_in'):
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    month = request.args.get('month')
+    year = request.args.get('year')
+    
+    # ดึงข้อมูลวันที่ทั้ง 2 รูปแบบที่พบใน DB ของคุณ
+    pattern1 = f'{year}-{month}-%'   # yyyy-mm-dd
+    pattern2 = f'%/{month}/{year} %' # dd/mm/yyyy
+    
+    conn = get_db_connection()
+    query = '''
+        SELECT p.name as item_name, SUM(l.qty) as total, p.unit
+        FROM transaction_logs l
+        JOIN products p ON l.product_id = p.id
+        WHERE (l.timestamp LIKE ? OR l.timestamp LIKE ?) 
+        AND l.status = 'Approved'
+        GROUP BY p.id
+        ORDER BY total DESC
+    '''
+    results = conn.execute(query, (pattern1, pattern2)).fetchall()
+    conn.close()
+    
+    return jsonify({
+        'labels': [r['item_name'] for r in results],
+        'values': [r['total'] for r in results],
+        'units': [r['unit'] for r in results]
+    })
+
+@app.route('/admin/export_monthly_excel')
+def export_monthly_excel():
+    if not session.get('admin_logged_in'): return redirect(url_for('index'))
+    
+    month = request.args.get('month')
+    year = request.args.get('year')
+    pattern1 = f'{year}-{month}-%'
+    pattern2 = f'%/{month}/{year} %'
+
+    conn = get_db_connection()
+    query = '''
+        SELECT 
+            l.timestamp as "วัน/เวลา",
+            u.name as "ผู้เบิก",
+            u.department as "แผนก",
+            p.code as "รหัสสินค้า",
+            p.name as "รายการสินค้า",
+            l.qty as "จำนวน",
+            p.unit as "หน่วย",
+            l.status as "สถานะ"
+        FROM transaction_logs l
+        JOIN products p ON l.product_id = p.id
+        JOIN users u ON l.emp_id = u.emp_id
+        WHERE (l.timestamp LIKE ? OR l.timestamp LIKE ?) 
+        AND l.status = 'Approved'
+        ORDER BY l.timestamp ASC
+    '''
+    df = pd.read_sql_query(query, conn, params=(pattern1, pattern2))
+    conn.close()
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Monthly_Report')
+    output.seek(0)
+
+    return send_file(output, as_attachment=True, download_name=f"Report_{month}_{year}.xlsx")
+    
 if __name__ == '__main__':
     # 1. เริ่มต้นระบบจัดการ Job
     if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
