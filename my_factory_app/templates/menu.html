@@ -1,215 +1,381 @@
 <!DOCTYPE html>
 <html lang="th">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>รายการเบิกอุปกรณ์ - Stock System</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@200;300;400;500;600;700&display=swap"
+        rel="stylesheet">
     <style>
-        :root { --primary-soft: #e7f1ff; --text-dark: #2d3436; }
-        body { background-color: #f8f9fa; font-family: "Mitr", sans-serif; font-weight: 200; color: var(--text-dark); }
-        .product-card { border: none; border-radius: 12px; transition: 0.2s; background: white; }
-        .product-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-        .cart-float { position: fixed; bottom: 25px; right: 25px; z-index: 1030; }
-        .btn-cart { width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative; border: none; }
-        .badge-cart { position: absolute; top: -5px; right: -5px; padding: 5px 8px; font-size: 0.75rem; }
-        .input-qty { width: 60px !important; text-align: center; border-radius: 8px 0 0 8px !important; font-weight: bold; }
-        .btn-add-item { border-radius: 0 8px 8px 0 !important; }
+        :root {
+            --primary-soft: #e7f1ff;
+            --text-dark: #2d3436;
+        }
+
+        body {
+            background-color: #f8f9fa;
+            font-family: "Mitr", sans-serif;
+            font-weight: 300;
+            color: var(--text-dark);
+        }
+
+        /* Sticky Header */
+        .header-container {
+            position: sticky;
+            top: 0;
+            z-index: 1020;
+            background: white;
+        }
+
+        /* Product Card */
+        .product-card {
+            border: none;
+            border-radius: 16px;
+            transition: 0.3s;
+            background: white;
+            overflow: hidden;
+        }
+
+        .product-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+        }
+
+        .category-scroll {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding: 10px 0;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        .category-scroll::-webkit-scrollbar {
+            display: none;
+        }
+
+        .out-of-stock {
+            opacity: 0.6;
+            filter: grayscale(1);
+            pointer-events: none;
+        }
+
+        .out-of-stock-label {
+            color: #dc3545;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        .cart-float {
+            position: fixed;
+            bottom: 25px;
+            right: 25px;
+            z-index: 1030;
+        }
+
+        .btn-cart {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+        }
+
+        .input-qty {
+            width: 55px !important;
+            text-align: center;
+            font-weight: 600;
+            border: 1px solid #eee;
+        }
+
+        .btn-add-item {
+            border-radius: 0 12px 12px 0 !important;
+        }
+
+        /* บังคับสีตัวอักษรขาวเมื่อปุ่ม Active */
+        .cat-btn.btn-primary,
+        .cat-btn.btn-dark {
+            color: #ffffff !important;
+        }
+
+        /* ปรับระยะห่างและฟอนต์ให้ดูสมดุล */
+        .cat-btn {
+            font-weight: 400;
+            transition: all 0.2s ease;
+            border-width: 1px;
+        }
     </style>
 </head>
+
 <body>
 
-<nav class="navbar navbar-white bg-white shadow-sm px-3 py-2 mb-0">
-    <div class="container d-flex justify-content-between">
-        <div class="d-flex align-items-center">
-            <div class="bg-primary text-white rounded-circle p-2 me-2" style="width: 35px; height: 35px; display: flex; align-items: center; justify-content: center;">
-                <i class="fas fa-user-circle"></i>
+    <nav class="navbar navbar-white bg-white border-bottom px-3 py-2">
+        <div class="container d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center">
+                <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center"
+                    style="width: 40px; height: 40px;">
+                    <i class="fas fa-user"></i>
+                </div>
+                <div class="ms-2">
+                    <div class="fw-medium small">{{ user['name'] }}</div>
+                    <div class="text-muted small" style="font-size: 0.7rem;">{{ user['location'] }} | {{
+                        user['department'] }}</div>
+                </div>
             </div>
-            <div>
-                <div class="fw-medium small">{{ user['name'] }}</div>
-                <div class="text-muted" style="font-size: 0.7rem;">{{ user['location'] }} | {{ user['department'] }}</div>
-            </div>
+            <a href="{{ url_for('logout_user', emp_id=user['emp_id']) }}"
+                class="btn btn-outline-danger btn-sm rounded-pill px-3">ออกระบบ</a>
         </div>
-        <a href="{{ url_for('logout_user', emp_id=user['emp_id']) }}" class="btn btn-outline-danger btn-sm rounded-pill px-3">ออก</a>
-    </div>
-</nav>
+    </nav>
 
-<div class="sticky-top bg-white shadow-sm p-3">
-    <div class="container">
-    <form action="/menu" method="GET" class="row g-2">
-        <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
-        <div class="col-9">
-            <div class="input-group">
-            <span class="input-group-text bg-light border-0 rounded-start-pill ps-3"><i class="fas fa-search text-muted"></i></span>
-            <input type="text" name="search" class="form-control rounded-pill bg-light border-0" 
-                   placeholder="รหัส หรือ ชื่ออุปกรณ์..." value="{{ request.args.get('search', '') }}">
+    <div class="header-container shadow-sm p-3">
+        <div class="container">
+            <div class="input-group mb-2">
+                <span class="input-group-text bg-light border-0 rounded-start-pill ps-3">
+                    <i class="fas fa-search text-muted"></i>
+                </span>
+                <input type="text" id="realTimeSearch" class="form-control border-0 bg-light rounded-end-pill py-2"
+                    placeholder="พิมพ์ชื่ออุปกรณ์เพื่อค้นหา..." autocomplete="off">
+            </div>
+
+            <div class="category-scroll">
+                <button class="btn btn-sm btn-info text-white rounded-pill px-3" data-bs-toggle="modal"
+                    data-bs-target="#historyModal">
+                    <i class="fas fa-history me-1"></i> ประวัติ
+                </button>
+                <button onclick="filterCategory('')"
+                    class="btn btn-sm rounded-pill px-3 cat-btn {% if not current_category %}btn-dark{% else %}btn-outline-dark{% endif %}">
+                    ทั้งหมด
+                </button>
+                {% for cat in all_categories %}
+                <button onclick="filterCategory('{{ cat }}')"
+                    class="btn btn-sm rounded-pill px-3 cat-btn {% if current_category == cat %}btn-primary{% else %}btn-outline-primary{% endif %}">
+                    {{ cat }}
+                </button>
+                {% endfor %}
             </div>
         </div>
-        <div class="col-3">
-            <button type="submit" class="btn btn-primary w-100 rounded-pill">ค้นหา</button>
-        </div>
-    </form>
-    
-    <div class="d-flex gap-2 overflow-auto py-2" style="white-space: nowrap;">
-        <a href="{{ url_for('menu', emp_id=user['emp_id'], search=request.args.get('search', '')) }}" 
-           class="btn btn-sm rounded-pill px-3 {% if not current_category %}btn-dark{% else %}btn-outline-dark{% endif %}">
-           ทั้งหมด
-        </a>
-        {% for cat in all_categories %}
-        <a href="{{ url_for('menu', emp_id=user['emp_id'], category=cat, search=request.args.get('search', '')) }}" 
-           class="btn btn-sm rounded-pill px-3 {% if current_category == cat %}btn-primary{% else %}btn-outline-primary{% endif %}">
-           {{ cat }}
-        </a>
-        {% endfor %}
     </div>
-    </div>
-</div>
 
-<div class="container py-4">
-    {% with messages = get_flashed_messages(with_categories=true) %}
+    <div class="container py-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert alert-{{ category }} rounded-4 border-0 shadow-sm py-2 small mb-3">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-
-    <div class="row g-2">
-        {% if not products %}
-        <div class="col-12 text-center py-5">
-            <i class="fas fa-box-open fa-3x text-light mb-3"></i>
-            <p class="text-muted">ไม่พบข้อมูลอุปกรณ์</p>
-        </div>
-        {% endif %}
-
-        {% for cat, items in products.items() %}
-        <div class="col-12 mt-3 mb-1">
-            <small class="text-uppercase fw-semibold text-muted" style="letter-spacing: 1px;">{{ cat }}</small>
-        </div>
-        {% for item in items %}
-        <div class="col-12 col-md-6 col-lg-4">
-            <div class="product-card p-3 shadow-sm border h-100">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div style="max-width: 60%;">
-                        <h6 class="fw-medium mb-0 text-dark">{{ item['name'] }}</h6>
-                        <small class="text-muted d-block">ID: {{ item['code'] }}</small>
-                        <small class="badge bg-light text-primary mt-1 fw-normal">คงเหลือ: {{ item['stock'] }} {{ item['unit'] }}</small>
-                    </div>
-                    <div class="text-end">
-                        <form action="/add_to_cart" method="POST" class="input-group input-group-sm">
-                            <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
-                            <input type="hidden" name="product_id" value="{{ item['id'] }}">
-                            <input type="hidden" name="current_search" value="{{ request.args.get('search', '') }}">
-                            <input type="hidden" name="current_cat" value="{{ current_category }}">
-                            
-                            <input type="number" name="qty" class="form-control input-qty" value="1" min="1" max="{{ item['stock'] }}">
-                            <button type="submit" class="btn btn-success btn-add-item px-3">
-                                <i class="fas fa-plus"></i>
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }} rounded-3 border-0 shadow-sm py-2 mb-3 small">{{ message }}</div>
         {% endfor %}
-        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <div class="row g-3" id="productDisplayArea">
+            {% include 'product_list_partial.html' %}
+        </div>
     </div>
-</div>
 
-<div class="cart-float">
-    <button class="btn btn-warning cart-btn shadow-lg btn-cart" data-bs-toggle="modal" data-bs-target="#cartModal">
-        <i class="fas fa-shopping-basket fa-xl text-dark"></i>
-        {% if cart_items %}
-        <span class="badge bg-danger rounded-pill badge-cart shadow-sm">{{ cart_items|length }}</span>
-        {% endif %}
-    </button>
-</div>
+    <div class="cart-float">
+        <button class="btn btn-warning shadow-lg btn-cart" data-bs-toggle="modal" data-bs-target="#cartModal">
+            <i class="fas fa-shopping-basket fa-lg"></i>
+            {% if cart_items %}
+            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                {{ cart_items|length }}
+            </span>
+            {% endif %}
+        </button>
+    </div>
 
-<div class="modal fade" id="cartModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content border-0 shadow-lg rounded-4">
-            <div class="modal-header border-0 pb-0">
-                <h5 class="modal-title fw-medium"><i class="fas fa-clipboard-list me-2"></i>รายการเบิกของฉัน</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body p-4">
-                {% if cart_items %}
-                <div class="table-responsive">
-                    <table class="table table-borderless align-middle mb-0">
-                        <thead class="text-muted small border-bottom">
-                            <tr>
-                                <th>รายการ</th>
-                                <th class="text-center">จำนวน</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in cart_items %}
-                            <tr class="border-bottom">
-                                <td>
-                                    <span class="badge bg-light text-primary mb-1 fw-normal">{{ item['category'] }}</span>
-                                    <div class="fw-medium text-dark">{{ item['name'] }}</div>
-                                    <small class="text-muted">{{ item['code'] }}</small>
-                                </td>
-                                <td class="text-center">
-                                    <span class="fs-5 fw-semibold text-primary">{{ item['qty'] }}</span>
-                                </td>
-                                <td class="text-end">
-                                    <form action="/remove_from_cart" method="POST">
-                                        <input type="hidden" name="cart_id" value="{{ item['id'] }}">
-                                        <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
-                                        <input type="hidden" name="product_id" value="{{ item['product_id'] }}">
-                                        <input type="hidden" name="qty" value="{{ item['qty'] }}">
-                                        <input type="hidden" name="current_search" value="{{ request.args.get('search', '') }}">
-                                        <input type="hidden" name="current_cat" value="{{ current_category }}">
-    
-                                        <button type="submit" class="btn btn-link text-danger p-0">
-                                            <i class="fas fa-trash-alt"></i>
-                                        </button>
-                                    </form>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+    <div class="modal fade" id="cartModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg rounded-4">
+                <div class="modal-header border-0">
+                    <h5 class="modal-title fw-medium"><i class="fas fa-cart-arrow-down me-2"></i>ตะกร้าของฉัน</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="alert alert-info mt-3 py-2 small border-0 bg-light text-primary">
-                    <i class="fas fa-info-circle me-1"></i> รายการนี้ถูกบันทึกไว้ในระบบแล้ว (ไม่หายเมื่อปิดโปรแกรม)
+                <div class="modal-body p-3">
+                    {% if cart_items %}
+                    <div class="table-responsive">
+                        <table class="table table-borderless align-middle">
+                            <tbody>
+                                {% for item in cart_items %}
+                                <tr class="border-bottom">
+                                    <td>
+                                        <div class="fw-medium">{{ item['name'] }}</div>
+                                        <small class="text-muted">{{ item['code'] }}</small>
+                                    </td>
+                                    <td class="text-center" style="min-width: 120px;">
+                                        <div class="d-flex align-items-center justify-content-center gap-2">
+                                            <button class="btn btn-sm btn-light border rounded-circle"
+                                                onclick="updateQty('{{ item['id'] }}', -1, '{{ user['emp_id'] }}')">-</button>
+                                            <span id="qty-{{ item['id'] }}" class="fw-medium mx-1">{{ item['qty']
+                                                }}</span>
+                                            <button class="btn btn-sm btn-light border rounded-circle"
+                                                onclick="updateQty('{{ item['id'] }}', 1, '{{ user['emp_id'] }}')">+</button>
+                                        </div>
+                                    </td>
+                                    <td class="text-end">
+                                        <form action="/remove_from_cart" method="POST">
+                                            <input type="hidden" name="cart_id" value="{{ item['id'] }}">
+                                            <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
+                                            <input type="hidden" name="product_id" value="{{ item['product_id'] }}">
+                                            <input type="hidden" name="qty" value="{{ item['qty'] }}">
+                                            <button type="submit" class="btn btn-link text-danger"><i
+                                                    class="fas fa-trash"></i></button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-center py-4 text-muted">
+                        <i class="fas fa-shopping-cart fa-3x mb-3 opacity-25"></i>
+                        <p>ยังไม่มีสินค้าในตะกร้า</p>
+                    </div>
+                    {% endif %}
                 </div>
-                {% else %}
-                <div class="text-center py-5">
-                    <i class="fas fa-shopping-basket fa-3x text-light mb-3"></i>
-                    <p class="text-muted">ยังไม่ได้เลือกอุปกรณ์</p>
+                <div class="modal-footer border-0">
+                    <form action="/confirm_withdrawal" method="POST" class="w-100">
+                        <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
+                        <button type="submit" class="btn btn-success w-100 rounded-pill py-3 fw-medium" {% if not
+                            cart_items %}disabled{% endif %}>
+                            ยืนยันการเบิกพัสดุ
+                        </button>
+                    </form>
                 </div>
-                {% endif %}
-            </div>
-            <div class="modal-footer border-0 p-4 pt-0">
-                <form action="/confirm_withdrawal" method="POST" class="w-100">
-                    <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
-                    <button type="submit" class="btn btn-success w-100 rounded-pill py-3 fw-medium fs-5 shadow" 
-                            {% if not cart_items %}disabled{% endif %}>
-                        ยืนยันการเบิกอุปกรณ์
-                    </button>
-                </form>
             </div>
         </div>
     </div>
-</div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script>
-    document.addEventListener("DOMContentLoaded", function() {
-        // ถ้ามี parameter open_cart=true ให้เปิด Modal ทันที (กรณีลบของแล้วอยากให้อยู่หน้าเดิม)
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('open_cart') === 'true') {
-            var cartModal = new bootstrap.Modal(document.getElementById('cartModal'));
-            cartModal.show();
+    <div class="modal fade" id="historyModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 rounded-4">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-medium">🕒 ประวัติล่าสุด</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <div class="list-group list-group-flush">
+                        {% for h in history %}
+                        <div class="list-group-item p-3">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <div class="fw-medium">{{ h['product_name'] }}</div>
+                                    <small class="text-muted">{{ h['timestamp'] }}</small>
+                                </div>
+                                <span
+                                    class="badge {% if h['status'] == 'Approved' %}bg-success{% elif h['status'] == 'Pending' %}bg-warning text-dark{% else %}bg-danger{% endif %} rounded-pill">
+                                    {{ h['qty'] }} {{ h['unit'] }}
+                                </span>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script>
+        const searchInput = document.getElementById('realTimeSearch');
+        const displayArea = document.getElementById('productDisplayArea');
+        const empId = "{{ user['emp_id'] }}";
+        let currentCategory = "";
+        let timeout = null;
+
+        // Real-time Search Logic
+        searchInput.addEventListener('input', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => fetchProducts(), 300);
+        });
+
+        // Category Filter Logic
+        function filterCategory(cat) {
+            currentCategory = cat;
+
+            // เลือกปุ่มหมวดหมู่ทั้งหมด
+            const buttons = document.querySelectorAll('.cat-btn');
+
+            buttons.forEach(btn => {
+                // ล้างคลาสสีเดิมออกทั้งหมดเพื่อเริ่มใหม่
+                btn.classList.remove('btn-dark', 'btn-primary', 'btn-outline-dark', 'btn-outline-primary');
+
+                // ตรวจสอบว่าเป็นปุ่ม "ทั้งหมด" หรือปุ่ม "หมวดหมู่เฉพาะ"
+                const isAllBtn = btn.getAttribute('onclick').includes("('')");
+                const isCurrentCat = btn.getAttribute('onclick').includes(`('${cat}')`);
+
+                if (cat === "" && isAllBtn) {
+                    // ถ้าเลือก "ทั้งหมด" ให้ปุ่มนั้นเป็นสีดำ
+                    btn.classList.add('btn-dark');
+                } else if (isCurrentCat && cat !== "") {
+                    // ถ้าเลือกหมวดหมู่เฉพาะ ให้ปุ่มนั้นเป็นสีฟ้า
+                    btn.classList.add('btn-primary');
+                } else {
+                    // ปุ่มที่ไม่ได้ถูกเลือก ให้เป็นแบบ Outline (โปร่งแสง)
+                    if (isAllBtn) {
+                        btn.classList.add('btn-outline-dark');
+                    } else {
+                        btn.classList.add('btn-outline-primary');
+                    }
+                }
+            });
+
+            fetchProducts(); // เรียกฟังก์ชันโหลดสินค้าแบบ Real-time
         }
-    });
-</script>
+
+        function fetchProducts() {
+            const query = searchInput.value;
+            fetch(`/api/search_products?emp_id=${empId}&search=${query}&category=${currentCategory}`)
+                .then(res => res.text())
+                .then(html => { displayArea.innerHTML = html; });
+        }
+
+        // Update Qty in Cart
+        function updateQty(cartId, delta, empId) {
+            const qtyElem = document.getElementById('qty-' + cartId);
+            qtyElem.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+            const formData = new FormData();
+            formData.append('cart_id', cartId);
+            formData.append('qty', parseInt(qtyElem.innerText || 0) + delta);
+            formData.append('emp_id', empId);
+
+            fetch('/update_cart_qty', { method: 'POST', body: formData })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.href = `?emp_id=${empId}&open_cart=true`;
+                    } else {
+                        Swal.fire('ผิดพลาด', data.message, 'error');
+                        fetchProducts(); // Refresh stock
+                    }
+                });
+        }
+
+        // Confirmation before submit
+        document.querySelector('form[action="/confirm_withdrawal"]').onsubmit = function (e) {
+            e.preventDefault();
+            Swal.fire({
+                title: 'ยืนยันการเบิก?',
+                text: "ข้อมูลจะถูกส่งไปยังแผนกคลังสินค้า",
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'ยืนยัน',
+                cancelButtonText: 'ยกเลิก'
+            }).then(res => { if (res.isConfirmed) this.submit(); });
+        };
+
+        // Auto-open cart if needed
+        window.onload = () => {
+            if (new URLSearchParams(window.location.search).get('open_cart') === 'true') {
+                new bootstrap.Modal(document.getElementById('cartModal')).show();
+            }
+        };
+    </script>
 </body>
+
 </html>

@@ -231,7 +231,7 @@
         <div class="form-box">
 
             <div class="form-content" id="userForm">
-                <h2 class="text-center fw-bold mb-1">ยินดีต้อนรับ</h2>
+                <h2 class="text-center fw-medium mb-1">ยินดีต้อนรับ</h2>
                 <p class="text-muted text-center mb-4 small">ระบุรหัสพนักงานเพื่อเข้าสู่ระบบ</p>
 
                 {% with messages = get_flashed_messages(category_filter=['user_error']) %}
@@ -255,7 +255,7 @@
             </div>
 
             <div class="form-content" id="adminForm" style="display: none;">
-                <h2 class="text-center fw-bold mb-1">Admin Access</h2>
+                <h2 class="text-center fw-medium mb-1">Admin Access</h2>
                 <p class="text-muted text-center mb-4 small">ลงชื่อเข้าใช้สิทธิ์ผู้ดูแลระบบ</p>
 
                 {% with messages = get_flashed_messages(category_filter=['admin_error']) %}
@@ -286,14 +286,14 @@
         <div class="side-panel">
             <div id="sideContentUser">
                 <div style="font-size: 3.5rem; margin-bottom: 1rem;">🏭</div>
-                <h3 class="fw-bold">STOCK SYSTEM</h3>
+                <h3 class="fw-medium">STOCK SYSTEM</h3>
                 <p class="small opacity-75 px-3">ระบบจัดการเบิกจ่ายพัสดุอุปกรณ์<br>PPE, Medicine, Maid Equipment, Stationary, IT stock</p>
                 <button class="btn-outline-white" onclick="toggleMode(true)">แอดมินระบบ?</button>
             </div>
 
             <div id="sideContentAdmin" style="display: none;">
                 <div style="font-size: 3.5rem; margin-bottom: 1rem;"><i class="fas fa-user-shield"></i></div>
-                <h3 class="fw-bold">ADMIN MODE</h3>
+                <h3 class="fw-medium">ADMIN MODE</h3>
                 <p class="small opacity-75 px-3">เข้าถึงสิทธิ์การจัดการหลังบ้าน<br>และดูรายงานสรุปทั้งหมด</p>
                 <button class="btn-outline-white" onclick="toggleMode(false)">ไปหน้าพนักงาน</button>
             </div>

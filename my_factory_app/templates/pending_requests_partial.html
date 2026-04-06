@@ -1,0 +1,28 @@
+{% for log in pending_logs %}
+<tr>
+    <td class="small text-muted ps-4">{{ log['timestamp'] }}</td>
+    <td>
+        <div class="fw-medium text-dark">{{ log['emp_name'] }}</div>
+        <small class="text-muted">{{ log['department'] }}</small>
+    </td>
+    <td>{{ log['product_name'] }} <small class="text-muted">({{ log['unit'] }})</small></td>
+    <td class="text-center fw-medium text-primary">{{ log['qty'] }}</td>
+    <td class="text-center">
+        <button onclick="confirmAction('{{ url_for('approve_request', log_id=log['id']) }}', 'อนุมัติการเบิกนี้?')"
+            class="btn btn-sm btn-success rounded-pill px-3 me-1 shadow-sm">
+            <i class="fas fa-check me-1"></i>อนุมัติ
+        </button>
+        <button onclick="confirmAction('{{ url_for('reject_request', log_id=log['id']) }}', 'ปฏิเสธรายการนี้?', 'warning')"
+            class="btn btn-sm btn-outline-danger rounded-pill px-3 shadow-sm">
+            <i class="fas fa-times me-1"></i>ปฏิเสธ
+        </button>
+    </td>
+</tr>
+{% else %}
+<tr>
+    <td colspan="5" class="text-center py-5 text-muted">
+        <i class="fas fa-inbox fa-3x mb-3 opacity-25 d-block"></i>
+        ไม่มีรายการรออนุมัติ
+    </td>
+</tr>
+{% endfor %}

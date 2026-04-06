@@ -12,7 +12,9 @@
         rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/th.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 
     <style>
@@ -180,6 +182,27 @@
             color: #ffc107 !important;
             /* บังคับสีเหลืองทอง */
         }
+
+        /* บังคับสีสำหรับ Stat Cards ในกรณี Bootstrap ไม่รองรับ subtle */
+        .bg-warning-subtle {
+            background-color: #fff3cd !important;
+        }
+
+        .bg-danger-subtle {
+            background-color: #f8d7da !important;
+        }
+
+        .bg-primary-subtle {
+            background-color: #cfe2ff !important;
+        }
+
+        .bg-success-subtle {
+            background-color: #d1e7dd !important;
+        }
+
+        .rounded-3 {
+            border-radius: 1rem !important;
+        }
     </style>
 </head>
 
@@ -190,13 +213,14 @@
             data-bs-target="#sidebarMenu">
             <span class="navbar-toggler-icon"></span>
         </button>
-        <span class="navbar-brand mb-0 h1 fs-6 fw-bold">PCM STOCK ADMIN</span>
+        <span class="navbar-brand mb-0 h1 fs-6 fw-medium">PCM STOCK ADMIN</span>
     </nav>
 
     <div class="offcanvas-lg offcanvas-start sidebar bg-dark shadow-sm" id="sidebarMenu" tabindex="-1">
         <div class="d-flex flex-column h-100 py-3">
             <div class="px-4 mb-4 mt-2">
-                <h5 class="text-white fw-bold mb-1"><i class="fas fa-shield-alt text-primary me-2"></i>{{ role|upper }}
+                <h5 class="text-white fw-medium mb-1"><i class="fas fa-shield-alt text-primary me-2"></i>{{ role|upper
+                    }}
                 </h5>
                 <small class="text-white-50">ยินดีต้อนรับ, {{ session.get('admin_name') }}</small>
             </div>
@@ -217,7 +241,7 @@
                 </a>
 
                 <div class="nav-category text-white-50">รายงาน & การทำรายการ</div>
-                <a href="{{ url_for('monthly_report') }}" class="nav-link">
+                <a href="javascript:void(0)" class="nav-link" onclick="toggleReportSection()">
                     <i class="fas fa-chart-line me-2 text-warning"></i> รายงานประจำเดือน
                 </a>
                 <a href="{{ url_for('print_all_qrs') }}" target="_blank" class="nav-link">
@@ -229,46 +253,126 @@
                     data-bs-target="#userManagementModal">
                     <i class="fas fa-users-cog me-2 text-primary"></i> จัดการพนักงาน
                 </a>
-                <a href="{{ url_for('manage_zombies') }}" class="nav-link">
+                <a href="javascript:void(0)" class="nav-link" onclick="openZombieModal()">
                     <i class="fas fa-user-clock me-2 text-primary"></i> ตรวจสอบพนักงานค้าง
                 </a>
 
                 {% if role == 'superadmin' %}
                 <div class="nav-category text-white-50">ระบบจัดการขั้นสูง</div>
-                <a href="javascript:void(0)" class="nav-link" data-bs-toggle="modal"
-                    data-bs-target="#alertSettingModal">
+                <a href="javascript:void(0)" class="nav-link" onclick="openAlertSettingModal()">
                     <i class="fas fa-bell-cog me-2 text-warning"></i> ตั้งเวลาแจ้งเตือน LINE
+                </a>
+                
+                <a href="javascript:void(0)" class="nav-link text-danger" data-bs-toggle="modal" data-bs-target="#dangerZoneModal">
+                    <i class="fas fa-radiation me-2"></i> ล้างข้อมูลระบบ (Set Zero)
                 </a>
                 {% endif %}
             </div>
 
             <div class="px-4 py-3 mt-auto border-top border-secondary">
-                <a href="/admin/logout" class="btn btn-outline-danger w-100 rounded-pill fw-bold">
+                <a href="/admin/logout" class="btn btn-outline-danger w-100 rounded-pill fw-medium">
                     <i class="fas fa-sign-out-alt me-2"></i> ออกจากระบบ
                 </a>
             </div>
         </div>
     </div>
 
+
     <main class="content-wrapper py-4">
         <div class="container-fluid px-3 px-md-4 px-lg-5">
 
+            <div class="row g-3 mb-4">
+                <div class="col-6 col-xl-3">
+                    <div class="card border-0 shadow-sm bg-white h-100">
+                        <div class="card-body d-flex align-items-center">
+                            <div class="flex-shrink-0 bg-warning-subtle text-warning rounded-3 p-3"
+                                style="width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fas fa-clock fa-2x"></i>
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <div class="small text-muted">รออนุมัติ</div>
+                                <div class="h4 fw-medium mb-0 text-dark" id="pendingStatCount">{{ pending_logs|length }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-6 col-xl-3">
+                    <div class="card border-0 shadow-sm bg-white h-100">
+                        <div class="card-body d-flex align-items-center">
+                            <div class="flex-shrink-0 bg-danger-subtle text-danger rounded-3 p-3"
+                                style="width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fas fa-exclamation-triangle fa-2x"></i>
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <div class="small text-muted">สต็อกต่ำ</div>
+                                <div class="h4 fw-medium mb-0 text-dark">{{ low_stock|length }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-6 col-xl-3">
+                    <div class="card border-0 shadow-sm bg-white h-100">
+                        <div class="card-body d-flex align-items-center">
+                            <div class="flex-shrink-0 bg-primary-subtle text-primary rounded-3 p-3"
+                                style="width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fas fa-users fa-2x"></i>
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <div class="small text-muted">พนักงานออนไลน์</div>
+                                <div class="h4 fw-medium mb-0 text-dark" id="onlineCount">0</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-6 col-xl-3">
+                    <div class="card border-0 shadow-sm bg-white h-100">
+                        <div class="card-body d-flex align-items-center">
+                            <div class="flex-shrink-0 bg-success-subtle text-success rounded-3 p-3"
+                                style="width: 60px; height: 60px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fab fa-line fa-2x"></i>
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <div class="small text-muted">แจ้งเตือน LINE</div>
+                                <div><span
+                                        class="badge bg-success-subtle text-success rounded-pill fw-normal">Active</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-            {% for category, message in messages %}
-            <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm mb-4 border-0 rounded-3">
-                {{ message }}
+            <div
+                class="alert alert-info alert-dismissible fade show shadow-sm mb-4 border-0 rounded-3 bg-white d-flex align-items-center p-3">
+                <div class="bg-info text-white rounded-circle p-2 me-3"
+                    style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+                    <i class="fas fa-info-circle"></i>
+                </div>
+                <div class="flex-grow-1">
+                    <h6 class="mb-0 fw-medium text-dark">แจ้งเตือนระบบ</h6>
+                    <ul class="mb-0 small text-muted ps-3">
+                        {% for category, message in messages %}
+                        <li>{{ message }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
-            {% endfor %}
             {% endif %}
             {% endwith %}
 
             <div class="card border-0 shadow-sm mb-4">
                 <div
-                    class="card-header bg-warning text-dark fw-bold py-3 d-flex justify-content-between align-items-center border-0">
+                    class="card-header bg-warning text-dark fw-medium py-3 d-flex justify-content-between align-items-center border-0">
                     <span><i class="fas fa-bell me-2"></i>รายการขอเบิกใหม่ (รออนุมัติ)</span>
-                    <span class="badge bg-dark rounded-pill px-3">{{ pending_logs|length }} รายการ</span>
+                    <span class="badge bg-dark rounded-pill px-3" id="pendingBadgeCount">{{ pending_logs|length }}
+                        รายการ</span>
                 </div>
                 <div class="card-body p-0 table-responsive">
                     <table class="table table-hover mb-0 align-middle">
@@ -281,7 +385,8 @@
                                 <th class="text-center">จัดการ</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="pendingTableBody">
+                            {% include 'pending_requests_partial.html' %}
                             {% for log in pending_logs %}
                             <tr>
                                 <td class="small text-muted ps-4">{{ log['timestamp'] }}</td>
@@ -290,14 +395,18 @@
                                     <small class="text-muted">{{ log['department'] }}</small>
                                 </td>
                                 <td>{{ log['product_name'] }} <small class="text-muted">({{ log['unit'] }})</small></td>
-                                <td class="text-center fw-bold text-primary">{{ log['qty'] }}</td>
+                                <td class="text-center fw-medium text-primary">{{ log['qty'] }}</td>
                                 <td class="text-center">
-                                    <a href="{{ url_for('approve_request', log_id=log['id']) }}"
-                                        class="btn btn-sm btn-success rounded-pill px-3 me-1 shadow-sm"><i
-                                            class="fas fa-check me-1"></i>อนุมัติ</a>
-                                    <a href="{{ url_for('reject_request', log_id=log['id']) }}"
-                                        class="btn btn-sm btn-outline-danger rounded-pill px-3 shadow-sm"><i
-                                            class="fas fa-times me-1"></i>ปฏิเสธ</a>
+                                    <button
+                                        onclick="confirmAction('{{ url_for('approve_request', log_id=log['id']) }}', 'อนุมัติการเบิกนี้?')"
+                                        class="btn btn-sm btn-success rounded-pill px-3 me-1 shadow-sm">
+                                        <i class="fas fa-check me-1"></i>อนุมัติ
+                                    </button>
+                                    <button
+                                        onclick="confirmAction('{{ url_for('reject_request', log_id=log['id']) }}', 'ปฏิเสธรายการนี้?', 'warning')"
+                                        class="btn btn-sm btn-outline-danger rounded-pill px-3 shadow-sm">
+                                        <i class="fas fa-times me-1"></i>ปฏิเสธ
+                                    </button>
                                 </td>
                             </tr>
                             {% else %}
@@ -316,15 +425,15 @@
             <div class="card border-0 shadow-sm mb-4">
                 <div class="card-header bg-success text-white py-3 border-0">
                     <div class="row align-items-center">
-                        <div class="col-md-4 fw-bold"><i class="fas fa-boxes me-2"></i>จัดการสต็อก</div>
+                        <div class="col-md-4 fw-medium"><i class="fas fa-boxes me-2"></i>จัดการสต็อก</div>
                         <div class="col-md-8 mt-3 mt-md-0">
                             <div class="d-flex gap-2 justify-content-md-end flex-wrap">
                                 <a href="{{ url_for('print_all_qrs') }}" target="_blank"
-                                    class="btn btn-warning btn-sm fw-bold shadow-sm">
+                                    class="btn btn-warning btn-sm fw-medium shadow-sm">
                                     <i class="fas fa-print me-1"></i> พิมพ์ QR ทั้งหมด
                                 </a>
                                 <select id="stockCatSelector" class="form-select form-select-sm shadow-none"
-                                    style="max-width: 150px;">
+                                    style="max-width: 150px;" onchange="loadStock()">
                                     <option value="">ทุกหมวดหมู่</option>
                                     {% for cat in categories %}
                                     <option value="{{ cat['category'] }}">{{ cat['category'] }}</option>
@@ -332,7 +441,8 @@
                                 </select>
                                 <input type="text" id="stockSearchInput"
                                     class="form-control form-control-sm shadow-none"
-                                    placeholder="ค้นหารหัส หรือ ชื่อ..." style="max-width: 200px;">
+                                    placeholder="ค้นหารหัส หรือ ชื่อ..." style="max-width: 200px;"
+                                    oninput="loadStock()">
                             </div>
                         </div>
                     </div>
@@ -352,14 +462,18 @@
                         </thead>
                         <tbody id="stockTableBody">
                             {% for item in items %}
-                            <tr>
-                                <td class="ps-4"><code
-                                        class="text-primary fw-bold bg-primary-subtle px-2 py-1 rounded">{{ item['code'] }}</code>
+                            <tr
+                                class="align-middle {% if item['is_active'] == 0 %}table-secondary opacity-75{% endif %}">
+                                <td class="ps-4"><code>{{ item['code'] }}</code></td>
+                                <td class="fw-medium">
+                                    {{ item['name'] }}
+                                    {% if item['is_active'] == 0 %}
+                                    <span class="badge bg-danger ms-1" style="font-size: 0.6rem;">ปิดใช้งาน</span>
+                                    {% endif %}
                                 </td>
-                                <td class="fw-medium">{{ item['name'] }}</td>
                                 <td><span class="badge bg-light text-dark border">{{ item['category'] }}</span></td>
                                 <td
-                                    class="text-center fw-bold {{ 'text-danger' if item['stock'] <= item['safety_stock'] else 'text-success' }}">
+                                    class="text-center fw-medium {{ 'text-danger' if item['stock'] <= item['safety_stock'] else 'text-success' }}">
                                     {{ item['stock'] }}
                                 </td>
                                 <td class="text-center text-muted">{{ item['safety_stock'] }}</td>
@@ -371,14 +485,31 @@
                                 </td>
                                 <td class="text-center text-nowrap">
                                     <button
-                                        class="btn btn-sm btn-light text-success border shadow-sm rounded-circle me-1 hover-shadow"
-                                        title="เพิ่มสต็อก (Add Lot)" onclick="openAddLotModal('{{ item['code'] }}')">
-                                        <i class="fas fa-plus"></i>
+                                        class="btn btn-sm {% if item['is_active'] == 1 %}btn-light text-danger{% else %}btn-danger text-white{% endif %} border shadow-sm rounded-circle"
+                                        title="เปิด/ปิดใช้งาน"
+                                        onclick="toggleProductStatus('{{ item['id'] }}', '{{ item['name'] }}', {{ item['is_active'] }})">
+                                        <i
+                                            class="fas {% if item['is_active'] == 1 %}fa-eye-slash{% else %}fa-eye{% endif %}"></i>
                                     </button>
+
+                                    <button
+                                        class="btn btn-sm btn-light text-success border shadow-sm rounded-circle me-1"
+                                        title="เพิ่มสต็อก (Add Lot)" onclick="openAddLotModal('{{ item.code }}')"> <i
+                                            class="fas fa-plus"></i>
+                                    </button>
+
                                     <button
                                         class="btn btn-sm btn-light text-warning border shadow-sm rounded-circle hover-shadow"
-                                        title="แก้ไข" onclick="editProductModal('{{ item['code'] }}')">
+                                        title="แก้ไข" onclick="editProductModal('{{ item['code'] }}')" {% if
+                                        item['is_active']==0 %} disabled style="cursor: not-allowed; opacity: 0.5;" {%
+                                        endif %}>
                                         <i class="fas fa-edit"></i>
+                                    </button>
+
+                                    <button
+                                        class="btn btn-sm btn-light text-danger border shadow-sm rounded-circle me-1"
+                                        title="ตัดจำหน่ายสินค้า (Scrap)" onclick="openWriteOffModal('{{ item.code }}')">
+                                        <i class="fas fa-trash-alt"></i>
                                     </button>
                                 </td>
                             </tr>
@@ -392,7 +523,7 @@
                 <div class="col-lg-7">
                     <div class="card border-0 shadow-sm h-100">
                         <div class="card-header bg-white py-3 border-0">
-                            <h6 class="mb-0 fw-bold text-dark"><i
+                            <h6 class="mb-0 fw-medium text-dark"><i
                                     class="fas fa-chart-bar me-2 text-primary"></i>สัดส่วนการเบิกจ่ายรายแผนก (30
                                 วันล่าสุด)</h6>
                         </div>
@@ -405,7 +536,8 @@
                 <div class="col-lg-5">
                     <div class="card border-0 shadow-sm h-100">
                         <div class="card-header bg-white py-3 border-0">
-                            <h6 class="mb-0 fw-bold text-dark"><i class="fas fa-fire me-2 text-danger"></i>ของเบิกสูงสุด
+                            <h6 class="mb-0 fw-medium text-dark"><i
+                                    class="fas fa-fire me-2 text-danger"></i>ของเบิกสูงสุด
                                 (Top 5)</h6>
                         </div>
                         <div class="card-body p-0">
@@ -441,7 +573,7 @@
             <div class="card border-0 shadow-sm mb-4">
                 <div
                     class="card-header bg-danger text-white py-3 d-flex justify-content-between align-items-center border-0">
-                    <h6 class="mb-0 fw-bold"><i class="fas fa-exclamation-triangle me-2"></i>รายการของใกล้หมด (Low
+                    <h6 class="mb-0 fw-medium"><i class="fas fa-exclamation-triangle me-2"></i>รายการของใกล้หมด (Low
                         Stock)</h6>
                     <select id="lowStockCatSelector" class="form-select form-select-sm shadow-none w-auto">
                         <option value="">-- ทุกหมวดหมู่ --</option>
@@ -466,17 +598,54 @@
                     </table>
                 </div>
             </div>
+            <div id="monthlyReportSection" class="card border-0 shadow-sm mb-4" style="display: none;">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 fw-medium text-primary"><i class="fas fa-file-alt me-2"></i>รายงานสรุปประจำเดือน</h6>
+                    <div class="d-flex gap-2">
+                        <select id="reportMonth" class="form-select form-select-sm" style="width: 130px;"
+                            onchange="fetchMonthlyReport()">
+                            <option value="01">มกราคม</option>
+                            <option value="02">กุมภาพันธ์</option>
+                            <option value="03">มีนาคม</option>
+                            <option value="04">เมษายน</option>
+                            <option value="05">พฤษภาคม</option>
+                            <option value="06">มิถุนายน</option>
+                            <option value="07">กรกฎาคม</option>
+                            <option value="08">สิงหาคม</option>
+                            <option value="09">กันยายน</option>
+                            <option value="10">ตุลาคม</option>
+                            <option value="11">พฤศจิกายน</option>
+                            <option value="12">ธันวาคม</option>
+                        </select>
+                        <select id="reportYear" class="form-select form-select-sm" style="width: 100px;"
+                            onchange="fetchMonthlyReport()">
+                        </select>
 
+                        <button class="btn btn-success btn-sm rounded-pill px-3" onclick="exportMonthlyReport()">
+                            <i class="fas fa-file-excel me-1"></i> Export Excel
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm rounded-circle" onclick="toggleReportSection()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+
+                </div>
+                <div class="card-body">
+                    <div style="height: 350px;">
+                        <canvas id="monthlyChart"></canvas>
+                    </div>
+                </div>
+            </div>
             <div class="card border-0 shadow-sm mb-4">
                 <div
-                    class="card-header bg-primary text-white fw-bold py-3 d-flex flex-wrap justify-content-between align-items-center border-0 gap-2">
+                    class="card-header bg-primary text-white fw-medium py-3 d-flex flex-wrap justify-content-between align-items-center border-0 gap-2">
                     <span><i class="fas fa-history me-2"></i>ประวัติการทำรายการ (Approved/Completed)</span>
 
                     <div class="d-flex align-items-center gap-3">
                         {% if role == 'superadmin' %}
                         <div class="btn-group btn-group-sm bg-white rounded-pill p-1 shadow-sm">
                             <button onclick="filterLogs('')" id="btn-log-all"
-                                class="btn btn-sm rounded-pill px-3 btn-primary fw-bold">รวม</button>
+                                class="btn btn-sm rounded-pill px-3 btn-primary fw-medium">รวม</button>
                             <button onclick="filterLogs('PC1')" id="btn-log-pc1"
                                 class="btn btn-sm rounded-pill px-3 btn-light text-muted border-0 fw-medium">PC1</button>
                             <button onclick="filterLogs('CC')" id="btn-log-cc"
@@ -534,7 +703,7 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content border-0 shadow-lg">
                 <div class="modal-header bg-dark text-white border-0">
-                    <h5 class="modal-title fw-bold"><i
+                    <h5 class="modal-title fw-medium"><i
                             class="fas fa-plus-circle text-success me-2"></i>เพิ่มของใหม่เข้าระบบ</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
@@ -591,18 +760,20 @@
                             <div class="col-md-6">
                                 <label class="form-label fw-medium text-muted small">วันที่รับเข้า (ระบบจะสร้าง Lot
                                     อัตโนมัติ รูปแบบ DDMMYYYY)</label>
-                                <input type="date" name="received_date" class="form-control shadow-none">
+                                <input type="text" name="received_date" id="date_picker_add" placeholder="DD/MM/YYYY"
+                                    class="form-control shadow-none">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label fw-medium text-muted small">วันหมดอายุ (ถ้ามี)</label>
-                                <input type="date" name="expiry_date" class="form-control shadow-none">
+                                <label class="form-label fw-medium text-muted small">วันหมดอายุ</label>
+                                <input type="text" id="date_picker_expiry" name="expiry_date" placeholder="DD/MM/YYYY"
+                                    class="form-control shadow-none">
                             </div>
                         </div>
                     </div>
                     <div class="modal-body border-top bg-light text-end">
                         <button type="button" class="btn btn-secondary px-4 rounded-pill"
                             data-bs-dismiss="modal">ยกเลิก</button>
-                        <button type="button" class="btn btn-success px-4 rounded-pill fw-bold"
+                        <button type="button" class="btn btn-success px-4 rounded-pill fw-medium"
                             onclick="submitAddProduct()">บันทึกข้อมูล</button>
                     </div>
                 </form>
@@ -614,7 +785,7 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content border-0 shadow-lg">
                 <div class="modal-header bg-dark text-white border-0">
-                    <h5 class="modal-title fw-bold"><i class="fas fa-edit text-warning me-2"></i>แก้ไขข้อมูลพัสดุ</h5>
+                    <h5 class="modal-title fw-medium"><i class="fas fa-edit text-warning me-2"></i>แก้ไขข้อมูลพัสดุ</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <form id="editProductForm">
@@ -655,14 +826,14 @@
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-medium text-muted small">วันหมดอายุ</label>
-                            <input type="date" id="edit_expiry_date" name="expiry_date"
+                            <input type="text" id="edit_date_picker_expiry" name="expiry_date" placeholder="DD/MM/YYYY"
                                 class="form-control shadow-none">
                         </div>
                     </div>
                     <div class="modal-body border-top bg-light text-end">
                         <button type="button" class="btn btn-secondary px-4 rounded-pill"
                             data-bs-dismiss="modal">ยกเลิก</button>
-                        <button type="button" class="btn btn-primary px-4 rounded-pill fw-bold"
+                        <button type="button" class="btn btn-primary px-4 rounded-pill fw-medium"
                             onclick="submitEditProduct()">บันทึกการแก้ไข</button>
                     </div>
                 </form>
@@ -674,13 +845,14 @@
         <div class="modal-dialog modal-xl">
             <div class="modal-content bg-white border-0 shadow-lg">
                 <div class="modal-header bg-dark text-white border-0">
-                    <h5 class="modal-title fw-bold"><i class="fas fa-users text-info me-2"></i>รายชื่อพนักงานในระบบ</h5>
+                    <h5 class="modal-title fw-medium"><i class="fas fa-users text-info me-2"></i>รายชื่อพนักงานในระบบ
+                    </h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body p-4 bg-light">
                     <form id="addUserForm" class="row g-3 mb-4 p-4 bg-white rounded-3 shadow-sm align-items-end border">
                         <div class="col-12 mb-1">
-                            <h6 class="fw-bold text-primary border-bottom pb-2 m-0"><i
+                            <h6 class="fw-medium text-primary border-bottom pb-2 m-0"><i
                                     class="fas fa-user-plus me-2"></i>แบบฟอร์มพนักงาน</h6>
                         </div>
                         <div class="col-md-2">
@@ -718,7 +890,7 @@
                             </select>
                         </div>
                         <div class="col-md-2" id="userSubmitBtnContainer">
-                            <button type="button" class="btn btn-success btn-sm w-100 fw-bold shadow-sm py-2"
+                            <button type="button" class="btn btn-success btn-sm w-100 fw-medium shadow-sm py-2"
                                 onclick="submitAddUser()">
                                 <i class="fas fa-plus-circle me-1"></i> เพิ่มพนักงาน
                             </button>
@@ -751,7 +923,7 @@
         <div class="modal-dialog">
             <div class="modal-content border-0 shadow-lg">
                 <div class="modal-header bg-success text-white border-0">
-                    <h5 class="modal-title fw-bold"><i class="fas fa-box-open me-2"></i>เพิ่มสต็อก (Add Lot)</h5>
+                    <h5 class="modal-title fw-medium"><i class="fas fa-box-open me-2"></i>เพิ่มสต็อก (Add Lot)</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <form id="addLotForm">
@@ -759,39 +931,41 @@
                         <input type="hidden" id="addLot_product_id" name="product_id">
 
                         <div class="mb-3">
-                            <label class="form-label text-muted small fw-bold">สินค้าที่ต้องการเพิ่ม</label>
+                            <label class="form-label text-muted small fw-medium">สินค้าที่ต้องการเพิ่ม</label>
                             <input type="text" id="addLot_product_display"
                                 class="form-control bg-light fw-medium text-primary" readonly>
                         </div>
 
                         <div class="row g-3">
                             <div class="col-sm-6">
-                                <label class="form-label text-muted small fw-bold">จำนวนที่เพิ่มเข้า *</label>
+                                <label class="form-label text-muted small fw-medium">จำนวนที่เพิ่มเข้า *</label>
                                 <div class="input-group">
                                     <input type="number" name="add_qty" class="form-control shadow-none border-success"
                                         required min="1" placeholder="ระบุจำนวน">
                                 </div>
                             </div>
                             <div class="col-sm-6">
-                                <label class="form-label text-muted small fw-bold">เลข Lot (ปล่อยว่างเพื่อ Auto)</label>
+                                <label class="form-label text-muted small fw-medium">เลข Lot (ปล่อยว่างเพื่อ
+                                    Auto)</label>
                                 <input type="text" id="addLot_number" name="lot_number" class="form-control shadow-none"
                                     placeholder="DDMMYYYY">
                             </div>
                             <div class="col-sm-6">
-                                <label class="form-label text-muted small fw-bold">วันที่รับเข้า</label>
-                                <input type="date" id="addLot_receive_date" name="receive_date"
+                                <label class="form-label text-muted small fw-medium">วันที่รับเข้า</label>
+                                <input type="text" id="date_picker_lot" name="receive_date" placeholder="DD/MM/YYYY"
                                     class="form-control shadow-none">
                             </div>
                             <div class="col-sm-6">
-                                <label class="form-label text-muted small fw-bold">วันหมดอายุ (ถ้ามี)</label>
-                                <input type="date" name="expire_date" class="form-control shadow-none">
+                                <label class="form-label text-muted small fw-medium">วันหมดอายุ (ถ้ามี)</label>
+                                <input type="text" id="add_lot_date_picker_expiry" name="expire_date"
+                                    placeholder="DD/MM/YYYY" class="form-control shadow-none">
                             </div>
                         </div>
                     </div>
                     <div class="modal-footer bg-light border-0">
                         <button type="button" class="btn btn-secondary rounded-pill px-4"
                             data-bs-dismiss="modal">ยกเลิก</button>
-                        <button type="button" class="btn btn-success rounded-pill px-4 fw-bold"
+                        <button type="button" class="btn btn-success rounded-pill px-4 fw-medium"
                             onclick="submitAddLot()">
                             <i class="fas fa-save me-1"></i> บันทึกสต็อก
                         </button>
@@ -800,11 +974,63 @@
             </div>
         </div>
     </div>
+    <div class="modal fade" id="writeOffModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-danger text-white border-0">
+                    <h5 class="modal-title fw-medium"><i class="fas fa-trash-alt me-2"></i>ตัดจำหน่ายสินค้า (Scrap)</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body bg-light">
+                    <form id="writeOffForm">
+                        <input type="hidden" name="product_id" id="writeOff_product_id">
+
+                        <div class="mb-3">
+                            <label class="form-label text-muted small fw-medium">รหัส / ชื่อสินค้า</label>
+                            <input type="text" id="writeOff_product_display" class="form-control text-muted bg-white"
+                                readonly>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-6">
+                                <label class="form-label text-danger small fw-medium">จำนวนที่ต้องการตัดทิ้ง *</label>
+                                <input type="number" name="qty" id="writeOff_qty"
+                                    class="form-control border-danger shadow-none" min="1" required>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label text-muted small fw-medium">คงเหลือปัจจุบัน</label>
+                                <input type="text" id="writeOff_current_stock" class="form-control text-muted bg-white"
+                                    readonly>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label text-muted small fw-medium">เหตุผลการตัดจำหน่าย *</label>
+                            <select name="reason" class="form-select shadow-none" required>
+                                <option value="สินค้าหมดอายุ">สินค้าหมดอายุ</option>
+                                <option value="ชำรุด / เสียหาย">ชำรุด / เสียหาย</option>
+                                <option value="สูญหาย">สูญหาย</option>
+                                <option value="อื่นๆ">อื่นๆ</option>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer border-0 bg-white">
+                    <button type="button" class="btn btn-secondary rounded-pill px-4 shadow-sm"
+                        data-bs-dismiss="modal">ยกเลิก</button>
+                    <button type="button" class="btn btn-danger rounded-pill px-4 shadow-sm" onclick="submitWriteOff()">
+                        <i class="fas fa-check me-2"></i>ยืนยันการตัดจำหน่าย
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="modal fade" id="alertSettingModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content border-0 shadow-lg">
                 <div class="modal-header bg-dark text-white border-0">
-                    <h5 class="modal-title fw-bold">
+                    <h5 class="modal-title fw-medium">
                         <i class="fas fa-bell text-warning me-2"></i>ตั้งเวลาแจ้งเตือน LINE
                     </h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
@@ -820,29 +1046,29 @@
                         </div>
 
                         <div class="mb-3">
-                            <label class="form-label fw-bold small text-muted">ระบุเวลา (24 ชม.)</label>
+                            <label class="form-label fw-medium small text-muted">ระบุเวลา (24 ชม.)</label>
                             <div class="input-group input-group-lg shadow-sm">
                                 <span class="input-group-text bg-white border-primary text-primary">
                                     <i class="fas fa-history"></i>
                                 </span>
 
                                 <select id="alert_hour"
-                                    class="form-select border-primary text-center fw-bold shadow-none">
+                                    class="form-select border-primary text-center fw-medium shadow-none">
                                     {% for h in range(24) %}
                                     <option value="{{ '%02d'|format(h) }}">{{ '%02d'|format(h) }}</option>
                                     {% endfor %}
                                 </select>
 
-                                <span class="input-group-text bg-white border-primary fw-bold">:</span>
+                                <span class="input-group-text bg-white border-primary fw-medium">:</span>
 
                                 <select id="alert_minute"
-                                    class="form-select border-primary text-center fw-bold shadow-none">
+                                    class="form-select border-primary text-center fw-medium shadow-none">
                                     {% for m in range(0, 60, 5) %}
                                     <option value="{{ '%02d'|format(m) }}">{{ '%02d'|format(m) }}</option>
                                     {% endfor %}
                                 </select>
 
-                                <span class="input-group-text bg-light border-primary fw-bold small">น.</span>
+                                <span class="input-group-text bg-light border-primary fw-medium small">น.</span>
                             </div>
                             <div class="form-text mt-2">
                                 <i class="fas fa-info-circle me-1"></i> ระบบจะส่งข้อความแจ้งเตือนตามเวลานี้ทุกวัน
@@ -854,7 +1080,7 @@
                         <button type="button" class="btn btn-secondary px-4 rounded-pill" data-bs-dismiss="modal">
                             ยกเลิก
                         </button>
-                        <button type="button" class="btn btn-primary px-4 rounded-pill fw-bold"
+                        <button type="button" class="btn btn-primary px-4 rounded-pill fw-medium"
                             onclick="saveAlertTime()">
                             <i class="fas fa-save me-1"></i> บันทึกการตั้งค่า
                         </button>
@@ -863,295 +1089,126 @@
             </div>
         </div>
     </div>
+    <div class="modal fade" id="zombieModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-warning text-dark border-0">
+                    <h5 class="modal-title fw-medium">
+                        <i class="fas fa-user-clock me-2"></i>รายชื่อพนักงานที่ระบบมองว่า "Online" ค้างอยู่
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <div class="table-responsive" style="max-height: 400px;">
+                        <table class="table table-hover mb-0 align-middle">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th class="ps-4">รหัสพนักงาน</th>
+                                    <th>ชื่อ-นามสกุล</th>
+                                    <th>แผนก / สถานที่</th>
+                                    <th>ใช้งานล่าสุด</th>
+                                    <th class="text-center">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="zombieTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0">
+                    <button type="button" class="btn btn-secondary rounded-pill px-4"
+                        data-bs-dismiss="modal">ปิดหน้าต่าง</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% if role == 'superadmin' %}
+    <div class="modal fade" id="dangerZoneModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-danger text-white border-0">
+                    <h5 class="modal-title fw-medium">
+                        <i class="fas fa-exclamation-triangle me-2"></i>Danger Zone (พื้นที่อันตราย)
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body bg-light p-4">
+                    <div class="alert alert-warning border-0 shadow-sm mb-4">
+                        <i class="fas fa-info-circle me-2"></i> <strong>คำเตือน:</strong> การกระทำในส่วนนี้ไม่สามารถเรียกคืนข้อมูลได้ กรุณาตรวจสอบให้แน่ใจก่อนดำเนินการ
+                    </div>
+
+                    <div class="card border-0 shadow-sm mb-3">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="fw-medium text-danger mb-1">ล้างประวัติการทำรายการ</h6>
+                                    <small class="text-muted">ลบประวัติเบิก-จ่ายทั้งหมด</small>
+                                </div>
+                                <button class="btn btn-outline-danger btn-sm rounded-pill px-3" onclick="confirmClearData('logs')">
+                                    <i class="fas fa-trash me-1"></i> Set Zero Logs
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="fw-medium text-danger mb-1">ล้างสต็อกสินค้า</h6>
+                                    <small class="text-muted">ลบล็อตและปรับสต็อกเป็น 0</small>
+                                </div>
+                                <button class="btn btn-outline-danger btn-sm rounded-pill px-3" onclick="confirmClearData('lots')">
+                                    <i class="fas fa-box-open me-1"></i> Set Zero Stock
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
     <form id="importForm" action="{{ url_for('import_excel') }}" method="POST" enctype="multipart/form-data"
         style="display: none;">
         <input type="file" id="importFile" name="file" accept=".xlsx, .xls" onchange="submitImport()">
     </form>
-
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        function submitImport() {
-            const fileInput = document.getElementById('importFile');
-            if (fileInput.files.length > 0) {
-                // ใช้ SweetAlert เพื่อยืนยันการนำเข้า (ถ้าคุณลง Library ไว้แล้ว)
+        // ==========================================
+        // 1. ตัวแปร Global และการตั้งค่าเริ่มต้น
+        // ==========================================
+        let currentLogPage = 1;
+        let currentLogLoc = '';
+        let idleTime = 0;
+        const maxIdleTime = 60; // Auto-logout 60 นาที
+        let monthlyChartObj = null; // ตัวแปรเก็บกราฟรายงาน
+
+        function checkAuth(response) {
+            if (response.status === 401 || response.statusText === 'Unauthorized') {
                 Swal.fire({
-                    title: 'ยืนยันการนำเข้าข้อมูล?',
-                    text: "ระบบจะอัปเดตสต็อกตามไฟล์ที่คุณเลือก",
-                    icon: 'question',
-                    showCancelButton: true,
-                    confirmButtonColor: '#3085d6',
-                    cancelButtonColor: '#d33',
-                    confirmButtonText: 'ตกลง, นำเข้าเลย!',
-                    cancelButtonText: 'ยกเลิก'
-                }).then((result) => {
-                    if (result.isConfirmed) {
-                        // แสดง Loading ระหว่างรอ
-                        Swal.fire({
-                            title: 'กำลังนำเข้าข้อมูล...',
-                            allowOutsideClick: false,
-                            didOpen: () => { Swal.showLoading(); }
-                        });
-                        // ส่งฟอร์ม
-                        document.getElementById('importForm').submit();
-                    } else {
-                        // ล้างค่าไฟล์ถ้ากดยกเลิก
-                        fileInput.value = '';
-                    }
-                });
+                    icon: 'warning',
+                    title: 'Session หมดอายุ',
+                    text: 'กรุณาเข้าสู่ระบบใหม่อีกครั้ง',
+                    confirmButtonText: 'ตกลง'
+                }).then(() => { window.location.href = '/admin_login'; });
+                throw new Error("Unauthorized access");
             }
-        }
-        // 1. ฟังก์ชันกรอง Log
-        function filterLogs(loc) {
-            fetch(`/admin/filter_logs?log_loc=${encodeURIComponent(loc)}`)
-                .then(response => response.text())
-                .then(html => {
-                    const body = document.getElementById('logTableBody');
-                    if (body) body.innerHTML = html;
-                })
-                .catch(err => console.error('Filter Logs Error:', err));
-
-            const btns = { '': 'btn-log-all', 'PC1': 'btn-log-pc1', 'CC': 'btn-log-cc' };
-            Object.keys(btns).forEach(key => {
-                const el = document.getElementById(btns[key]);
-                if (el) el.className = (key === loc) ? 'btn btn-sm rounded-pill px-3 btn-primary fw-bold' : 'btn btn-sm rounded-pill px-3 btn-light text-muted border-0 fw-medium';
-            });
+            return response;
         }
 
-        // 2. ฟังก์ชัน Gen Code สินค้า
-        function generateNextCode() {
-            const category = document.getElementById('productCategory').value;
-            const location = document.getElementById('productLocation').value;
-            const codeInput = document.getElementById('productCode');
-
-            if (!category || !location) {
-                codeInput.value = '';
-                return;
-            }
-            fetch(`/admin/get_next_code?category=${encodeURIComponent(category)}&location=${encodeURIComponent(location)}`)
-                .then(response => response.json())
-                .then(data => { codeInput.value = data.next_code; })
-                .catch(error => console.error('Gen Code Error:', error));
-        }
-
-        // 3. ฟังก์ชันสินค้า (Edit & Submit)
-        function editProductModal(code) {
-            fetch('/admin/get_product/' + code)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        Swal.fire({ icon: 'error', title: 'ข้อผิดพลาด', text: 'ไม่พบข้อมูลของ' });
-                        return;
-                    }
-                    document.getElementById('edit_code').value = data.code;
-                    document.getElementById('edit_code_display').value = data.code;
-                    document.getElementById('edit_name').value = data.name;
-                    document.getElementById('edit_category').value = data.category;
-                    document.getElementById('edit_category_display').value = data.category;
-                    document.getElementById('edit_unit').value = data.unit;
-                    document.getElementById('edit_location').value = data.location;
-                    document.getElementById('edit_location_display').value = data.location;
-                    document.getElementById('edit_safety_stock').value = data.safety_stock;
-                    document.getElementById('edit_stock').value = data.stock;
-                    document.getElementById('edit_expiry_date').value = data.expiry_date || '';
-
-                    new bootstrap.Modal(document.getElementById('editProductModal')).show();
-                })
-                .catch(error => console.error('Edit Modal Error:', error));
-        }
-
-        function submitEditProduct() {
-            const form = document.querySelector('#editProductModal form');
-            const formData = new FormData(form);
-
-            fetch('/admin/edit_product', { method: 'POST', body: formData })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        bootstrap.Modal.getInstance(document.getElementById('editProductModal')).hide();
-                        document.getElementById('stockSearchInput').dispatchEvent(new Event('input')); // รีโหลดตาราง
-                        Swal.fire({ icon: 'success', title: 'บันทึกสำเร็จ', text: data.message, showConfirmButton: false, timer: 1500 });
-                    } else {
-                        Swal.fire({ icon: 'error', title: 'ข้อผิดพลาด', text: data.message });
-                    }
-                })
-                .catch(error => console.error('Submit Error:', error));
-        }
-
-        function submitAddProduct() {
-            const form = document.querySelector('#addProductModal form');
-            const formData = new FormData(form);
-
-            fetch('/admin/add_product', { method: 'POST', body: formData })
-                .then(res => res.json()) // ตอนนี้จะอ่าน JSON สำเร็จแล้ว
-                .then(data => {
-                    if (data.success) {
-                        // ปิด Modal
-                        bootstrap.Modal.getInstance(document.getElementById('addProductModal')).hide();
-                        // รีเฟรชตาราง
-                        document.getElementById('stockSearchInput').dispatchEvent(new Event('input'));
-                        // ล้างฟอร์ม
-                        form.reset();
-                        // แจ้งเตือนสวยๆ
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'เพิ่มข้อมูลสำเร็จ',
-                            showConfirmButton: false,
-                            timer: 1500
-                        });
-                    } else {
-                        Swal.fire({ icon: 'error', title: 'ข้อผิดพลาด', text: data.message });
-                    }
-                })
-                .catch(err => {
-                    console.error('Submit Error:', err);
-                    Swal.fire({ icon: 'error', title: 'ระบบขัดข้อง', text: 'ไม่สามารถติดต่อ Server ได้' });
-                });
-        }
-        // 4. ฟังก์ชันพนักงาน (User Management)
-        function updateDeptDropdown(callback) {
-            fetch('/admin/list_departments')
-                .then(res => res.json())
-                .then(depts => {
-                    const select = document.getElementById('userDeptSelect');
-                    if (!select) return;
-                    let html = '<option value="">-- เลือกแผนก --</option>';
-                    depts.forEach(d => { html += `<option value="${d.name}">${d.name}</option>`; });
-                    select.innerHTML = html;
-                    if (callback) callback();
-                })
-                .catch(err => console.error("❌ ดึงแผนกไม่สำเร็จ:", err));
-        }
-
-        document.getElementById('userManagementModal').addEventListener('shown.bs.modal', function () {
-            updateDeptDropdown();
-            loadUserList();
-        });
-
-        function editUser(id, name, dept, loc) {
-            updateDeptDropdown(() => {
-                const form = document.getElementById('addUserForm');
-                form.querySelector('[name="emp_id"]').value = id;
-                form.querySelector('[name="emp_id"]').readOnly = true;
-                form.querySelector('[name="name"]').value = name;
-
-                const deptSelect = document.getElementById('userDeptSelect');
-                deptSelect.value = dept || "";
-
-                const locSelect = form.querySelector('[name="location"]');
-                if (locSelect) locSelect.value = loc;
-
-                const btnAction = document.getElementById('userSubmitBtnContainer');
-                btnAction.innerHTML = `
-                    <div class="d-grid gap-2">
-                        <button type="button" class="btn btn-primary btn-sm shadow-sm py-2 fw-bold" onclick="submitUpdateUser()">
-                            <i class="fas fa-save me-1"></i> บันทึกแก้ไข
-                        </button>
-                        <button type="button" class="btn btn-light border btn-sm fw-medium" onclick="resetUserForm()">ยกเลิก</button>
-                    </div>
-                `;
-                form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            });
-        }
-
-        function loadUserList() {
-            fetch('/admin/list_users')
-                .then(res => res.json())
-                .then(users => {
-                    const tbody = document.getElementById('userTableBody');
-                    tbody.innerHTML = users.map(user => {
-                        const deptDisplay = (user.department && user.department.trim() !== "")
-                            ? user.department
-                            : '<span class="badge bg-secondary opacity-75">Boss / ไม่ระบุ</span>';
-                        return `
-                            <tr>
-                                <td class="ps-4 fw-medium text-primary"># ${user.emp_id}</td>
-                                <td class="fw-medium">${user.name}</td>
-                                <td>${deptDisplay}</td>
-                                <td class="text-center"><span class="badge bg-light text-dark border">${user.location}</span></td>
-                                <td class="text-center">
-                                    <div class="btn-group btn-group-sm shadow-sm">
-                                        <button class="btn btn-light border text-warning" title="แก้ไข" onclick="editUser('${user.emp_id}', '${user.name}', '${user.department || ""}', '${user.location}')"><i class="fas fa-edit"></i></button>
-                                        <button class="btn btn-light border text-danger" title="ลบ" onclick="deleteUser('${user.emp_id}')"><i class="fas fa-trash"></i></button>
-                                    </div>
-                                </td>
-                            </tr>
-                        `;
-                    }).join('');
-                });
-        }
-
-        function submitUpdateUser() {
-            const form = document.getElementById('addUserForm');
-            const formData = new FormData(form);
-
-            fetch('/admin/update_user_ajax', { method: 'POST', body: formData })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        Swal.fire({ icon: 'success', title: 'อัปเดตเรียบร้อย', showConfirmButton: false, timer: 1500 });
-                        resetUserForm();
-                        loadUserList();
-                    } else {
-                        Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: data.message });
-                    }
-                });
-        }
-
-        function resetUserForm() {
-            const form = document.getElementById('addUserForm');
-            form.reset();
-            form.querySelector('[name="emp_id"]').readOnly = false;
-            document.getElementById('userSubmitBtnContainer').innerHTML = `
-                <button type="button" class="btn btn-success btn-sm w-100 fw-bold shadow-sm py-2" onclick="submitAddUser()">
-                    <i class="fas fa-plus-circle me-1"></i> เพิ่มพนักงาน
-                </button>
-            `;
-        }
-
-        function submitAddUser() {
-            const form = document.getElementById('addUserForm');
-            const formData = new FormData(form);
-            fetch('/admin/add_user_ajax', { method: 'POST', body: formData })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        form.reset();
-                        loadUserList();
-                        Swal.fire({ icon: 'success', title: 'เพิ่มพนักงานเรียบร้อย', showConfirmButton: false, timer: 1500 });
-                    } else {
-                        Swal.fire({ icon: 'error', title: 'เพิ่มไม่สำเร็จ', text: data.message });
-                    }
-                });
-        }
-
-        function deleteUser(emp_id) {
-            Swal.fire({
-                title: 'ยืนยันการลบ?',
-                text: `ลบข้อมูลพนักงานรหัส ${emp_id} ใช่หรือไม่?`,
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonColor: '#d33',
-                cancelButtonColor: '#6c757d',
-                confirmButtonText: 'ลบเลย!',
-                cancelButtonText: 'ยกเลิก'
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    fetch(`/admin/delete_user/${emp_id}`, { method: 'POST' })
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                Swal.fire({ title: 'ลบเรียบร้อย!', icon: 'success', showConfirmButton: false, timer: 1000 });
-                                loadUserList();
-                            }
-                        });
-                }
-            });
-        }
-
-        // 5. โหลดเมื่อเข้าหน้าเว็บ (DOMContentLoaded)
         document.addEventListener('DOMContentLoaded', function () {
-            // Chart
+            // --- 1.1 ตั้งค่าปฏิทิน (Flatpickr) ---
+            const dateConfig = { locale: "th", dateFormat: "Y-m-d", altInput: true, altFormat: "d/m/Y", allowInput: true };
+            flatpickr("#date_picker_add", dateConfig);
+            flatpickr("#date_picker_lot", dateConfig);
+            flatpickr("#date_picker_expiry", dateConfig);
+            flatpickr("#add_lot_date_picker_expiry", dateConfig);
+            flatpickr("#edit_date_picker_expiry", dateConfig);
+
+            // --- 1.2 วาดกราฟสัดส่วนการเบิก (Chart.js) หน้า Dashboard ---
             try {
                 const ctx = document.getElementById('deptChart');
                 if (ctx) {
@@ -1174,257 +1231,487 @@
                 options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
             });
         }
-                }
-            } catch (error) { console.error("Chart Error:", error); }
-
-        // Filter Stock
-        try {
-            const catSelect = document.getElementById('stockCatSelector');
-            const searchInput = document.getElementById('stockSearchInput');
-            const tableBody = document.getElementById('stockTableBody');
-
-            function loadStock() {
-                if (!catSelect || !searchInput) return;
-                fetch(`/admin/filter_stock?cat=${encodeURIComponent(catSelect.value)}&search=${encodeURIComponent(searchInput.value)}`)
-                    .then(res => res.text())
-                    .then(html => { tableBody.innerHTML = html; })
-                    .catch(err => console.error('Load Stock Error:', err));
             }
-            if (catSelect) catSelect.addEventListener('change', loadStock);
-            if (searchInput) searchInput.addEventListener('input', loadStock);
-        } catch (error) { }
+        } catch (error) { console.error("Chart Error:", error); }
 
-        // Filter Low Stock
-        try {
-            const lowStockCat = document.getElementById('lowStockCatSelector');
-            const lowStockTable = document.getElementById('lowStockTableBody');
-            if (lowStockCat) {
-                lowStockCat.addEventListener('change', function () {
-                    fetch(`/admin/filter_low_stock?low_stock_cat=${encodeURIComponent(this.value)}`)
-                        .then(res => res.text())
-                        .then(html => { if (lowStockTable) lowStockTable.innerHTML = html; })
-                });
-            }
-        } catch (error) { }
-        });
+        // --- 1.3 เริ่มระบบ Real-time Update ---
+        setupReportYears();
+        refreshDashboard();
+        setInterval(refreshDashboard, 15000); // อัปเดตทุก 15 วินาที
 
-        // 6. Auto-Logout (60 นาที)
-        let idleTime = 0;
-        const maxIdleTime = 60;
-        function resetIdleTime() { idleTime = 0; }
-        document.addEventListener('mousemove', resetIdleTime);
-        document.addEventListener('keypress', resetIdleTime);
-        document.addEventListener('click', resetIdleTime);
-        document.addEventListener('scroll', resetIdleTime);
-        setInterval(function () {
+        // --- 1.4 ระบบดักจับการเคลื่อนไหว ---
+        document.addEventListener('mousemove', () => idleTime = 0);
+        document.addEventListener('keypress', () => idleTime = 0);
+        setInterval(() => {
             idleTime++;
-            if (idleTime >= maxIdleTime) {
-                window.location.href = "/admin/logout";
-            }
+            if (idleTime >= maxIdleTime) window.location.href = "/admin/logout";
         }, 60000);
+    });
 
         // ==========================================
-        // ฟังก์ชัน: เปิดหน้าต่างเพิ่มสต็อก (Add Lot)
+        // 2. ระบบ Dashboard (Real-time)
         // ==========================================
-        function openAddLotModal(code) {
-            fetch('/admin/get_product/' + code)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        Swal.fire({ icon: 'error', title: 'ข้อผิดพลาด', text: 'ไม่พบข้อมูลสินค้า' });
-                        return;
-                    }
+        function refreshDashboard() {
+            // อัปเดตคนออนไลน์
+            fetch('/api/admin/online_count').then(checkAuth).then(res => res.json()).then(data => {
+                const el = document.getElementById('onlineCount');
+                if (el) el.innerText = data.count || 0;
+            }).catch(() => { });
 
-                    // 1. ใส่ชื่อสินค้าโชว์ในช่อง
-                    document.getElementById('addLot_product_id').value = data.id;
-                    document.getElementById('addLot_product_display').value = `[${data.code}] ${data.name}`;
+            // อัปเดตตารางสต็อก (ถ้าไม่ได้พิมพ์ค้นหาอยู่)
+            const searchInput = document.getElementById('stockSearchInput');
+            if (searchInput && searchInput.value === '') loadStock();
 
-                    // 2. สร้างวันที่ Auto (ดึงวันปัจจุบัน)
-                    const today = new Date();
-                    const yyyy = today.getFullYear();
-                    const mm = String(today.getMonth() + 1).padStart(2, '0');
-                    const dd = String(today.getDate()).padStart(2, '0');
-                    const dateString = `${yyyy}-${mm}-${dd}`;
-                    const lotString = `${dd}${mm}${yyyy}`; // สร้างเลข Lot แบบ DDMMYYYY
+            // อัปเดตตารางประวัติเบิก
+            if (currentLogPage === 1) updateLogTable(false);
 
-                    document.getElementById('addLot_receive_date').value = dateString;
-                    document.getElementById('addLot_number').value = lotString;
+            // อัปเดตตารางขอเบิกใหม่
+            updatePendingRequests();
+        }
 
-                    // 3. ล้างค่าจำนวนและวันหมดอายุเก่าทิ้ง
-                    document.querySelector('#addLotForm input[name="add_qty"]').value = '';
-                    document.querySelector('#addLotForm input[name="expire_date"]').value = '';
+        function updatePendingRequests() {
+            fetch('/api/admin/pending_requests').then(checkAuth).then(res => res.text()).then(html => {
+                const tableBody = document.getElementById('pendingTableBody');
+                if (tableBody) tableBody.innerHTML = html;
 
-                    // 4. เปิด Modal
-                    new bootstrap.Modal(document.getElementById('addLotModal')).show();
-                })
-                .catch(error => console.error('Add Lot Modal Error:', error));
+                const hasData = !html.includes("ไม่มีรายการรออนุมัติ");
+                const rowCount = hasData ? (html.match(/<tr>/g) || []).length : 0;
+
+                if (document.getElementById('pendingStatCount')) document.getElementById('pendingStatCount').innerText = rowCount;
+                if (document.getElementById('pendingBadgeCount')) document.getElementById('pendingBadgeCount').innerText = rowCount + " รายการ";
+            });
         }
 
         // ==========================================
-        // ฟังก์ชัน: กดยืนยันบันทึกสต็อก
+        // 3. ระบบจัดการสินค้า (สต็อก)
         // ==========================================
-        function submitAddLot() {
-            const form = document.querySelector('#addLotForm');
-            const formData = new FormData(form);
+        function loadStock() {
+            const cat = document.getElementById('stockCatSelector').value;
+            const search = document.getElementById('stockSearchInput').value;
+            fetch(`/admin/filter_stock?cat=${encodeURIComponent(cat)}&search=${encodeURIComponent(search)}`)
+                .then(checkAuth).then(res => res.text()).then(html => {
+                    document.getElementById('stockTableBody').innerHTML = html;
+                });
+        }
 
-            // ดักเช็คว่ากรอกจำนวนถูกต้องไหม
-            const qty = formData.get('add_qty');
-            if (!qty || parseInt(qty) <= 0) {
-                Swal.fire({ icon: 'warning', title: 'แจ้งเตือน', text: 'กรุณาระบุจำนวนสินค้าที่มากกว่า 0' });
+        function generateNextCode() {
+            const category = document.getElementById('productCategory').value;
+            const location = document.getElementById('productLocation').value;
+            if (!category || !location) return;
+            fetch(`/admin/get_next_code?category=${encodeURIComponent(category)}&location=${encodeURIComponent(location)}`)
+                .then(checkAuth).then(res => res.json()).then(data => {
+                    document.getElementById('productCode').value = data.next_code;
+                });
+        }
+
+        function submitAddProduct() {
+            const form = document.querySelector('#addProductModal form');
+            fetch('/admin/add_product', { method: 'POST', body: new FormData(form) })
+                .then(checkAuth).then(res => res.json()).then(data => {
+                    if (data.success) {
+                        bootstrap.Modal.getInstance(document.getElementById('addProductModal')).hide();
+                        form.reset(); loadStock();
+                        Swal.fire({ icon: 'success', title: 'เพิ่มสำเร็จ', showConfirmButton: false, timer: 1500 });
+                    } else { Swal.fire({ icon: 'error', title: 'ผิดพลาด', text: data.message }); }
+                });
+        }
+
+        function toggleProductStatus(id, name, currentStatus) {
+            const actionText = currentStatus === 1 ? 'ปิดการใช้งาน' : 'เปิดการใช้งาน';
+            Swal.fire({
+                title: `ยืนยัน${actionText}?`, icon: 'warning', showCancelButton: true, confirmButtonText: 'ตกลง', cancelButtonText: 'ยกเลิก'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    fetch(`/admin/toggle_product_status/${id}`, { method: 'POST' })
+                        .then(checkAuth).then(res => res.json()).then(data => {
+                            if (data.success) { loadStock(); Swal.fire('สำเร็จ!', '', 'success'); }
+                        });
+                }
+            });
+        }
+
+        function openAddLotModal(code) {
+            fetch('/admin/get_product/' + code).then(checkAuth).then(res => res.json()).then(data => {
+                document.getElementById('addLot_product_id').value = data.id;
+                document.getElementById('addLot_product_display').value = `[${data.code}] ${data.name}`;
+
+                // --- ส่วนที่ดึงกลับมา: สร้างเลข Lot และวันที่อัตโนมัติ ---
+                const today = new Date();
+                const d = String(today.getDate()).padStart(2, '0');
+                const m = String(today.getMonth() + 1).padStart(2, '0');
+                const y = today.getFullYear();
+                const lotString = `${d}${m}${y}`; // รูปแบบ DDMMYYYY
+
+                // ใส่วันที่ในปฏิทิน
+                const datePickerLot = document.getElementById('date_picker_lot');
+                if (datePickerLot && datePickerLot._flatpickr) {
+                    datePickerLot._flatpickr.setDate(today);
+                }
+                // ใส่เลข Lot ในช่อง
+                document.getElementById('addLot_number').value = lotString;
+                // --------------------------------------------------
+
+                new bootstrap.Modal(document.getElementById('addLotModal')).show();
+            });
+        }
+
+        function submitAddLot() {
+            const form = document.getElementById('addLotForm');
+            fetch('/admin/add_product_ajax', { method: 'POST', body: new FormData(form) })
+                .then(checkAuth).then(res => res.json()).then(data => {
+                    if (data.success) {
+                        bootstrap.Modal.getInstance(document.getElementById('addLotModal')).hide();
+                        form.reset(); loadStock();
+                        Swal.fire({ icon: 'success', title: 'เพิ่มสต็อกเรียบร้อย!', timer: 1500, showConfirmButton: false });
+                    }
+                });
+        }
+
+        function editProductModal(code) {
+            fetch('/admin/get_product/' + code).then(checkAuth).then(res => res.json()).then(data => {
+                document.getElementById('edit_code').value = data.code;
+                document.getElementById('edit_code_display').value = data.code;
+                document.getElementById('edit_name').value = data.name;
+                document.getElementById('edit_category').value = data.category;
+                document.getElementById('edit_category_display').value = data.category;
+                document.getElementById('edit_unit').value = data.unit;
+                document.getElementById('edit_location').value = data.location;
+                document.getElementById('edit_location_display').value = data.location;
+                document.getElementById('edit_safety_stock').value = data.safety_stock;
+                document.getElementById('edit_stock').value = data.stock;
+                if (document.getElementById('edit_date_picker_expiry')._flatpickr) {
+                    document.getElementById('edit_date_picker_expiry')._flatpickr.setDate(data.expiry_date || '');
+                }
+                new bootstrap.Modal(document.getElementById('editProductModal')).show();
+            });
+        }
+
+        function submitEditProduct() {
+            const form = document.getElementById('editProductForm');
+            fetch('/admin/edit_product', { method: 'POST', body: new FormData(form) })
+                .then(checkAuth).then(res => res.json()).then(data => {
+                    if (data.success) {
+                        bootstrap.Modal.getInstance(document.getElementById('editProductModal')).hide();
+                        loadStock();
+                        Swal.fire({ icon: 'success', title: 'แก้ไขสำเร็จ', timer: 1500, showConfirmButton: false });
+                    }
+                });
+        }
+
+        // ==========================================
+        // 4. ระบบประวัติการเบิก (Logs & Pagination)
+        // ==========================================
+        function updateLogTable(shouldScroll = true) {
+            fetch(`/admin/filter_logs?page=${currentLogPage}&log_loc=${encodeURIComponent(currentLogLoc)}`)
+                .then(checkAuth)
+                .then(response => {
+                    const newTotalPages = response.headers.get('X-Total-Pages');
+                    if (newTotalPages) document.getElementById('totalPageNum').innerText = newTotalPages;
+                    return response.text();
+                })
+                .then(html => {
+                    document.getElementById('logTableBody').innerHTML = html;
+                    document.getElementById('currentPageNum').innerText = currentLogPage;
+                    const totalPages = parseInt(document.getElementById('totalPageNum').innerText);
+                    document.getElementById('prevPageItem').classList.toggle('disabled', currentLogPage <= 1);
+                    document.getElementById('nextPageItem').classList.toggle('disabled', currentLogPage >= totalPages);
+                    if (shouldScroll) document.querySelector('.card-header.bg-primary').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+        }
+
+        function filterLogs(loc) {
+            currentLogLoc = loc;
+            currentLogPage = 1;
+            updateLogTable();
+            const btnMap = { '': 'btn-log-all', 'PC1': 'btn-log-pc1', 'CC': 'btn-log-cc' };
+            Object.keys(btnMap).forEach(key => {
+                const btn = document.getElementById(btnMap[key]);
+                if (btn) btn.className = (key === loc) ? 'btn btn-sm rounded-pill px-3 btn-primary fw-medium' : 'btn btn-sm rounded-pill px-3 btn-light text-muted border-0 fw-medium';
+            });
+        }
+
+        function prevLogPage() { if (currentLogPage > 1) { currentLogPage--; updateLogTable(); } }
+        function nextLogPage() {
+            const totalPages = parseInt(document.getElementById('totalPageNum').innerText);
+            if (currentLogPage < totalPages) { currentLogPage++; updateLogTable(); }
+        }
+
+        // ==========================================
+        // 5. ระบบรายงานประจำเดือน (Report Section)
+        // ==========================================
+        function toggleReportSection() {
+            const section = document.getElementById('monthlyReportSection');
+            if (section.style.display === 'none') {
+                section.style.display = 'block';
+                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                setupReportYears();
+                fetchMonthlyReport();
+            } else {
+                section.style.display = 'none';
+            }
+        }
+
+        function setupReportYears() {
+            const yearSelect = document.getElementById('reportYear');
+            if (!yearSelect || yearSelect.options.length > 0) return;
+            const currentYear = new Date().getFullYear();
+            for (let i = 0; i < 5; i++) {
+                let year = currentYear - i;
+                yearSelect.innerHTML += `<option value="${year}">${year + 543}</option>`;
+            }
+        }
+
+        function fetchMonthlyReport() {
+            const month = document.getElementById('reportMonth').value;
+            const year = document.getElementById('reportYear').value;
+            fetch(`/admin/get_monthly_report_data?month=${month}&year=${year}`)
+                .then(checkAuth).then(res => res.json()).then(data => {
+                    const ctx = document.getElementById('monthlyChart').getContext('2d');
+                    if (monthlyChartObj) monthlyChartObj.destroy();
+                    monthlyChartObj = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: data.labels,
+                            datasets: [{
+                                label: `รายการสินค้าที่ถูกเบิก ประจำเดือน ${month}/${parseInt(year) + 543}`,
+                                data: data.values,
+                                backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false }
+                    });
+                });
+        }
+
+        function exportMonthlyReport() {
+            const month = document.getElementById('reportMonth').value;
+            const year = document.getElementById('reportYear').value;
+            window.location.href = `/admin/export_monthly_excel?month=${month}&year=${year}`;
+        }
+
+        // ==========================================
+        // 6. ระบบพนักงานค้าง (Zombie) & พนักงานทั้งหมด
+        // ==========================================
+        function openZombieModal() {
+            fetchZombieUsers();
+            new bootstrap.Modal(document.getElementById('zombieModal')).show();
+        }
+
+        function fetchZombieUsers() {
+            fetch('/admin/list_zombies_json').then(checkAuth).then(res => res.json()).then(users => {
+                const tbody = document.getElementById('zombieTableBody');
+                if (users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">ไม่มีพนักงานค้าง</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = users.map(user => `
+                <tr>
+                    <td class="ps-4">${user.emp_id}</td>
+                    <td>${user.name}</td>
+                    <td>${user.department}</td>
+                    <td>${user.last_seen || '-'}</td>
+                    <td class="text-center">
+                        <button onclick="unlockZombie('${user.emp_id}')" class="btn btn-sm btn-danger rounded-pill">ปลดล็อก</button>
+                    </td>
+                </tr>
+            `).join('');
+            });
+        }
+
+        function unlockZombie(empId) {
+            fetch(`/admin/unlock_user_ajax/${empId}`, { method: 'POST' })
+                .then(checkAuth).then(res => res.json()).then(data => {
+                    if (data.success) { fetchZombieUsers(); refreshDashboard(); }
+                });
+        }
+
+        function loadUserList() {
+            // อัปเดตรายชื่อแผนกใน Dropdown
+            fetch('/admin/list_departments').then(checkAuth).then(res => res.json()).then(depts => {
+                document.getElementById('userDeptSelect').innerHTML = '<option value="">-- เลือกแผนก --</option>' + depts.map(d => `<option value="${d.name}">${d.name}</option>`).join('');
+            });
+
+            // โหลดรายชื่อพนักงาน
+            fetch('/admin/list_users').then(checkAuth).then(res => res.json()).then(users => {
+                const tbody = document.getElementById('userTableBody');
+                tbody.innerHTML = users.map(user => `
+                <tr>
+                    <td class="ps-4 fw-medium text-primary"># ${user.emp_id}</td>
+                    <td class="fw-medium">${user.name}</td>
+                    <td>${user.department || 'ไม่ระบุ'}</td>
+                    <td class="text-center">${user.location}</td>
+                    <td class="text-center">
+                        <button class="btn btn-sm btn-light border text-danger" onclick="deleteUser('${user.emp_id}')"><i class="fas fa-trash"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+            });
+        }
+
+        function submitAddUser() {
+            fetch('/admin/add_user_ajax', { method: 'POST', body: new FormData(document.getElementById('addUserForm')) })
+                .then(checkAuth).then(res => res.json()).then(data => {
+                    if (data.success) { document.getElementById('addUserForm').reset(); loadUserList(); Swal.fire('สำเร็จ', '', 'success'); }
+                    else { Swal.fire('ผิดพลาด', data.message, 'error'); }
+                });
+        }
+
+        function deleteUser(emp_id) {
+            Swal.fire({ title: 'ยืนยันลบพนักงาน?', icon: 'warning', showCancelButton: true, confirmButtonText: 'ลบ' }).then((result) => {
+                if (result.isConfirmed) {
+                    fetch(`/admin/delete_user/${emp_id}`, { method: 'POST' }).then(checkAuth).then(res => res.json()).then(data => {
+                        if (data.success) { loadUserList(); } else { Swal.fire('ผิดพลาด', data.message, 'error'); }
+                    });
+                }
+            });
+        }
+
+        // ==========================================
+        // 7. Utility (ตั้งเวลา, Import, ยืนยัน)
+        // ==========================================
+        function confirmAction(url, title, icon = 'question') {
+            Swal.fire({
+                title: title, icon: icon, showCancelButton: true, confirmButtonText: 'ตกลง', cancelButtonText: 'ยกเลิก'
+            }).then((result) => { if (result.isConfirmed) window.location.href = url; });
+        }
+
+        function submitImport() {
+            const fileInput = document.getElementById('importFile');
+            if (fileInput.files.length > 0) {
+                Swal.fire({ title: 'ยืนยันการนำเข้า?', icon: 'question', showCancelButton: true, confirmButtonText: 'ตกลง' }).then((result) => {
+                    if (result.isConfirmed) {
+                        Swal.fire({ title: 'กำลังนำเข้า...', didOpen: () => { Swal.showLoading(); } });
+                        document.getElementById('importForm').submit();
+                    }
+                });
+            }
+        }
+
+        function openAlertSettingModal() {
+            fetch('/admin/get_alert_time').then(checkAuth).then(res => res.json()).then(data => {
+                if (data.time) {
+                    const [hour, minute] = data.time.split(':');
+                    document.getElementById('alert_hour').value = hour;
+                    document.getElementById('alert_minute').value = minute;
+                }
+                new bootstrap.Modal(document.getElementById('alertSettingModal')).show();
+            }).catch(() => new bootstrap.Modal(document.getElementById('alertSettingModal')).show());
+        }
+
+        function saveAlertTime() {
+            const formData = new FormData();
+            formData.append('alert_time', `${document.getElementById('alert_hour').value}:${document.getElementById('alert_minute').value}`);
+            fetch('/admin/save_alert_time', { method: 'POST', body: formData }).then(checkAuth).then(res => res.json()).then(data => {
+                if (data.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('alertSettingModal')).hide();
+                    Swal.fire('บันทึกสำเร็จ!', '', 'success');
+                }
+            });
+        }
+        // เปิดหน้าต่างและดึงข้อมูลสินค้ามาแสดง
+        function openWriteOffModal(code) {
+            fetch('/admin/get_product/' + code).then(checkAuth).then(res => res.json()).then(data => {
+                document.getElementById('writeOff_product_id').value = data.id;
+                document.getElementById('writeOff_product_display').value = `[${data.code}] ${data.name}`;
+                document.getElementById('writeOff_current_stock').value = data.stock + ' ' + data.unit;
+                document.getElementById('writeOff_qty').max = data.stock; // ห้ามตัดเกินสต็อกที่มี
+                document.getElementById('writeOff_qty').value = ''; // เคลียร์ค่าเดิม
+
+                new bootstrap.Modal(document.getElementById('writeOffModal')).show();
+            });
+        }
+
+        // ส่งข้อมูลไปบันทึก
+        function submitWriteOff() {
+            const qty = document.getElementById('writeOff_qty').value;
+            if (!qty || qty <= 0) {
+                Swal.fire('แจ้งเตือน', 'กรุณาระบุจำนวนที่ต้องการตัดจำหน่าย', 'warning');
                 return;
             }
 
-            // ส่งข้อมูลไปเซิร์ฟเวอร์
-            fetch('/admin/add_product_ajax', { method: 'POST', body: formData })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        // ปิดหน้าต่าง
-                        bootstrap.Modal.getInstance(document.getElementById('addLotModal')).hide();
-                        // รีโหลดข้อมูลในตาราง
-                        const searchInput = document.getElementById('stockSearchInput');
-                        if (searchInput) searchInput.dispatchEvent(new Event('input'));
-
-                        Swal.fire({ icon: 'success', title: 'เพิ่มสต็อกเรียบร้อย!', text: data.message, showConfirmButton: false, timer: 1500 });
-                    } else {
-                        Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: data.message });
-                    }
-                })
-                .catch(err => {
-                    console.error('Submit Add Lot Error:', err);
-                    Swal.fire({ icon: 'error', title: 'ระบบขัดข้อง', text: 'ไม่สามารถเชื่อมต่อกับ Server ได้' });
-                });
-        }
-
-        let currentLogPage = 1; // เก็บหน้าปัจจุบันไว้ในตัวแปร JS
-        let currentLogLoc = '';
-
-        function prevLogPage() {
-            if (currentLogPage > 1) {
-                currentLogPage--;
-                updateLogTable();
-            }
-        }
-
-        function nextLogPage() {
-            const totalPages = parseInt(document.getElementById('totalPageNum').innerText);
-            if (currentLogPage < totalPages) {
-                currentLogPage++;
-                updateLogTable();
-            }
-        }
-
-        function updateLogTable() {
-            const body = document.getElementById('logTableBody');
-            body.style.opacity = '0.5';
-
-            fetch(`/admin/filter_logs?page=${currentLogPage}&log_loc=${encodeURIComponent(currentLogLoc)}`)
-                .then(response => response.text())
-                .then(html => {
-                    body.innerHTML = html;
-                    body.style.opacity = '1';
-
-                    // อัปเดตตัวเลขหน้าบน UI
-                    document.getElementById('currentPageNum').innerText = currentLogPage;
-
-                    // จัดการสถานะปุ่ม (Disable/Enable)
-                    const totalPages = parseInt(document.getElementById('totalPageNum').innerText);
-
-                    // ปุ่มก่อนหน้า
-                    if (currentLogPage <= 1) {
-                        document.getElementById('prevPageItem').classList.add('disabled');
-                    } else {
-                        document.getElementById('prevPageItem').classList.remove('disabled');
-                    }
-
-                    // ปุ่มถัดไป
-                    if (currentLogPage >= totalPages) {
-                        document.getElementById('nextPageItem').classList.add('disabled');
-                    } else {
-                        document.getElementById('nextPageItem').classList.remove('disabled');
-                    }
-
-                    // เลื่อนจอกลับไปที่หัวตาราง
-                    document.querySelector('.card-header.bg-primary').scrollIntoView({ behavior: 'smooth', block: 'start' });
-                });
-        }
-
-        // แก้ฟังก์ชัน filter เดิมให้รีเซ็ตหน้าเป็น 1 เสมอ
-        function filterLogs(loc) {
-            currentLogLoc = loc;
-            currentLogPage = 1; // รีเซ็ตหน้า
-            updateLogTable();
-
-            // อัปเดตสีปุ่ม Filter
-            const btns = { '': 'btn-log-all', 'PC1': 'btn-log-pc1', 'CC': 'btn-log-cc' };
-            Object.keys(btns).forEach(key => {
-                const el = document.getElementById(btns[key]);
-                if (el) el.className = (key === loc) ? 'btn btn-sm rounded-pill px-3 btn-primary fw-bold' : 'btn btn-sm rounded-pill px-3 btn-light text-muted border-0 fw-medium';
-            });
-        }
-        // ฟังก์ชันบันทึกเวลา
-        function saveAlertTime() {
-            // 1. ดึงค่าจาก Select Box ทั้ง 2 ตัว (ชั่วโมง และ นาที)
-            const hr = document.getElementById('alert_hour').value;
-            const min = document.getElementById('alert_minute').value;
-
-            // 2. รวมร่างเป็นฟอร์แมต HH:mm (เช่น "15:30")
-            const fullTime = `${hr}:${min}`;
-
-            // 3. เตรียมข้อมูลส่งไปที่ Python (app.py)
-            const formData = new FormData();
-            formData.append('alert_time', fullTime);
-
-            // 4. แสดง Loading ระหว่างบันทึก
             Swal.fire({
-                title: 'กำลังบันทึกตั้งค่า...',
-                allowOutsideClick: false,
-                didOpen: () => { Swal.showLoading(); }
-            });
-
-            // 5. ยิง Fetch API ไปที่หลังบ้าน
-            fetch('/admin/save_alert_time', {
-                method: 'POST',
-                body: formData
-            })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        // ปิด Modal เมื่อสำเร็จ
-                        const modalEl = document.getElementById('alertSettingModal');
-                        const modalInstance = bootstrap.Modal.getInstance(modalEl);
-                        if (modalInstance) modalInstance.hide();
-
-                        // แจ้งเตือนความสำเร็จด้วย SweetAlert
-                        Swal.fire({
-                            icon: 'success',
-                            title: 'บันทึกสำเร็จ!',
-                            text: `ระบบจะแจ้งเตือน LINE ทุกวันเวลา ${fullTime} น.`,
-                            confirmButtonColor: '#0d6efd'
+                title: 'ยืนยันการตัดจำหน่าย?',
+                text: "สต็อกจะถูกหักออกและบันทึกลงประวัติทันที",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#dc3545',
+                confirmButtonText: 'ยืนยันตัดทิ้ง',
+                cancelButtonText: 'ยกเลิก'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    const form = document.getElementById('writeOffForm');
+                    fetch('/admin/write_off_ajax', { method: 'POST', body: new FormData(form) })
+                        .then(checkAuth).then(res => res.json()).then(data => {
+                            if (data.success) {
+                                bootstrap.Modal.getInstance(document.getElementById('writeOffModal')).hide();
+                                form.reset();
+                                loadStock(); // รีเฟรชตารางสต็อก
+                                updateLogTable(); // รีเฟรชตารางประวัติเพื่อโชว์รายการตัดทิ้ง
+                                Swal.fire({ icon: 'success', title: 'ตัดจำหน่ายเรียบร้อย', timer: 1500, showConfirmButton: false });
+                            } else {
+                                Swal.fire('ผิดพลาด', data.message, 'error');
+                            }
                         });
-                    } else {
-                        Swal.fire({ icon: 'error', title: 'เกิดข้อผิดพลาด', text: data.message });
-                    }
-                })
-                .catch(err => {
-                    console.error('Save Alert Error:', err);
-                    Swal.fire({ icon: 'error', title: 'ระบบขัดข้อง', text: 'ไม่สามารถติดต่อเซิร์ฟเวอร์ได้' });
-                });
+                }
+            });
         }
+        // ฟังก์ชันล้างข้อมูลระบบ
+        function confirmClearData(target) {
+            let titleText = target === 'logs' ? 'ล้างประวัติการทำรายการ (Logs)' : 'ล้างสต็อกทั้งหมด (Lots & Stock)';
+            let warningText = target === 'logs' ? 'ประวัติทั้งหมดจะถูกลบทิ้งอย่างถาวร ไม่สามารถกู้คืนได้!' : 'สินค้าทุกรายการจะกลายเป็น 0 ชิ้น และล็อตทั้งหมดจะถูกลบทิ้ง!';
 
-        // ฟังก์ชันนี้จะทำงาน "ทุกครั้งที่กดเปิด Modal" เพื่อดึงค่าจาก DB มาโชว์
-        document.getElementById('alertSettingModal').addEventListener('shown.bs.modal', function () {
-            fetch('/admin/get_alert_time')
-                .then(res => res.json())
-                .then(data => {
-                    if (data.time) {
-                        const [h, m] = data.time.split(':');
-                        // ตั้งค่าให้ Select Box เลือกตามเวลาที่ดึงมาได้
-                        document.getElementById('alert_hour').value = h;
-                        document.getElementById('alert_minute').value = m;
+            Swal.fire({
+                title: '⚠️ ยืนยันการ Set Zero',
+                html: `<div class="text-danger fw-medium mb-3">${warningText}</div><div class="text-muted small">โปรดใส่รหัสผ่านพิเศษ (Secondary Password) เพื่อยืนยันคำสั่งนี้</div>`,
+                icon: 'warning',
+                input: 'password', // กำหนดให้ Popup มีช่องใส่รหัสผ่าน (ซ่อนตัวอักษร)
+                inputPlaceholder: 'ใส่รหัสผ่านพิเศษที่นี่...',
+                inputAttributes: {
+                    autocapitalize: 'off',
+                    autocorrect: 'off'
+                },
+                showCancelButton: true,
+                confirmButtonColor: '#dc3545',
+                cancelButtonColor: '#6c757d',
+                confirmButtonText: '<i class="fas fa-radiation me-2"></i>ยืนยันล้างข้อมูล',
+                cancelButtonText: 'ยกเลิก',
+                preConfirm: (password) => {
+                    if (!password) {
+                        Swal.showValidationMessage('กรุณาใส่รหัสผ่านเพื่อยืนยันสิทธิ์');
                     }
-                });
-        });
+                    return password;
+                }
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    // โชว์โหลดดิ้งระหว่างล้างข้อมูล
+                    Swal.fire({ title: 'กำลังล้างข้อมูล...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+
+                    // ส่งข้อมูลไปหลังบ้าน
+                    let formData = new FormData();
+                    formData.append('target', target);
+                    formData.append('password', result.value);
+
+                    fetch('/admin/clear_system_data', { method: 'POST', body: formData })
+                        .then(checkAuth).then(res => res.json()).then(data => {
+                            if (data.success) {
+                                Swal.fire({
+                                    icon: 'success',
+                                    title: 'ล้างข้อมูลสำเร็จ!',
+                                    text: 'ระบบได้รับการ Set Zero เรียบร้อยแล้ว',
+                                    timer: 2000,
+                                    showConfirmButton: false
+                                }).then(() => {
+                                    location.reload(); // รีเฟรชหน้าเว็บอัตโนมัติ
+                                });
+                            } else {
+                                Swal.fire('ผิดพลาด', data.message, 'error');
+                            }
+                        }).catch(() => Swal.fire('ผิดพลาด', 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้', 'error'));
+                }
+            });
+        }
     </script>
 </body>
 
