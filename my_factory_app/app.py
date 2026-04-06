@@ -1,3 +1,5 @@
+import math
+import requests
 import sqlite3
 import pandas as pd
 import qrcode
@@ -21,6 +23,34 @@ scheduler = APScheduler()
 
 app.secret_key = 'factory_smart_key_2026'
 DB_NAME = 'factory_stock.db'
+
+# ==========================================
+# 🕒 ระบบจัดการ Request (ยุบรวมทุกอย่างที่นี่)
+# ==========================================
+@app.before_request
+def handle_before_request():
+    # 1. ตั้งค่า Session ให้ถาวร (Zombie Check)
+    session.permanent = True
+    app.permanent_session_lifetime = timedelta(minutes=15)
+    
+    # 2. อัปเดตเวลาใช้งานล่าสุดของพนักงาน
+    emp_id = request.args.get('emp_id') or request.form.get('emp_id')
+    if emp_id:
+        try:
+            conn = get_db_connection()
+            conn.execute("UPDATE users SET last_seen = datetime('now', '+7 hours') WHERE emp_id = ?", (emp_id,))
+            conn.commit()
+            conn.close()
+        except:
+            pass
+
+@app.after_request
+def add_header(response):
+    # ป้องกัน Cache เพื่อความปลอดภัย
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 # สร้างฟังก์ชันสำหรับดึงเวลาไทย
 def get_thailand_time():
@@ -65,35 +95,8 @@ def send_line_message(message):
     try:
         requests.post(url, headers=headers, json=payload)
     except Exception as e:
+        print(f"Error sending LINE message: {e}")
 
-# ==========================================
-# 🕒 ระบบ Auto Unlock (User Zombie Check)
-# ==========================================
-@app.before_request
-def update_last_seen():
-    emp_id = request.args.get('emp_id') or request.form.get('emp_id')
-    if emp_id:
-        try:
-            conn = get_db_connection()
-            # ใช้ datetime('now', '+7 hours') เพื่อให้ตรงกับไทย
-            conn.execute("UPDATE users SET last_seen = datetime('now', '+7 hours') WHERE emp_id = ?", (emp_id,))
-            conn.commit()
-            conn.close()
-        except:
-            pass
-        
-@app.after_request
-def add_header(response):
-    # สั่งให้ Browser ไม่เก็บ Cache ของหน้าเว็บ
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
-
-app.permanent_session_lifetime = timedelta(minutes=15) # บังคับให้ Logout หากไม่มีการเคลื่อนไหวใน 15 นาที
-@app.before_request
-def make_session_permanent():
-    session.permanent = True # ทำให้ทุก Session มีวันหมดอายุตามที่ตั้งไว้
 # ==========================================
 # 👤 ส่วนของพนักงาน (USER & CART SYSTEM)
 # ==========================================
