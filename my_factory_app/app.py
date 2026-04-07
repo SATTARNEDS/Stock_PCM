@@ -10,6 +10,7 @@ from datetime import datetime, date, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_apscheduler import APScheduler
+from unit_conversion import UnitConversionManager  # ✅ Unit Conversion Support
 
 # --- เพิ่ม Config ---
 class Config:
@@ -247,27 +248,84 @@ def add_to_cart():
     emp_id = request.form.get('emp_id')
     product_id = request.form.get('product_id')
     qty = int(request.form.get('qty', 1))
+    qty_unit = request.form.get('qty_unit', 'package')  # ✅ NEW: base or package unit
     current_search = request.form.get('current_search', '')
     current_cat = request.form.get('current_cat', '')
 
     conn = get_db_connection()
     product = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
 
+    # ✅ Convert requested qty to base units for checking stock
+    if qty_unit == 'base':
+        qty_base = qty
+        qty_to_reserve = qty  # Reserve in base units
+    else:  # package
+        conversion_rate = product['conversion_rate'] or 1
+        qty_base = int(qty * conversion_rate)
+        qty_to_reserve = qty_base  # Reserve in base units
+    
+    # Check if we have enough total stock (packages + open boxes combined)
     if product and product['stock'] >= qty:
         existing_item = conn.execute('SELECT * FROM carts WHERE emp_id = ? AND product_id = ?', (emp_id, product_id)).fetchone()
         if existing_item:
-            conn.execute('UPDATE carts SET qty = qty + ? WHERE id = ?', (qty, existing_item['id']))
+            conn.execute('UPDATE carts SET qty = qty + ? WHERE id = ?', (qty_to_reserve, existing_item['id']))
         else:
-            conn.execute('INSERT INTO carts (emp_id, product_id, qty) VALUES (?, ?, ?)', (emp_id, product_id, qty))
+            conn.execute('INSERT INTO carts (emp_id, product_id, qty) VALUES (?, ?, ?)', (emp_id, product_id, qty_to_reserve))
         
-        conn.execute('UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ?', (qty, qty, product_id))
+        conn.execute('UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ?', (qty, qty_to_reserve, product_id))
         conn.commit()
-        flash(f'🛒 เพิ่ม {product["name"]} เรียบร้อย', 'success')
+        flash(f'🛒 เพิ่ม {product["name"]} ({qty} {"เม็ด" if qty_unit=="base" else "ขวด"}) เรียบร้อย', 'success')
     else:
         flash('❌ ของหมดหรือมีไม่พอ', 'danger')
     
     conn.close()
     return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
+
+@app.route('/api/get_product_unit_info', methods=['GET'])  # ✅ NEW: Get unit info for AJAX
+def api_get_product_unit_info():
+    """API endpoint to get unit conversion info"""
+    try:
+        product_id = request.args.get('product_id', type=int)
+        conn = get_db_connection()
+        manager = UnitConversionManager(conn)
+        info = manager.get_product_unit_info(product_id)
+        conn.close()
+        return jsonify(info)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/preview_withdrawal', methods=['POST'])  # ✅ NEW: Preview unit conversion
+def api_preview_withdrawal():
+    """API to preview withdrawal calculation"""
+    try:
+        product_id = request.form.get('product_id', type=int)
+        qty_requested = int(request.form.get('qty'))
+        qty_unit = request.form.get('qty_unit', 'base')  # 'base' or 'package'
+        
+        conn = get_db_connection()
+        manager = UnitConversionManager(conn)
+        info = manager.get_product_unit_info(product_id)
+        
+        # Convert to base units if user specified package units
+        if qty_unit == 'package':
+            qty_base_unit = int(qty_requested * info['conversion_rate'])
+        else:
+            qty_base_unit = qty_requested
+        
+        # Calculate withdrawal
+        result = manager.calculate_withdrawal(product_id, qty_base_unit)
+        conn.close()
+        
+        return jsonify({
+            'success': result['can_fulfill'],
+            'message': result['message'],
+            'full_packages': result['full_packages_needed'],
+            'new_open_qty': result['new_open_box_qty'],
+            'total_packages': result['total_packages_used'],
+            'from_open_box': result['from_open_box']
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route('/remove_from_cart', methods=['POST'])
 def remove_from_cart():
@@ -306,41 +364,66 @@ def confirm_withdrawal():
     
     thai_now = get_thailand_time().strftime('%d/%m/%Y %H:%M:%S')
     
+    # ✅ NEW: Initialize UnitConversionManager
+    manager = UnitConversionManager(conn)
+    
     for item in cart_items:
         item_name = item['name']
         
-        # --- ส่วนที่แก้ไข: เช็คว่าเป็นตระกูลหมวกเซฟตี้หรือไม่ ---
-        if "หมวกเซฟตี้" in item_name or "Helmet" in item_name:
-            # ใช้ Logic อัปเดต (หรือ Insert ใหม่ถ้ายังไม่มี) เพื่อเก็บวันที่เบิกล่าสุดไว้เช็ค 2 ปี
-            # เราจะเช็คจาก emp_id และ product_id เดิมที่มี Action นี้อยู่แล้ว
-            existing_helmet = conn.execute('''
-                SELECT id FROM transaction_logs 
-                WHERE emp_id = ? AND product_id = ? AND action = 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)'
-            ''', (emp_id, item['product_id'])).fetchone()
+        # ✅ NEW: Use UnitConversionManager to apply withdrawal (FIFO + open packages)
+        try:
+            withdrawal_result = manager.apply_withdrawal(
+                product_id=item['product_id'],
+                qty_base_unit=item['qty'],  # qty already in base units
+                emp_id=emp_id,
+                lot_id=None
+            )
+            
+            # ✅ Log transaction with unit info
+            if "หมวกเซฟตี้" in item_name or "Helmet" in item_name:
+                existing_helmet = conn.execute('''
+                    SELECT id FROM transaction_logs 
+                    WHERE emp_id = ? AND product_id = ? AND action = 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)'
+                ''', (emp_id, item['product_id'])).fetchone()
 
-            if existing_helmet:
-                # ถ้าเคยเบิกแล้ว ให้ UPDATE วันที่เบิกล่าสุดทับของเดิม
-                conn.execute('''
-                    UPDATE transaction_logs 
-                    SET qty = ?, timestamp = ?, status = 'Pending'
-                    WHERE id = ?
-                ''', (item['qty'], thai_now, existing_helmet['id']))
+                if existing_helmet:
+                    conn.execute('''
+                        UPDATE transaction_logs 
+                        SET qty = ?, qty_base_unit = ?, timestamp = ?, status = 'Pending', note = ?
+                        WHERE id = ?
+                    ''', (withdrawal_result['full_packages_used'], item['qty'], thai_now, withdrawal_result['note'], existing_helmet['id']))
+                else:
+                    conn.execute('''
+                        INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note) 
+                        VALUES (?, ?, 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)', ?, ?, ?, 'Pending', ?, ?)
+                    ''', (emp_id, item['product_id'], withdrawal_result['full_packages_used'], item['qty'], withdrawal_result['total_packages_used'], thai_now, withdrawal_result['note']))
             else:
-                # ถ้ายังไม่เคยเบิกหมวกใบนี้เลย ให้ INSERT ใหม่
                 conn.execute('''
-                    INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp) 
-                    VALUES (?, ?, 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)', ?, 'Pending', ?)
-                ''', (emp_id, item['product_id'], item['qty'], thai_now))
-        else:
-            # กรณีของทั่วไป: INSERT เป็นประวัติใหม่เสมอ
-            conn.execute('''
-                INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp) 
-                VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, 'Pending', ?)
-            ''', (emp_id, item['product_id'], item['qty'], thai_now))
-        
-        # คำนวณสต็อกคงเหลือโชว์ใน Line
-        remain_after = item['stock']
-        msg_list.append(f"📦 {item_name}\n   🔹 จำนวน: {item['qty']} {item['unit']}\n   ⚠️ คงเหลือหลังเบิก: {remain_after}")
+                    INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note) 
+                    VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, ?, ?, 'Pending', ?, ?)
+                ''', (emp_id, item['product_id'], withdrawal_result['full_packages_used'], item['qty'], withdrawal_result['total_packages_used'], thai_now, withdrawal_result['note']))
+            
+            msg_list.append(f"📦 {item_name}\n   🔹 จำนวน: {item['qty']} {item['unit']}\n   ℹ️ {withdrawal_result['note']}")
+            
+        except Exception as e:
+            # Fallback to old logic if UnitConversionManager fails
+            if "หมวกเซฟตี้" in item_name or "Helmet" in item_name:
+                existing_helmet = conn.execute('''
+                    SELECT id FROM transaction_logs 
+                    WHERE emp_id = ? AND product_id = ? AND action = 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)'
+                ''', (emp_id, item['product_id'])).fetchone()
+                if existing_helmet:
+                    conn.execute('''UPDATE transaction_logs SET qty = ?, timestamp = ?, status = 'Pending' WHERE id = ?''', 
+                                (item['qty'], thai_now, existing_helmet['id']))
+                else:
+                    conn.execute('''INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp) 
+                                   VALUES (?, ?, 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)', ?, 'Pending', ?)''', 
+                                (emp_id, item['product_id'], item['qty'], thai_now))
+            else:
+                conn.execute('''INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp) 
+                               VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, 'Pending', ?)''', 
+                            (emp_id, item['product_id'], item['qty'], thai_now))
+            msg_list.append(f"📦 {item_name}\n   🔹 จำนวน: {item['qty']} {item['unit']}\n   ⚠️ คงเหลือหลังเบิก: {item['stock']}")
 
     # ล้างตะกร้า
     conn.execute('DELETE FROM carts WHERE emp_id = ?', (emp_id,))

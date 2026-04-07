@@ -29,15 +29,30 @@
             </div>
             
             <div class="text-end">
-                <form action="/add_to_cart" method="POST" class="d-flex">
+                <div class="mb-2 small">
+                    <label class="form-check form-check-inline">
+                        <input class="form-check-input qty-unit-select" type="radio" name="qty_unit_{{ item['id'] }}" 
+                               value="package" checked onchange="previewWithdrawal({{ item['id'] }})"> {{ item['unit'] if item['unit'] != 'box' else 'ขวด' }}
+                    </label>
+                    <label class="form-check form-check-inline">
+                        <input class="form-check-input qty-unit-select" type="radio" name="qty_unit_{{ item['id'] }}" 
+                               value="base" onchange="previewWithdrawal({{ item['id'] }})"> เม็ด
+                    </label>
+                </div>
+                <form action="/add_to_cart" method="POST" class="d-flex gap-1">
                     <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
                     <input type="hidden" name="product_id" value="{{ item['id'] }}">
-                    <input type="number" name="qty" class="form-control form-control-sm input-qty" 
-                           value="1" min="1" max="{{ item['stock'] }}" {% if item['stock'] <= 0 %}disabled{% endif %}>
-                    <button type="submit" class="btn btn-success btn-sm btn-add-item px-3" {% if item['stock'] <= 0 %}disabled{% endif %}>
+                    <input type="hidden" name="qty_unit" class="qty_unit_value_{{ item['id'] }}" value="package">
+                    <input type="number" name="qty" class="form-control form-control-sm input-qty qty-input-{{ item['id'] }}" 
+                           value="1" min="1" max="{{ item['stock'] }}" {% if item['stock'] <= 0 %}disabled{% endif %}
+                           onchange="previewWithdrawal({{ item['id'] }})">
+                    <button type="submit" class="btn btn-success btn-sm btn-add-item px-2" {% if item['stock'] <= 0 %}disabled{% endif %}>
                         <i class="fas fa-plus"></i>
                     </button>
                 </form>
+                <div id="preview_{{ item['id'] }}" class="mt-1 small text-muted" style="display:none;">
+                    <i class="fas fa-eye"></i> <span id="preview_text_{{ item['id'] }}"></span>
+                </div>
             </div>
         </div>
     </div>

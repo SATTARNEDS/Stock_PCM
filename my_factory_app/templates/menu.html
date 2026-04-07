@@ -417,6 +417,50 @@
                 new bootstrap.Modal(document.getElementById('cartModal')).show();
             }
         };
+
+        // ✅ NEW: Preview withdrawal calculation with unit conversion
+        function previewWithdrawal(productId) {
+            const qtyInput = document.querySelector(`.qty-input-${productId}`);
+            const unitRadios = document.querySelectorAll(`input[name="qty_unit_${productId}"]`);
+            const previewDiv = document.getElementById(`preview_${productId}`);
+            const previewText = document.getElementById(`preview_text_${productId}`);
+            const qtyUnitInput = document.querySelector(`.qty_unit_value_${productId}`);
+            
+            if (!qtyInput || unitRadios.length === 0) return;
+            
+            const qty = parseInt(qtyInput.value) || 1;
+            let selectedUnit = 'package';
+            unitRadios.forEach(radio => {
+                if (radio.checked) {
+                    selectedUnit = radio.value;
+                }
+            });
+            
+            // Update hidden input
+            qtyUnitInput.value = selectedUnit;
+            
+            // Fetch preview
+            const formData = new FormData();
+            formData.append('product_id', productId);
+            formData.append('qty', qty);
+            formData.append('qty_unit', selectedUnit);
+            
+            fetch('/api/preview_withdrawal', { method: 'POST', body: formData })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        previewText.textContent = data.message;
+                        previewDiv.style.display = 'block';
+                    } else {
+                        previewText.textContent = '⚠️ ' + (data.error || 'ไม่สามารถคำนวณได้');
+                        previewDiv.style.display = 'block';
+                    }
+                })
+                .catch(err => {
+                    console.error('Preview error:', err);
+                    previewDiv.style.display = 'none';
+                });
+        }
     </script>
 </body>
 
