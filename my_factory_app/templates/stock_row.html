@@ -12,7 +12,12 @@
     </td>
     <td><span class="badge bg-light text-dark border">{{ item['category'] }}</span></td>
     <td class="text-center fw-medium {{ 'text-danger' if item['stock'] <= item['safety_stock'] else 'text-success' }}">
+        {% if item['is_split_tablet_medicine'] %}
+        <div>{{ item['backend_stock_text'] }}</div>
+        <small class="text-muted">แสดงหน้าเบิก: {{ item['frontend_stock_text'] }}</small>
+        {% else %}
         {{ item['stock'] }}
+        {% endif %}
     </td>
     <td class="text-center text-muted">{{ item['safety_stock'] }}</td>
     <td class="text-center">

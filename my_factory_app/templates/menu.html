@@ -201,6 +201,9 @@
                         <table class="table table-borderless align-middle">
                             <tbody>
                                 {% for item in cart_items %}
+                                {% set pkg = (item['package_unit']|default(item['unit'])|string|lower) %}
+                                {% set is_medicine_item = (('ยา' in (item['category']|string)) or ('medicine' in (item['category']|string|lower)) or ('pharma' in (item['category']|string|lower)) or ('drug' in (item['category']|string|lower))) and (('pack' in pkg) or ('package' in pkg) or ('box' in pkg) or ('jar' in pkg) or ('bottle' in pkg) or ('แพ็ค' in pkg) or ('กล่อง' in pkg) or ('กระปุก' in pkg) or ('ขวด' in pkg)) %}
+                                {% set display_unit = (item['base_unit'] if item['base_unit'] else 'เม็ด') if is_medicine_item else item['unit'] %}
                                 <tr class="border-bottom">
                                     <td>
                                         <div class="fw-medium">{{ item['name'] }}</div>
@@ -215,6 +218,7 @@
                                             <button class="btn btn-sm btn-light border rounded-circle"
                                                 onclick="updateQty('{{ item['id'] }}', 1, '{{ user['emp_id'] }}')">+</button>
                                         </div>
+                                        <small class="text-muted">{{ display_unit }}</small>
                                     </td>
                                     <td class="text-end">
                                         <form action="/remove_from_cart" method="POST">
@@ -241,6 +245,19 @@
                 <div class="modal-footer border-0">
                     <form action="/confirm_withdrawal" method="POST" class="w-100">
                         <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
+                        {% set medicine_in_cart = namespace(value=false) %}
+                        {% for c in cart_items %}
+                            {% set c_pkg = (c['package_unit']|default(c['unit'])|string|lower) %}
+                            {% if ((('ยา' in (c['category']|string)) or ('medicine' in (c['category']|string|lower)) or ('pharma' in (c['category']|string|lower)) or ('drug' in (c['category']|string|lower))) and (('pack' in c_pkg) or ('package' in c_pkg) or ('box' in c_pkg) or ('jar' in c_pkg) or ('bottle' in c_pkg) or ('แพ็ค' in c_pkg) or ('กล่อง' in c_pkg) or ('กระปุก' in c_pkg) or ('ขวด' in c_pkg))) %}
+                                {% set medicine_in_cart.value = true %}
+                            {% endif %}
+                        {% endfor %}
+                        {% if medicine_in_cart.value %}
+                        <div class="mb-2">
+                            <label class="form-label small fw-medium">อาการผู้ป่วย (จำเป็นสำหรับการเบิกยา)</label>
+                            <textarea name="symptom" class="form-control form-control-sm" rows="2" placeholder="เช่น ปวดหัว มีไข้ เจ็บคอ" required></textarea>
+                        </div>
+                        {% endif %}
                         <button type="submit" class="btn btn-success w-100 rounded-pill py-3 fw-medium" {% if not
                             cart_items %}disabled{% endif %}>
                             ยืนยันการเบิกพัสดุ
@@ -262,6 +279,10 @@
                     <div class="list-group list-group-flush">
                         {% if history %}
                             {% for h in history %}
+                            {% set h_pkg = (h['package_unit']|default(h['unit'])|string|lower) %}
+                            {% set is_medicine_history = (('ยา' in (h['category']|string)) or ('medicine' in (h['category']|string|lower)) or ('pharma' in (h['category']|string|lower)) or ('drug' in (h['category']|string|lower))) and (('pack' in h_pkg) or ('package' in h_pkg) or ('box' in h_pkg) or ('jar' in h_pkg) or ('bottle' in h_pkg) or ('แพ็ค' in h_pkg) or ('กล่อง' in h_pkg) or ('กระปุก' in h_pkg) or ('ขวด' in h_pkg)) %}
+                            {% set history_qty = h['qty_base_unit'] if is_medicine_history and h['qty_base_unit'] is not none else h['qty'] %}
+                            {% set history_unit = (h['base_unit'] if h['base_unit'] else 'เม็ด') if is_medicine_history else h['unit'] %}
                             <div class="list-group-item p-3">
                                 <div class="d-flex justify-content-between align-items-start">
                                     <div>
@@ -270,7 +291,7 @@
                                     </div>
                                     <span
                                         class="badge {% if h['status'] == 'Approved' %}bg-success{% elif h['status'] == 'Pending' %}bg-warning text-dark{% else %}bg-danger{% endif %} rounded-pill">
-                                        {{ h['qty'] }} {{ h['unit'] }}
+                                        {{ history_qty }} {{ history_unit }}
                                     </span>
                                 </div>
                             </div>
@@ -426,15 +447,22 @@
             const previewText = document.getElementById(`preview_text_${productId}`);
             const qtyUnitInput = document.querySelector(`.qty_unit_value_${productId}`);
             
-            if (!qtyInput || unitRadios.length === 0) return;
+            if (!qtyInput || !qtyUnitInput) return;
             
             const qty = parseInt(qtyInput.value) || 1;
             let selectedUnit = 'package';
-            unitRadios.forEach(radio => {
-                if (radio.checked) {
-                    selectedUnit = radio.value;
-                }
-            });
+            if (unitRadios.length > 0) {
+                unitRadios.forEach(radio => {
+                    if (radio.checked) {
+                        selectedUnit = radio.value;
+                    }
+                });
+            } else {
+                // ไม่ใช่ยา: ซ่อน preview และใช้หน่วยหลักสินค้า
+                qtyUnitInput.value = 'package';
+                if (previewDiv) previewDiv.style.display = 'none';
+                return;
+            }
             
             // Update hidden input
             qtyUnitInput.value = selectedUnit;

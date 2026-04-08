@@ -5,8 +5,13 @@
     <td>{{ item['name'] }}</td>
     
     <td class="text-center">
-        <span class="fw-medium text-danger">{{ item['stock'] }}</span> 
-        <small class="text-muted">/ {{ item['unit'] }}</small>
+        {% if item['is_split_tablet_medicine'] %}
+            <span class="fw-medium text-danger">{{ item['backend_stock_text'] }}</span>
+            <br><small class="text-muted">หน้าเบิก: {{ item['frontend_stock_text'] }}</small>
+        {% else %}
+            <span class="fw-medium text-danger">{{ item['stock'] }}</span> 
+            <small class="text-muted">/ {{ item['unit'] }}</small>
+        {% endif %}
     </td>
     
     <td class="text-center">

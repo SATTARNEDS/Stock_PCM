@@ -388,36 +388,6 @@
                         </thead>
                         <tbody id="pendingTableBody">
                             {% include 'pending_requests_partial.html' %}
-                            {% for log in pending_logs %}
-                            <tr>
-                                <td class="small text-muted ps-4">{{ log['timestamp'] }}</td>
-                                <td>
-                                    <div class="fw-medium text-dark">{{ log['emp_name'] }}</div>
-                                    <small class="text-muted">{{ log['department'] }}</small>
-                                </td>
-                                <td>{{ log['product_name'] }} <small class="text-muted">({{ log['unit'] }})</small></td>
-                                <td class="text-center fw-medium text-primary">{{ log['qty'] }}</td>
-                                <td class="text-center">
-                                    <button
-                                        onclick="confirmAction('{{ url_for('approve_request', log_id=log['id']) }}', 'อนุมัติการเบิกนี้?')"
-                                        class="btn btn-sm btn-success rounded-pill px-3 me-1 shadow-sm">
-                                        <i class="fas fa-check me-1"></i>อนุมัติ
-                                    </button>
-                                    <button
-                                        onclick="confirmAction('{{ url_for('reject_request', log_id=log['id']) }}', 'ปฏิเสธรายการนี้?', 'warning')"
-                                        class="btn btn-sm btn-outline-danger rounded-pill px-3 shadow-sm">
-                                        <i class="fas fa-times me-1"></i>ปฏิเสธ
-                                    </button>
-                                </td>
-                            </tr>
-                            {% else %}
-                            <tr>
-                                <td colspan="5" class="text-center py-5 text-muted">
-                                    <i class="fas fa-inbox fa-3x mb-3 opacity-25 d-block"></i>
-                                    ไม่มีรายการรออนุมัติ
-                                </td>
-                            </tr>
-                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
@@ -478,7 +448,12 @@
                                 <td><span class="badge bg-light text-dark border">{{ item['category'] }}</span></td>
                                 <td
                                     class="text-center fw-medium {{ 'text-danger' if item['stock'] <= item['safety_stock'] else 'text-success' }}">
+                                    {% if item['is_split_tablet_medicine'] %}
+                                    <div>{{ item['backend_stock_text'] }}</div>
+                                    <small class="text-muted">แสดงหน้าเบิก: {{ item['frontend_stock_text'] }}</small>
+                                    {% else %}
                                     {{ item['stock'] }}
+                                    {% endif %}
                                 </td>
                                 <td class="text-center text-muted">{{ item['safety_stock'] }}</td>
                                 <td class="text-center">
@@ -833,6 +808,21 @@
                         <div class="col-md-6">
                             <label class="form-label fw-medium text-muted small">หน่วยนับ</label>
                             <input type="text" id="edit_unit" name="unit" class="form-control shadow-none" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-medium text-muted small">หน่วยแพ็ค/กล่อง/กระปุก</label>
+                            <input type="text" id="edit_package_unit" name="package_unit" class="form-control shadow-none"
+                                placeholder="เช่น กล่อง, ขวด, กระปุก">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-medium text-muted small">หน่วยย่อย</label>
+                            <input type="text" id="edit_base_unit" name="base_unit" class="form-control shadow-none"
+                                placeholder="เช่น เม็ด">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-medium text-muted small">1 แพ็ค มีจำนวน (หน่วยย่อย)</label>
+                            <input type="number" id="edit_conversion_rate" name="conversion_rate" class="form-control shadow-none"
+                                min="1" step="1" value="1">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-medium text-muted small">สถานที่เก็บ</label>
@@ -1463,6 +1453,9 @@
                 document.getElementById('edit_category').value = data.category;
                 document.getElementById('edit_category_display').value = data.category;
                 document.getElementById('edit_unit').value = data.unit;
+                document.getElementById('edit_package_unit').value = data.package_unit || data.unit || '';
+                document.getElementById('edit_base_unit').value = data.base_unit || 'เม็ด';
+                document.getElementById('edit_conversion_rate').value = data.conversion_rate || 1;
                 document.getElementById('edit_location').value = data.location;
                 document.getElementById('edit_location_display').value = data.location;
                 document.getElementById('edit_safety_stock').value = data.safety_stock;

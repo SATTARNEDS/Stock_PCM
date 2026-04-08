@@ -1,16 +1,17 @@
-import math
-import requests
-import sqlite3
-import pandas as pd
-import qrcode
 import io
-import pytz
-from io import BytesIO
+import math
+import sqlite3
 from datetime import datetime, date, timedelta
+
+import pandas as pd
+import pytz
+import qrcode
+import requests
 from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify, make_response
-from werkzeug.security import generate_password_hash, check_password_hash
 from flask_apscheduler import APScheduler
+from io import BytesIO
 from unit_conversion import UnitConversionManager  # ✅ Unit Conversion Support
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # --- เพิ่ม Config ---
 class Config:
@@ -24,6 +25,14 @@ scheduler = APScheduler()
 
 app.secret_key = 'factory_smart_key_2026'
 DB_NAME = 'factory_stock.db'
+THAILAND_TZ = 'Asia/Bangkok'
+SESSION_TIMEOUT_MINUTES = 15
+USER_LOCK_TIMEOUT_MINUTES = 5
+NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
 
 # ==========================================
 # 🕒 ระบบจัดการ Request (ยุบรวมทุกอย่างที่นี่)
@@ -32,31 +41,86 @@ DB_NAME = 'factory_stock.db'
 def handle_before_request():
     # 1. ตั้งค่า Session ให้ถาวร (Zombie Check)
     session.permanent = True
-    app.permanent_session_lifetime = timedelta(minutes=15)
-    
+    app.permanent_session_lifetime = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
+
     # 2. อัปเดตเวลาใช้งานล่าสุดของพนักงาน
     emp_id = request.args.get('emp_id') or request.form.get('emp_id')
-    if emp_id:
-        try:
-            conn = get_db_connection()
-            conn.execute("UPDATE users SET last_seen = datetime('now', '+7 hours') WHERE emp_id = ?", (emp_id,))
-            conn.commit()
-            conn.close()
-        except:
-            pass
+    if not emp_id:
+        return
+    try:
+        update_user_last_seen(emp_id)
+    except Exception:
+        pass
 
 @app.after_request
 def add_header(response):
     # ป้องกัน Cache เพื่อความปลอดภัย
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
+    response.headers.update(NO_CACHE_HEADERS)
     return response
 
 # สร้างฟังก์ชันสำหรับดึงเวลาไทย
 def get_thailand_time():
-    tz = pytz.timezone('Asia/Bangkok')
+    tz = pytz.timezone(THAILAND_TZ)
     return datetime.now(tz)
+
+def is_medicine_product(product_row):
+    """True เมื่อสินค้าเป็นกลุ่มยา (ใช้สำหรับ logic หน่วยเบิกยา)"""
+    category = str(product_row['category'] or '').strip().lower() if product_row else ''
+    name = str(product_row['name'] or '').strip().lower() if product_row else ''
+    medicine_keywords = ('ยา', 'medicine', 'medic', 'drug', 'pharma')
+    return any(keyword in category or keyword in name for keyword in medicine_keywords)
+
+def is_split_tablet_medicine(product_row):
+    """ยาแบบแพ็ค/กล่อง/กระปุก/ขวด ที่ต้องแตกหน่วยเป็นเม็ด"""
+    if not product_row or not is_medicine_product(product_row):
+        return False
+
+    package_label = str(
+        (product_row['package_unit'] if 'package_unit' in product_row.keys() else None)
+        or product_row['unit']
+        or ''
+    ).strip().lower()
+    conversion_rate = int(product_row['conversion_rate'] or 1)
+    package_keywords = ('pack', 'package', 'box', 'jar', 'bottle', 'แพ็ค', 'กล่อง', 'กระปุก', 'ขวด')
+    return conversion_rate > 1 and any(k in package_label for k in package_keywords)
+
+def enrich_products_for_display(conn, products_list):
+    """เติมข้อมูลสต็อกแสดงผลสำหรับ frontend/backend โดยไม่แก้ค่าจริงใน DB"""
+    if not products_list:
+        return []
+
+    product_ids = [item['id'] for item in products_list]
+    placeholders = ','.join(['?'] * len(product_ids))
+    open_rows = conn.execute(f'''
+        SELECT product_id, COALESCE(SUM(base_unit_qty), 0) as open_base_qty
+        FROM open_packages
+        WHERE status = 'active' AND product_id IN ({placeholders})
+        GROUP BY product_id
+    ''', product_ids).fetchall()
+    open_qty_map = {row['product_id']: int(row['open_base_qty'] or 0) for row in open_rows}
+
+    enriched = []
+    for row in products_list:
+        item = dict(row)
+        split_medicine = is_split_tablet_medicine(row)
+        package_unit = str(item.get('package_unit') or item.get('unit') or 'กล่อง')
+        base_unit = str(item.get('base_unit') or 'เม็ด')
+        conversion_rate = int(item.get('conversion_rate') or 1)
+        open_base_qty = open_qty_map.get(item['id'], 0)
+        package_stock = int(item.get('stock') or 0)
+        total_base_qty = (package_stock * conversion_rate) + open_base_qty
+
+        item['is_split_tablet_medicine'] = split_medicine
+        item['package_unit_label'] = package_unit
+        item['base_unit_label'] = base_unit
+        item['open_base_qty'] = open_base_qty
+        item['stock_base_total'] = total_base_qty
+        item['frontend_stock_text'] = f"{total_base_qty} {base_unit}" if split_medicine else f"{package_stock} {item.get('unit', '')}".strip()
+        item['backend_stock_text'] = f"{package_stock} {package_unit} + {open_base_qty} {base_unit}" if split_medicine else f"{package_stock} {item.get('unit', '')}".strip()
+        item['max_withdraw_qty'] = total_base_qty if split_medicine else package_stock
+        enriched.append(item)
+
+    return enriched
 
 def standardize_date(date_value):
     """แปลงวันที่ให้เป็น YYYY-MM-DD เสมอก่อนลง Database"""
@@ -71,14 +135,11 @@ def standardize_date(date_value):
     if not date_str:
         return ""
 
-    # ถ้ามีเครื่องหมาย / แปลว่าเป็น DD/MM/YYYY ให้สลับตำแหน่ง
+    # ถ้ามีเครื่องหมาย / แปลว่าเป็น DD/MM/YYYY ให้พยายามแปลง
     if '/' in date_str:
         try:
-            parts = date_str.split('/')
-            if len(parts) == 3:
-                d, m, y = parts
-                return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
-        except:
+            return datetime.strptime(date_str, '%d/%m/%Y').strftime('%Y-%m-%d')
+        except ValueError:
             pass
 
     return date_str # ถ้าเป็น YYYY-MM-DD อยู่แล้ว หรือแปลงไม่ได้ ก็คืนค่าเดิมไป
@@ -95,6 +156,33 @@ def get_db_connection():
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.row_factory = sqlite3.Row
     return conn
+
+def update_user_last_seen(emp_id):
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET last_seen = datetime('now', '+7 hours') WHERE emp_id = ?",
+            (emp_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def is_user_currently_locked(user_row):
+    """คืนค่า True ถ้ายังอยู่ในช่วงล็อกอินซ้ำ"""
+    if user_row['is_locked'] != 1:
+        return False
+
+    last_seen_str = user_row['last_seen']
+    if not last_seen_str:
+        return False
+
+    try:
+        last_seen = datetime.strptime(last_seen_str, '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return False
+
+    return (datetime.now() - last_seen) <= timedelta(minutes=USER_LOCK_TIMEOUT_MINUTES)
 
 def send_line_message(message):
     if not LINE_CHANNEL_ACCESS_TOKEN: return
@@ -120,20 +208,11 @@ def index():
         if user:
             # เพิ่มการเช็ค: ถ้าเป็นคนเดิมที่ถือ Session อยู่ ให้เข้าได้เลยไม่ติด Lock
             if session.get('user_id') == emp_id:
+                conn.close()
                 return redirect(url_for('menu', emp_id=emp_id))
-            # 4. ป้องกันล็อกอินซ้ำ (ปรับปรุงใหม่: เช็คเวลา last_seen)
-            is_locked = user['is_locked']
-            last_seen_str = user['last_seen']
-            
-            if is_locked == 1 and last_seen_str:
-                try:
-                    last_seen = datetime.strptime(last_seen_str, '%Y-%m-%d %H:%M:%S')
-                    if datetime.now() - last_seen > timedelta(minutes=5):
-                        is_locked = 0 
-                except:
-                    is_locked = 0
 
-            if is_locked == 1:
+            # 4. ป้องกันล็อกอินซ้ำ (ปรับปรุงใหม่: เช็คเวลา last_seen)
+            if is_user_currently_locked(user):
                 # ✅ เปลี่ยน category เป็น 'user_error'
                 flash(f'❌ รหัส {emp_id} กำลังใช้งานอยู่ (ต้อง Logout หรือรอ 5 นาที)', 'user_error')
                 conn.close()
@@ -207,6 +286,7 @@ def menu():
         params.append(category_filter)
 
     products_list = conn.execute(query, params).fetchall()
+    products_list = enrich_products_for_display(conn, products_list)
     # -----------------------------------------------------
 
     products_by_category = {}
@@ -216,7 +296,7 @@ def menu():
         products_by_category[cat].append(item)
 
     cart_items = conn.execute('''
-        SELECT c.*, p.name, p.code, p.category, p.unit 
+        SELECT c.*, p.name, p.code, p.category, p.unit, p.base_unit, p.package_unit
         FROM carts c JOIN products p ON c.product_id = p.id 
         WHERE c.emp_id = ?
     ''', (emp_id,)).fetchall()
@@ -226,7 +306,7 @@ def menu():
 
     # การดึงประวัติการเบิก (History)
     history = conn.execute('''
-        SELECT l.*, p.name as product_name, p.unit 
+        SELECT l.*, p.name as product_name, p.unit, p.category, p.base_unit, p.package_unit
         FROM transaction_logs l 
         JOIN products p ON l.product_id = p.id 
         WHERE l.emp_id = ? 
@@ -254,27 +334,52 @@ def add_to_cart():
 
     conn = get_db_connection()
     product = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
+    if not product:
+        conn.close()
+        flash('❌ ไม่พบสินค้า', 'danger')
+        return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
 
-    # ✅ Convert requested qty to base units for checking stock
-    if qty_unit == 'base':
-        qty_base = qty
-        qty_to_reserve = qty  # Reserve in base units
-    else:  # package
-        conversion_rate = product['conversion_rate'] or 1
-        qty_base = int(qty * conversion_rate)
-        qty_to_reserve = qty_base  # Reserve in base units
-    
-    # Check if we have enough total stock (packages + open boxes combined)
-    if product and product['stock'] >= qty:
+    is_medicine = is_medicine_product(product)
+    split_medicine = is_split_tablet_medicine(product)
+    manager = UnitConversionManager(conn)
+
+    if split_medicine:
+        if qty_unit not in ('base', 'package'):
+            conn.close()
+            flash('❌ หน่วยเบิกยาไม่ถูกต้อง', 'danger')
+            return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
+
+        product_info = manager.get_product_unit_info(product_id)
+        if qty_unit == 'package':
+            qty_to_reserve = int(qty * product_info['conversion_rate'])
+        else:
+            qty_to_reserve = qty
+
+        stock_check = manager.check_stock_available(product_id, qty_to_reserve)
+        can_add = stock_check['available']
+    else:
+        # สินค้าทั่วไปให้คง logic เดิม (หน่วยหลักของสินค้า)
+        qty_unit = 'package'
+        qty_to_reserve = qty
+        can_add = product['stock'] >= qty
+
+    if can_add:
         existing_item = conn.execute('SELECT * FROM carts WHERE emp_id = ? AND product_id = ?', (emp_id, product_id)).fetchone()
         if existing_item:
             conn.execute('UPDATE carts SET qty = qty + ? WHERE id = ?', (qty_to_reserve, existing_item['id']))
         else:
             conn.execute('INSERT INTO carts (emp_id, product_id, qty) VALUES (?, ?, ?)', (emp_id, product_id, qty_to_reserve))
-        
-        conn.execute('UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ?', (qty, qty_to_reserve, product_id))
+
+        # ยา: ไม่ลด stock ตอนใส่ตะกร้า ปล่อยให้ตัดจริงตอน confirm (FIFO)
+        if split_medicine:
+            conn.execute('UPDATE products SET reserved_stock = reserved_stock + ? WHERE id = ?', (qty_to_reserve, product_id))
+        else:
+            conn.execute('UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ?', (qty, qty_to_reserve, product_id))
         conn.commit()
-        flash(f'🛒 เพิ่ม {product["name"]} ({qty} {"เม็ด" if qty_unit=="base" else "ขวด"}) เรียบร้อย', 'success')
+        if split_medicine:
+            flash(f'🛒 เพิ่ม {product["name"]} ({qty} {"เม็ด" if qty_unit=="base" else "ขวด"}) เรียบร้อย', 'success')
+        else:
+            flash(f'🛒 เพิ่ม {product["name"]} ({qty} {product["unit"]}) เรียบร้อย', 'success')
     else:
         flash('❌ ของหมดหรือมีไม่พอ', 'danger')
     
@@ -337,8 +442,14 @@ def remove_from_cart():
     current_cat = request.form.get('current_cat', '')
 
     conn = get_db_connection()
+    product = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
+    is_medicine = is_split_tablet_medicine(product) if product else False
+
     conn.execute('DELETE FROM carts WHERE id = ?', (cart_id,))
-    conn.execute('UPDATE products SET stock = stock + ?, reserved_stock = reserved_stock - ? WHERE id = ?', (qty, qty, product_id))
+    if is_medicine:
+        conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (qty, product_id))
+    else:
+        conn.execute('UPDATE products SET stock = stock + ?, reserved_stock = reserved_stock - ? WHERE id = ?', (qty, qty, product_id))
     conn.commit()
     conn.close()
     
@@ -347,11 +458,12 @@ def remove_from_cart():
 @app.route('/confirm_withdrawal', methods=['POST'])
 def confirm_withdrawal():
     emp_id = request.form.get('emp_id')
+    symptom = (request.form.get('symptom') or '').strip()
     conn = get_db_connection()
     
     user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
     cart_items = conn.execute('''
-        SELECT c.*, p.name, p.stock, p.unit 
+        SELECT c.*, p.name, p.stock, p.unit, p.category
         FROM carts c JOIN products p ON c.product_id = p.id 
         WHERE c.emp_id = ?
     ''', (emp_id,)).fetchall()
@@ -360,7 +472,15 @@ def confirm_withdrawal():
         conn.close()
         return redirect(url_for('index'))
     
+    has_medicine = any(is_split_tablet_medicine(item) for item in cart_items)
+    if has_medicine and not symptom:
+        conn.close()
+        flash('❌ รายการเบิกยาต้องระบุอาการก่อนยืนยัน', 'danger')
+        return redirect(url_for('menu', emp_id=emp_id, open_cart='true'))
+
     msg_list = [f"🚀 *มีคำขอเบิกใหม่* 🚀\n👤 ผู้เบิก: {user['name']}\n📍 แผนก: {user['department']} ({user['location']})"]
+    if has_medicine:
+        msg_list.append(f"🩺 อาการ: {symptom}")
     
     thai_now = get_thailand_time().strftime('%d/%m/%Y %H:%M:%S')
     
@@ -372,12 +492,20 @@ def confirm_withdrawal():
         
         # ✅ NEW: Use UnitConversionManager to apply withdrawal (FIFO + open packages)
         try:
-            withdrawal_result = manager.apply_withdrawal(
-                product_id=item['product_id'],
-                qty_base_unit=item['qty'],  # qty already in base units
-                emp_id=emp_id,
-                lot_id=None
-            )
+            is_medicine = is_split_tablet_medicine(item)
+            if is_medicine:
+                withdrawal_result = manager.apply_withdrawal(
+                    product_id=item['product_id'],
+                    qty_base_unit=item['qty'],  # ยาเก็บในตะกร้าเป็น base unit
+                    emp_id=emp_id,
+                    lot_id=None
+                )
+            else:
+                withdrawal_result = {
+                    'full_packages_used': item['qty'],
+                    'total_packages_used': item['qty'],
+                    'note': ''
+                }
             
             # ✅ Log transaction with unit info
             if "หมวกเซฟตี้" in item_name or "Helmet" in item_name:
@@ -386,24 +514,31 @@ def confirm_withdrawal():
                     WHERE emp_id = ? AND product_id = ? AND action = 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)'
                 ''', (emp_id, item['product_id'])).fetchone()
 
+                result_qty = withdrawal_result.get('full_packages_used', item['qty'])
+                result_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
                 if existing_helmet:
                     conn.execute('''
                         UPDATE transaction_logs 
                         SET qty = ?, qty_base_unit = ?, timestamp = ?, status = 'Pending', note = ?
                         WHERE id = ?
-                    ''', (withdrawal_result['full_packages_used'], item['qty'], thai_now, withdrawal_result['note'], existing_helmet['id']))
+                    ''', (result_qty, item['qty'], thai_now, result_note, existing_helmet['id']))
                 else:
                     conn.execute('''
                         INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note) 
                         VALUES (?, ?, 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)', ?, ?, ?, 'Pending', ?, ?)
-                    ''', (emp_id, item['product_id'], withdrawal_result['full_packages_used'], item['qty'], withdrawal_result['total_packages_used'], thai_now, withdrawal_result['note']))
+                    ''', (emp_id, item['product_id'], result_qty, item['qty'], withdrawal_result.get('total_packages_used', result_qty), thai_now, result_note))
             else:
+                result_qty = withdrawal_result.get('full_packages_used', item['qty'])
+                result_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
+                if has_medicine and is_medicine:
+                    result_note = f"อาการ: {symptom}" + (f" | {result_note}" if result_note else "")
                 conn.execute('''
                     INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note) 
                     VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, ?, ?, 'Pending', ?, ?)
-                ''', (emp_id, item['product_id'], withdrawal_result['full_packages_used'], item['qty'], withdrawal_result['total_packages_used'], thai_now, withdrawal_result['note']))
+                ''', (emp_id, item['product_id'], result_qty, item['qty'], withdrawal_result.get('total_packages_used', result_qty), thai_now, result_note))
             
-            msg_list.append(f"📦 {item_name}\n   🔹 จำนวน: {item['qty']} {item['unit']}\n   ℹ️ {withdrawal_result['note']}")
+            log_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
+            msg_list.append(f"📦 {item_name}\n   🔹 จำนวน: {item['qty']} {item['unit']}\n   ℹ️ {log_note}")
             
         except Exception as e:
             # Fallback to old logic if UnitConversionManager fails
@@ -447,14 +582,26 @@ def update_cart_qty():
     # ดึงข้อมูลเดิมเพื่อคำนวณส่วนต่างสต็อก
     item = conn.execute('SELECT * FROM carts WHERE id = ?', (cart_id,)).fetchone()
     if item:
-        product = conn.execute('SELECT stock, reserved_stock FROM products WHERE id = ?', (item['product_id'],)).fetchone()
+        product = conn.execute('SELECT stock, reserved_stock, category, name FROM products WHERE id = ?', (item['product_id'],)).fetchone()
+        is_medicine = is_split_tablet_medicine(product)
         diff = new_qty - item['qty']
         
         # เช็คว่าสต็อกจริงพอให้ปรับเพิ่มไหม
-        if product['stock'] >= diff:
+        if is_medicine:
+            manager = UnitConversionManager(conn)
+            stock_check = manager.check_stock_available(item['product_id'], new_qty)
+            can_update = stock_check['available']
+        else:
+            can_update = product['stock'] >= diff
+
+        if can_update:
             conn.execute('UPDATE carts SET qty = ? WHERE id = ?', (new_qty, cart_id))
-            conn.execute('UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ?', 
-                         (diff, diff, item['product_id']))
+            if is_medicine:
+                conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock + ?) WHERE id = ?',
+                             (diff, item['product_id']))
+            else:
+                conn.execute('UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ?', 
+                             (diff, diff, item['product_id']))
             conn.commit()
             res = {'success': True}
         else:
@@ -503,6 +650,7 @@ def api_search_products():
         params.extend([per_page, offset])
         
         products_list = conn.execute(paged_query, params).fetchall()
+        products_list = enrich_products_for_display(conn, products_list)
         products_by_category = {category_filter: products_list}
         has_more = offset + per_page < total_count
         
@@ -519,6 +667,7 @@ def api_search_products():
         params.extend([per_page, offset])
         
         products_list = conn.execute(paged_query, params).fetchall()
+        products_list = enrich_products_for_display(conn, products_list)
         # จัดกลุ่มตามหมวดหมู่
         products_by_category = {}
         for item in products_list:
@@ -539,6 +688,7 @@ def api_search_products():
         selected_category = categories_list[page - 1]
         query = f'SELECT * FROM products WHERE category = ? AND is_active = 1 {location_condition} ORDER BY code ASC'
         products_list = conn.execute(query, [selected_category]).fetchall()
+        products_list = enrich_products_for_display(conn, products_list)
         products_by_category = {selected_category: products_list}
         has_more = page < len(categories_list)
 
@@ -653,7 +803,8 @@ def admin_dashboard():
 
     # --- ดึงข้อมูลส่วนอื่นๆ (คงเดิม) ---
     pending_query = f'''
-        SELECT l.*, u.name as emp_name, u.department, u.location, p.name as product_name, p.unit
+        SELECT l.*, u.name as emp_name, u.department, u.location,
+               p.name as product_name, p.unit, p.category, p.base_unit, p.package_unit, p.conversion_rate
         FROM transaction_logs l
         LEFT JOIN users u ON l.emp_id = u.emp_id
         LEFT JOIN products p ON l.product_id = p.id
@@ -674,6 +825,7 @@ def admin_dashboard():
         stock_params.append(stock_cat)
     stock_query += " ORDER BY code ASC LIMIT 500" 
     all_stock = conn.execute(stock_query, stock_params).fetchall()
+    all_stock = enrich_products_for_display(conn, all_stock)
     
     categories = conn.execute(f"SELECT DISTINCT category FROM products WHERE 1=1 {product_loc_filter}").fetchall()
 
@@ -696,6 +848,7 @@ def admin_dashboard():
 
     low_stock_query = f"SELECT * FROM products WHERE stock < safety_stock {product_loc_filter}"
     low_stock = conn.execute(low_stock_query).fetchall()
+    low_stock = enrich_products_for_display(conn, low_stock)
 
     conn.close()
     
@@ -777,7 +930,8 @@ def get_pending_requests():
         role_log_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')"
 
     query = f'''
-        SELECT l.*, u.name as emp_name, u.department, p.name as product_name, p.unit
+        SELECT l.*, u.name as emp_name, u.department,
+               p.name as product_name, p.unit, p.category, p.base_unit, p.package_unit, p.conversion_rate
         FROM transaction_logs l
         LEFT JOIN users u ON l.emp_id = u.emp_id
         LEFT JOIN products p ON l.product_id = p.id
@@ -794,8 +948,30 @@ def get_pending_requests():
 @app.route('/admin/approve/<int:log_id>') # ฟังก์ชันนี้จะถูกเรียกเมื่อแอดมินกดอนุมัติการเบิก
 def approve_request(log_id):
     if not session.get('admin_logged_in'): return redirect(url_for('index'))
-    
+    role = session.get('admin_role', 'superadmin')
+
     conn = get_db_connection()
+    if role == 'admin_pc1':
+        permission_check = conn.execute('''
+            SELECT l.id FROM transaction_logs l
+            LEFT JOIN users u ON l.emp_id = u.emp_id
+            WHERE l.id = ? AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')
+        ''', (log_id,)).fetchone()
+        if not permission_check:
+            conn.close()
+            flash('❌ คุณไม่มีสิทธิ์อนุมัติรายการนี้', 'danger')
+            return redirect(url_for('admin_dashboard'))
+    elif role == 'admin_cc':
+        permission_check = conn.execute('''
+            SELECT l.id FROM transaction_logs l
+            LEFT JOIN users u ON l.emp_id = u.emp_id
+            WHERE l.id = ? AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')
+        ''', (log_id,)).fetchone()
+        if not permission_check:
+            conn.close()
+            flash('❌ คุณไม่มีสิทธิ์อนุมัติรายการนี้', 'danger')
+            return redirect(url_for('admin_dashboard'))
+
     # 1. ดึงข้อมูลรายการเบิกที่รออนุมัติ
     log = conn.execute('SELECT * FROM transaction_logs WHERE id=?', (log_id,)).fetchone()
     
@@ -868,7 +1044,32 @@ def check_safety_alert(product_id): # ฟังก์ชันนี้จะถ
 
 @app.route('/admin/reject/<int:log_id>')
 def reject_request(log_id):
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('index'))
+    role = session.get('admin_role', 'superadmin')
+
     conn = get_db_connection()
+    if role == 'admin_pc1':
+        permission_check = conn.execute('''
+            SELECT l.id FROM transaction_logs l
+            LEFT JOIN users u ON l.emp_id = u.emp_id
+            WHERE l.id = ? AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')
+        ''', (log_id,)).fetchone()
+        if not permission_check:
+            conn.close()
+            flash('❌ คุณไม่มีสิทธิ์ปฏิเสธรายการนี้', 'danger')
+            return redirect(url_for('admin_dashboard'))
+    elif role == 'admin_cc':
+        permission_check = conn.execute('''
+            SELECT l.id FROM transaction_logs l
+            LEFT JOIN users u ON l.emp_id = u.emp_id
+            WHERE l.id = ? AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')
+        ''', (log_id,)).fetchone()
+        if not permission_check:
+            conn.close()
+            flash('❌ คุณไม่มีสิทธิ์ปฏิเสธรายการนี้', 'danger')
+            return redirect(url_for('admin_dashboard'))
+
     log = conn.execute('SELECT * FROM transaction_logs WHERE id=?', (log_id,)).fetchone()
     if log and log['status'] == 'Pending':
         conn.execute('UPDATE products SET stock = stock + ?, reserved_stock = reserved_stock - ? WHERE id = ?', 
@@ -1203,6 +1404,9 @@ def edit_product():
     code = request.form.get('code')
     name = request.form.get('name')
     unit = request.form.get('unit')
+    base_unit = request.form.get('base_unit', '').strip() or 'เม็ด'
+    package_unit = request.form.get('package_unit', '').strip() or unit
+    conversion_rate = int(request.form.get('conversion_rate', 1) or 1)
     safety_stock = request.form.get('safety_stock', 0)
     stock = request.form.get('stock', 0)
     expiry_date = standardize_date(request.form.get('expiry_date', ''))
@@ -1211,9 +1415,9 @@ def edit_product():
     try:
         conn.execute('''
             UPDATE products 
-            SET name=?, unit=?, safety_stock=?, stock=?, expiry_date=?
+            SET name=?, unit=?, base_unit=?, package_unit=?, conversion_rate=?, safety_stock=?, stock=?, expiry_date=?
             WHERE code=?
-        ''', (name, unit, safety_stock, stock, expiry_date, code))
+        ''', (name, unit, base_unit, package_unit, conversion_rate, safety_stock, stock, expiry_date, code))
         conn.commit()
         # คืนค่า Success เป็น JSON แทนการ Redirect
         return jsonify({'success': True, 'message': 'แก้ไขข้อมูลของเรียบร้อย'})
@@ -1249,6 +1453,7 @@ def filter_low_stock():
         params.append(cat)
         
     rows = conn.execute(sql, params).fetchall()
+    rows = enrich_products_for_display(conn, rows)
     conn.close()
     
     # ส่งผลลัพธ์กลับไปที่หน้า HTML (ส่วนของแถวตาราง)
@@ -1287,6 +1492,7 @@ def filter_stock():
     sql += " ORDER BY code ASC"
     
     rows = conn.execute(sql, params).fetchall()
+    rows = enrich_products_for_display(conn, rows)
     conn.close()
     
     # ส่งกลับไปที่ Template ย่อยสำหรับแสดงแถวตาราง
