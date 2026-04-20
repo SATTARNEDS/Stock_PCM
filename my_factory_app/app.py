@@ -3,6 +3,7 @@ import math
 import sqlite3
 from datetime import datetime, date, timedelta
 
+import os
 import pandas as pd
 import pytz
 import qrcode
