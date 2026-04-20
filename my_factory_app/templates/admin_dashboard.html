@@ -249,8 +249,7 @@
                 </a>
 
                 <div class="nav-category text-white-50">ระบบบุคลากร</div>
-                <a href="javascript:void(0)" class="nav-link" onclick="loadUserList()" data-bs-toggle="modal"
-                    data-bs-target="#userManagementModal">
+                <a href="javascript:void(0)" class="nav-link" onclick="openUserManagementModal()">
                     <i class="fas fa-users-cog me-2 text-primary"></i> จัดการพนักงาน
                 </a>
                 <a href="javascript:void(0)" class="nav-link" onclick="openZombieModal()">
@@ -506,12 +505,11 @@
                     <div class="card border-0 shadow-sm h-100 chart-card">
                         <div class="card-header bg-white py-3 border-0">
                             <h6 class="mb-0 fw-medium text-dark"><i
-                                    class="fas fa-chart-bar me-2 text-primary"></i>สัดส่วนการเบิกจ่ายรายแผนก (30
-                                วันล่าสุด)</h6>
+                                    class="fas fa-chart-pie me-2 text-primary"></i>สัดส่วนการเบิกจ่ายรายแผนก (30 วันล่าสุด)</h6>
                         </div>
                         <div class="card-body p-3 d-flex align-items-center justify-content-center">
-                            <div class="chart-wrapper w-100" style="min-height: 320px;">
-                                <canvas id="deptChart" class="w-100" style="height: 100%; display:block;"></canvas>
+                            <div class="chart-wrapper w-100" style="height: 320px; max-height: 320px;">
+                                <canvas id="deptChart" class="w-100 h-100" style="display:block;"></canvas>
                             </div>
                         </div>
                     </div>
@@ -916,6 +914,23 @@
                     </form>
 
                     <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white border-bottom">
+                            <div class="row g-2 align-items-center">
+                                <div class="col-md-4">
+                                    <div class="fw-semibold text-primary">
+                                        <i class="fas fa-search me-1"></i>ค้นหาในรายชื่อพนักงาน
+                                    </div>
+                                </div>
+                                <div class="col-md-8">
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text bg-light text-muted"><i class="fas fa-search"></i></span>
+                                        <input type="text" id="userSearchInputTable" class="form-control shadow-none"
+                                            placeholder="ค้นหาในตารางพนักงาน..." oninput="syncUserSearchFromTable()">
+                                        <button type="button" class="btn btn-outline-secondary" onclick="clearUserSearch()">ล้างค้นหา</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                         <div class="table-responsive" style="max-height: 450px;">
                             <table class="table table-hover mb-0 align-middle">
                                 <thead class="table-light">
@@ -1206,6 +1221,8 @@
         let idleTime = 0;
         const maxIdleTime = 60; // Auto-logout 60 นาที
         let monthlyChartObj = null; // ตัวแปรเก็บกราฟรายงาน
+        let deptChartObj = null;
+        let userSearchDebounceTimer = null;
 
         function checkAuth(response) {
             if (response.status === 401 || response.statusText === 'Unauthorized') {
@@ -1238,78 +1255,91 @@
             try {
                 const ctx = document.getElementById('deptChart');
                 if (ctx) {
-                    const labels = {{ (dept_labels or[]) | tojson | safe }};
-        const values = {{ (dept_values or[]) | tojson | safe }};
-        if (labels.length > 0) {
-            const gradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 320);
-            gradient.addColorStop(0, 'rgba(13, 110, 253, 0.95)');
-            gradient.addColorStop(1, 'rgba(13, 110, 253, 0.35)');
+                    const rawLabels = {{ (dept_labels or[]) | tojson | safe }};
+                    const rawValues = {{ (dept_values or[]) | tojson | safe }};
+                    const filteredData = rawLabels.map((label, index) => ({
+                        label,
+                        value: Number(rawValues[index] || 0)
+                    })).filter(item => item.label && item.value > 0);
 
-            const colors = [
-                'rgba(13, 110, 253, 0.9)',
-                'rgba(54, 162, 235, 0.85)',
-                'rgba(25, 135, 84, 0.85)',
-                'rgba(255, 193, 7, 0.85)',
-                'rgba(220, 53, 69, 0.85)',
-                'rgba(102, 16, 242, 0.85)',
-                'rgba(13, 202, 240, 0.85)'
-            ];
+                    const wrapper = ctx.closest('.chart-wrapper');
+                    if (deptChartObj) {
+                        deptChartObj.destroy();
+                        deptChartObj = null;
+                    }
 
-            new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'จำนวน (ชิ้น)',
-                        data: values,
-                        backgroundColor: labels.map((_, index) => colors[index % colors.length]),
-                        borderColor: '#ffffff',
-                        borderWidth: 2,
-                        hoverOffset: 10,
-                        cutout: '60%'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: { duration: 900, easing: 'easeOutQuart' },
-                    layout: { padding: { top: 10, right: 10, bottom: 10, left: 10 } },
-                    plugins: {
-                        legend: {
-                            display: true,
-                            position: 'right',
-                            labels: {
-                                color: '#495057',
-                                boxWidth: 12,
-                                padding: 16,
-                                usePointStyle: true
+                    if (filteredData.length > 0) {
+                        const labels = filteredData.map(item => item.label);
+                        const values = filteredData.map(item => item.value);
+                        const total = values.reduce((sum, value) => sum + value, 0);
+                        const colors = [
+                            'rgba(13, 110, 253, 0.9)',
+                            'rgba(54, 162, 235, 0.85)',
+                            'rgba(25, 135, 84, 0.85)',
+                            'rgba(255, 193, 7, 0.85)',
+                            'rgba(220, 53, 69, 0.85)',
+                            'rgba(102, 16, 242, 0.85)'
+                        ];
+
+                        deptChartObj = new Chart(ctx, {
+                            type: 'doughnut',
+                            data: {
+                                labels: labels,
+                                datasets: [{
+                                    label: 'จำนวนที่เบิก',
+                                    data: values,
+                                    backgroundColor: labels.map((_, index) => colors[index % colors.length]),
+                                    borderColor: '#ffffff',
+                                    borderWidth: 2,
+                                    hoverOffset: 8,
+                                    cutout: '58%'
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                animation: { duration: 700, easing: 'easeOutQuart' },
+                                plugins: {
+                                    legend: {
+                                        display: true,
+                                        position: 'right',
+                                        labels: {
+                                            color: '#495057',
+                                            boxWidth: 12,
+                                            padding: 14,
+                                            usePointStyle: true
+                                        }
+                                    },
+                                    title: {
+                                        display: true,
+                                        text: 'รายการเบิกที่อนุมัติย้อนหลัง 30 วัน แยกตามแผนก',
+                                        color: '#212529',
+                                        font: { size: 14, weight: '600' },
+                                        padding: { bottom: 10 }
+                                    },
+                                    tooltip: {
+                                        backgroundColor: '#212529',
+                                        titleColor: '#ffffff',
+                                        bodyColor: '#f8f9fa',
+                                        borderColor: 'rgba(255,255,255,0.12)',
+                                        borderWidth: 1,
+                                        padding: 12,
+                                        callbacks: {
+                                            label: context => {
+                                                const value = context.parsed || 0;
+                                                const percent = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                                return ` ${context.label}: ${value.toLocaleString()} ชิ้น (${percent}%)`;
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                        },
-                        title: {
-                            display: true,
-                            text: 'สัดส่วนการเบิกจ่ายตามแผนก (30 วัน)',
-                            color: '#212529',
-                            font: { size: 14, weight: '600' },
-                            padding: { bottom: 12 }
-                        },
-                        tooltip: {
-                            backgroundColor: '#212529',
-                            titleColor: '#ffffff',
-                            bodyColor: '#f8f9fa',
-                            borderColor: 'rgba(255,255,255,0.12)',
-                            borderWidth: 1,
-                            padding: 14,
-                            displayColors: true,
-                            callbacks: {
-                                label: context => ` ${context.label}: ${context.parsed.toLocaleString()} ชิ้น`
-                            }
-                        }
+                        });
+                    } else if (wrapper) {
+                        wrapper.innerHTML = '<div class="text-center text-muted py-5">ยังไม่มีข้อมูลการเบิกย้อนหลัง 30 วัน</div>';
                     }
                 }
-            });
-        }
-            }
-        } catch (error) { console.error("Chart Error:", error); }
+            } catch (error) { console.error("Chart Error:", error); }
 
         // --- 1.3 เริ่มระบบ Real-time Update ---
         setupReportYears();
@@ -1643,6 +1673,17 @@
             new bootstrap.Modal(document.getElementById('zombieModal')).show();
         }
 
+        function openUserManagementModal() {
+            loadUserList();
+            const modalEl = document.getElementById('userManagementModal');
+            const modal = new bootstrap.Modal(modalEl);
+            modal.show();
+            setTimeout(() => {
+                const searchInput = document.getElementById('userSearchInputTable');
+                if (searchInput) searchInput.focus();
+            }, 250);
+        }
+
         function fetchZombieUsers() {
             fetch('/admin/list_zombies_json').then(checkAuth).then(res => res.json()).then(users => {
                 const tbody = document.getElementById('zombieTableBody');
@@ -1671,15 +1712,40 @@
                 });
         }
 
+        function debouncedLoadUserList() {
+            if (userSearchDebounceTimer) clearTimeout(userSearchDebounceTimer);
+            userSearchDebounceTimer = setTimeout(() => loadUserList(), 300);
+        }
+
+        function clearUserSearch() {
+            const tableSearchInput = document.getElementById('userSearchInputTable');
+            if (tableSearchInput) tableSearchInput.value = '';
+            loadUserList();
+        }
+
+        function syncUserSearchFromTable() {
+            debouncedLoadUserList();
+        }
+
         function loadUserList() {
             // อัปเดตรายชื่อแผนกใน Dropdown
             fetch('/admin/list_departments').then(checkAuth).then(res => res.json()).then(depts => {
                 document.getElementById('userDeptSelect').innerHTML = '<option value="">-- เลือกแผนก --</option>' + depts.map(d => `<option value="${d.name}">${d.name}</option>`).join('');
             });
 
-            // โหลดรายชื่อพนักงาน
-            fetch('/admin/list_users').then(checkAuth).then(res => res.json()).then(users => {
-                const tbody = document.getElementById('userTableBody');
+            const tableSearchInput = document.getElementById('userSearchInputTable');
+            const search = tableSearchInput ? tableSearchInput.value.trim() : '';
+            const tbody = document.getElementById('userTableBody');
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-3 text-muted">กำลังค้นหา...</td></tr>';
+            }
+
+            fetch(`/admin/list_users?search=${encodeURIComponent(search)}`).then(checkAuth).then(res => res.json()).then(users => {
+                if (!Array.isArray(users) || users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">ไม่พบพนักงานที่ตรงกับคำค้นหา</td></tr>';
+                    return;
+                }
+
                 tbody.innerHTML = users.map(user => `
                 <tr>
                     <td class="ps-4 fw-medium text-primary"># ${user.emp_id}</td>

@@ -62,8 +62,10 @@ app.config.update(
     MAX_CONTENT_LENGTH=int(os.environ.get('MAX_UPLOAD_MB', '5')) * 1024 * 1024,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
-    SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', '0') == '1'
+    SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', '0') == '1',
+    TEMPLATES_AUTO_RELOAD=True
 )
+app.jinja_env.auto_reload = True
 DB_NAME = 'factory_stock.db'
 THAILAND_TZ = 'Asia/Bangkok'
 SESSION_TIMEOUT_MINUTES = 15
@@ -139,6 +141,10 @@ def normalize_location_value(value):
     if lower in ('general', 'ทั่วไป'):
         return 'General'
     return raw
+
+def is_cc_location_value(value):
+    text = str(value or '').strip().lower()
+    return text == 'cc' or 'coil center' in text or ' cc' in f' {text}'
 
 def is_valid_emp_id(emp_id):
     return bool(re.fullmatch(r'[A-Za-z0-9_-]{1,20}', str(emp_id or '').strip()))
@@ -341,6 +347,16 @@ def start_write_transaction(conn):
     except sqlite3.OperationalError as e:
         if 'within a transaction' not in str(e).lower():
             raise
+
+def transaction_timestamp_expr(alias='l'):
+    prefix = f"{alias}." if alias else ""
+    return f"""
+        CASE
+            WHEN {prefix}timestamp LIKE '__/__/____ __:__:__' THEN
+                substr({prefix}timestamp, 7, 4) || '-' || substr({prefix}timestamp, 4, 2) || '-' || substr({prefix}timestamp, 1, 2) || ' ' || substr({prefix}timestamp, 12, 8)
+            ELSE REPLACE(substr(COALESCE({prefix}timestamp, ''), 1, 19), 'T', ' ')
+        END
+    """
 
 def update_user_last_seen(emp_id):
     conn = get_db_connection()
@@ -1085,18 +1101,27 @@ def admin_dashboard():
     conn = get_db_connection()
 
     # --- 1. Analytics: กราฟการเบิกจ่ายแยกตามแผนก (30 วันล่าสุด) ---
-    # เปลี่ยนจาก COUNT(*) เป็น SUM(qty) เพื่อดูปริมาณการเบิกจริง
+    # นับย้อนหลัง 30 วันจากเวลาปัจจุบันของเซิร์ฟเวอร์ โดยแปลง timestamp เดิมให้อยู่ในรูปที่ SQLite เทียบวันที่ได้ถูกต้อง
     chart_query = f'''
-        SELECT u.department, SUM(l.qty) as total_qty 
+        SELECT u.department AS department,
+               COALESCE(SUM(CASE
+                   WHEN l.qty_base_unit IS NOT NULL AND l.qty_base_unit > 0 THEN l.qty_base_unit
+                   ELSE l.qty
+               END), 0) AS total_qty
         FROM transaction_logs l
         JOIN users u ON l.emp_id = u.emp_id
-        WHERE l.status = 'Approved' 
-        AND l.timestamp >= date('now', '-30 days')
+        WHERE l.status = 'Approved'
+          AND l.emp_id NOT LIKE 'ADMIN:%'
+          AND TRIM(COALESCE(u.department, '')) <> ''
+          AND datetime({transaction_timestamp_expr('l')}) >= datetime('now', 'localtime', '-30 days')
         GROUP BY u.department
+        HAVING total_qty > 0
+        ORDER BY total_qty DESC
     '''
     chart_results = conn.execute(chart_query).fetchall()
-    dept_labels = [row['department'] if row['department'] else 'ไม่ระบุ' for row in chart_results]
-    dept_values = [int(row['total_qty']) for row in chart_results] # มั่นใจว่าเป็น Integer
+    dept_labels = [row['department'] for row in chart_results]
+    dept_values = [int(row['total_qty']) for row in chart_results]
+    dept_summary = [{'name': row['department'], 'total': int(row['total_qty'])} for row in chart_results]
 
     # --- 2. Analytics: ของที่ถูกเบิกสูงสุด 5 อันดับแรก (Top 5 Items) ---
     top_items_query = f'''
@@ -1168,7 +1193,7 @@ def admin_dashboard():
                            low_stock=low_stock,
                            logs=logs,
                            page=page, total_pages=total_pages,
-                           dept_labels=dept_labels, dept_values=dept_values, # ข้อมูลสำหรับกราฟ
+                           dept_labels=dept_labels, dept_values=dept_values, dept_summary=dept_summary, # ข้อมูลสำหรับกราฟ
                            top_items=top_items, # ข้อมูลของเบิกสูงสุด
                            role=role,
                            selected_loc=selected_loc)
@@ -1259,42 +1284,41 @@ def get_pending_requests():
 
 @app.route('/admin/approve/<int:log_id>', methods=['POST']) # ฟังก์ชันนี้จะถูกเรียกเมื่อแอดมินกดอนุมัติการเบิก
 def approve_request(log_id):
-    if not session.get('admin_logged_in'): return redirect(url_for('index'))
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('index'))
+
     role = session.get('admin_role', 'superadmin')
-
     conn = get_db_connection()
-    start_write_transaction(conn)
-    start_write_transaction(conn)
-    if role == 'admin_pc1':
-        permission_check = conn.execute('''
-            SELECT l.id FROM transaction_logs l
-            LEFT JOIN users u ON l.emp_id = u.emp_id
-            WHERE l.id = ? AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')
-        ''', (log_id,)).fetchone()
-        if not permission_check:
-            conn.close()
-            flash('❌ คุณไม่มีสิทธิ์อนุมัติรายการนี้', 'danger')
-            return redirect(url_for('admin_dashboard'))
-    elif role == 'admin_cc':
-        permission_check = conn.execute('''
-            SELECT l.id FROM transaction_logs l
-            LEFT JOIN users u ON l.emp_id = u.emp_id
-            WHERE l.id = ? AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')
-        ''', (log_id,)).fetchone()
-        if not permission_check:
-            conn.close()
-            flash('❌ คุณไม่มีสิทธิ์อนุมัติรายการนี้', 'danger')
+
+    try:
+        start_write_transaction(conn)
+
+        if role == 'admin_pc1':
+            permission_check = conn.execute('''
+                SELECT l.id FROM transaction_logs l
+                LEFT JOIN users u ON l.emp_id = u.emp_id
+                WHERE l.id = ? AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')
+            ''', (log_id,)).fetchone()
+            if not permission_check:
+                flash('❌ คุณไม่มีสิทธิ์อนุมัติรายการนี้', 'danger')
+                return redirect(url_for('admin_dashboard'))
+        elif role == 'admin_cc':
+            permission_check = conn.execute('''
+                SELECT l.id FROM transaction_logs l
+                LEFT JOIN users u ON l.emp_id = u.emp_id
+                WHERE l.id = ? AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')
+            ''', (log_id,)).fetchone()
+            if not permission_check:
+                flash('❌ คุณไม่มีสิทธิ์อนุมัติรายการนี้', 'danger')
+                return redirect(url_for('admin_dashboard'))
+
+        log = conn.execute('SELECT * FROM transaction_logs WHERE id=? AND status = "Pending"', (log_id,)).fetchone()
+        if not log:
+            flash('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่พบข้อมูล', 'warning')
             return redirect(url_for('admin_dashboard'))
 
-    # 1. ดึงข้อมูลรายการเบิกที่รออนุมัติ
-    log = conn.execute('SELECT * FROM transaction_logs WHERE id=? AND status = "Pending"', (log_id,)).fetchone()
-    
-    if log:
         product_id = log['product_id']
         qty_to_withdraw = log['qty']
-        
-        # 2. ค้นหา Lot ของที่เก่าที่สุดที่มีของอยู่ (FIFO)
-        # เรียงตาม received_date (วันที่รับ) และ id (ตัวไหนเข้าฐานข้อมูลก่อน)
         lots = conn.execute('''
             SELECT * FROM product_lots 
             WHERE product_id = ? AND qty > 0 
@@ -1304,25 +1328,20 @@ def approve_request(log_id):
         remaining = qty_to_withdraw
         last_lot_id = None
 
-        # 3. เริ่มวนลูปหักสต็อกทีละล็อตจนกว่าจะครบตามจำนวนที่เบิก
         for lot in lots:
-            if remaining <= 0: break
-            
+            if remaining <= 0:
+                break
+
             take = min(lot['qty'], remaining)
-            
-            # ✅ ต้องเอา Comment ออก เพื่อให้หักยอดออกจาก Lot จริงๆ
             conn.execute('UPDATE product_lots SET qty = qty - ? WHERE id = ?', (take, lot['id']))
-            
             remaining -= take
-            last_lot_id = lot['id'] 
+            last_lot_id = lot['id']
 
         if remaining > 0:
             conn.rollback()
-            conn.close()
             flash('❌ จำนวนสินค้าใน lot ไม่พอสำหรับการอนุมัติ', 'danger')
             return redirect(url_for('admin_dashboard'))
 
-        # 4. อัปเดตตารางหลัก
         thai_now = get_thailand_time().strftime('%d/%m/%Y %H:%M:%S')
         update_result = conn.execute('''
             UPDATE transaction_logs 
@@ -1332,16 +1351,12 @@ def approve_request(log_id):
 
         if update_result.rowcount == 0:
             conn.rollback()
-            conn.close()
             flash('⚠️ รายการนี้ถูกดำเนินการไปแล้ว', 'warning')
             return redirect(url_for('admin_dashboard'))
-        
-        # อัปเดตยอดเบิกสะสมในตารางของหลัก
+
         conn.execute('UPDATE products SET withdraw = withdraw + ? WHERE id = ?', (qty_to_withdraw, product_id))
-        
         conn.commit()
 
-        # 5. เช็คแจ้งเตือน Safety Stock หลังตัดสต็อก
         check_safety_alert(product_id)
 
         user_info = conn.execute('SELECT name, department, location FROM users WHERE emp_id = ?', (log['emp_id'],)).fetchone()
@@ -1362,9 +1377,15 @@ def approve_request(log_id):
         send_line_message(approval_message, location=(user_info['location'] if user_info else ''), role=role)
 
         flash('✅ อนุมัติและตัดสต็อกแบบ FIFO เรียบร้อยแล้ว', 'success')
-    
-    conn.close()
-    return redirect(url_for('admin_dashboard'))
+        return redirect(url_for('admin_dashboard'))
+
+    except Exception as e:
+        conn.rollback()
+        print(f'Approve request error: {e}')
+        flash('❌ ไม่สามารถอนุมัติรายการได้ กรุณาลองใหม่', 'danger')
+        return redirect(url_for('admin_dashboard'))
+    finally:
+        conn.close()
 
 def check_safety_alert(product_id): # ฟังก์ชันนี้จะถูกเรียกหลังจากอนุมัติการเบิก เพื่อเช็คว่าของตัวนั้นๆ ต่ำกว่า Safety Stock หรือไม่
     conn = get_db_connection()
@@ -1385,54 +1406,65 @@ def check_safety_alert(product_id): # ฟังก์ชันนี้จะถ
 def reject_request(log_id):
     if not session.get('admin_logged_in'):
         return redirect(url_for('index'))
+
     role = session.get('admin_role', 'superadmin')
-
-    start_write_transaction(conn)
     conn = get_db_connection()
-    start_write_transaction(conn)
-    if role == 'admin_pc1':
-        permission_check = conn.execute('''
-            SELECT l.id FROM transaction_logs l
-            LEFT JOIN users u ON l.emp_id = u.emp_id
-            WHERE l.id = ? AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')
-        ''', (log_id,)).fetchone()
-        if not permission_check:
-            conn.close()
-            flash('❌ คุณไม่มีสิทธิ์ปฏิเสธรายการนี้', 'danger')
-            return redirect(url_for('admin_dashboard'))
-    elif role == 'admin_cc':
-        permission_check = conn.execute('''
-            SELECT l.id FROM transaction_logs l
-            LEFT JOIN users u ON l.emp_id = u.emp_id
-            WHERE l.id = ? AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')
-        ''', (log_id,)).fetchone()
-        if not permission_check:
-            conn.close()
-            flash('❌ คุณไม่มีสิทธิ์ปฏิเสธรายการนี้', 'danger')
+
+    try:
+        start_write_transaction(conn)
+
+        if role == 'admin_pc1':
+            permission_check = conn.execute('''
+                SELECT l.id FROM transaction_logs l
+                LEFT JOIN users u ON l.emp_id = u.emp_id
+                WHERE l.id = ? AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')
+            ''', (log_id,)).fetchone()
+            if not permission_check:
+                flash('❌ คุณไม่มีสิทธิ์ปฏิเสธรายการนี้', 'danger')
+                return redirect(url_for('admin_dashboard'))
+        elif role == 'admin_cc':
+            permission_check = conn.execute('''
+                SELECT l.id FROM transaction_logs l
+                LEFT JOIN users u ON l.emp_id = u.emp_id
+                WHERE l.id = ? AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')
+            ''', (log_id,)).fetchone()
+            if not permission_check:
+                flash('❌ คุณไม่มีสิทธิ์ปฏิเสธรายการนี้', 'danger')
+                return redirect(url_for('admin_dashboard'))
+
+        log = conn.execute('SELECT * FROM transaction_logs WHERE id=? AND status = "Pending"', (log_id,)).fetchone()
+        if not log:
+            flash('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่พบข้อมูล', 'warning')
             return redirect(url_for('admin_dashboard'))
 
-    log = conn.execute('SELECT * FROM transaction_logs WHERE id=? AND status = "Pending"', (log_id,)).fetchone()
-    if log:
         product = conn.execute('SELECT * FROM products WHERE id = ?', (log['product_id'],)).fetchone()
         is_medicine = is_split_tablet_medicine(product) if product else False
 
         if is_medicine:
             conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (log['qty'], log['product_id']))
         else:
-            conn.execute('UPDATE products SET stock = stock + ?, reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', 
-                         (log['qty'], log['qty'], log['product_id']))
+            conn.execute(
+                'UPDATE products SET stock = stock + ?, reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?',
+                (log['qty'], log['qty'], log['product_id'])
+            )
 
         update_result = conn.execute('UPDATE transaction_logs SET status = "Rejected" WHERE id = ? AND status = "Pending"', (log_id,))
         if update_result.rowcount == 0:
             conn.rollback()
-            conn.close()
             flash('⚠️ รายการนี้ถูกดำเนินการไปแล้ว', 'warning')
             return redirect(url_for('admin_dashboard'))
 
         conn.commit()
         flash('❌ ปฏิเสธรายการเรียบร้อยแล้ว', 'warning')
-    conn.close()
-    return redirect(url_for('admin_dashboard'))
+        return redirect(url_for('admin_dashboard'))
+
+    except Exception as e:
+        conn.rollback()
+        print(f'Reject request error: {e}')
+        flash('❌ ไม่สามารถปฏิเสธรายการได้ กรุณาลองใหม่', 'danger')
+        return redirect(url_for('admin_dashboard'))
+    finally:
+        conn.close()
 
 @app.route('/admin/get_next_code')
 def get_next_code():
@@ -2279,7 +2311,7 @@ def monthly_report():
     
     conn = get_db_connection()
     # ดึงข้อมูลการเบิกจ่ายที่ Approved แล้วในเดือนปัจจุบัน
-    query = '''
+    query = f'''
         SELECT 
             p.code AS "รหัสของ", 
             p.name AS "ชื่อของ", 
@@ -2290,7 +2322,7 @@ def monthly_report():
         JOIN products p ON l.product_id = p.id
         JOIN users u ON l.emp_id = u.emp_id
         WHERE l.status = 'Approved' 
-        AND strftime('%m', l.timestamp) = strftime('%m', 'now')
+          AND strftime('%Y-%m', datetime({transaction_timestamp_expr('l')})) = strftime('%Y-%m', 'now', 'localtime')
         GROUP BY p.id, u.department
     '''
     try:
@@ -2313,15 +2345,16 @@ def monthly_report():
 def get_inventory_forecast():
     conn = get_db_connection()
     # คำนวณการเบิกเฉลี่ยต่อวันในช่วง 30 วันที่ผ่านมา
-    stats = conn.execute('''
+    stats = conn.execute(f'''
         SELECT 
             p.id, 
             p.name, 
-            p.stock, 
-            SUM(l.qty) / 30.0 as daily_avg
+            p.stock,
+            COALESCE(SUM(l.qty), 0) / 30.0 as daily_avg
         FROM products p
         LEFT JOIN transaction_logs l ON p.id = l.product_id 
-        WHERE l.status = 'Approved' AND l.timestamp >= date('now', '-30 days')
+            AND l.status = 'Approved'
+            AND datetime({transaction_timestamp_expr('l')}) >= datetime('now', 'localtime', '-30 days')
         GROUP BY p.id
     ''').fetchall()
     conn.close()
@@ -2453,18 +2486,25 @@ def list_users():
         return jsonify({'success': False, 'message': 'Unauthorized'}), 401
         
     role = session.get('admin_role')
+    search = clean_input_text(request.args.get('search', ''), 100)
     conn = get_db_connection()
-    
-    # --- Logic กรองตามสิทธิ์ ---
+
+    query = "SELECT emp_id, name, department, location FROM users WHERE 1=1"
+    params = []
+
     if role == 'admin_pc1':
-        query = "SELECT emp_id, name, department, location FROM users WHERE location = 'PC1'"
+        query += " AND location = 'PC1'"
     elif role == 'admin_cc':
-        query = "SELECT emp_id, name, department, location FROM users WHERE location = 'Coil Center'"
-    else:
-        # Superadmin เห็นทั้งหมด
-        query = "SELECT emp_id, name, department, location FROM users"
-        
-    users = conn.execute(query).fetchall()
+        query += " AND (location = 'CC' OR location = 'Coil Center' OR location LIKE '%CC%' OR location LIKE '%Coil Center%')"
+
+    if search:
+        query += " AND (emp_id LIKE ? OR name LIKE ? OR department LIKE ? OR location LIKE ?)"
+        like_term = f"%{search}%"
+        params.extend([like_term, like_term, like_term, like_term])
+
+    query += " ORDER BY emp_id ASC"
+
+    users = conn.execute(query, params).fetchall()
     conn.close()
     return jsonify([dict(u) for u in users])
 
@@ -2515,7 +2555,7 @@ def delete_user(emp_id):
     if role == 'admin_pc1' and user['location'] != 'PC1':
         conn.close()
         return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์จัดการพนักงานนอก PC1'}), 403
-    if role == 'admin_cc' and user['location'] != 'Coil Center':
+    if role == 'admin_cc' and not is_cc_location_value(user['location']):
         conn.close()
         return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์จัดการพนักงานนอก CC'}), 403
 
