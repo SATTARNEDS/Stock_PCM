@@ -9,6 +9,10 @@ PowerShell
 .\venv\Scripts\Activate.ps1 (เข้า venv ที่ทำการติดตั้ง python ไว้เพื่อรันสคริปต์)
 py app.py (รันแอปพลิเคชัน)
 
+Environment variables
+ตอนนี้โปรเจกต์จะอ่านค่าจากไฟล์ .env ในโฟลเดอร์ my_factory_app อัตโนมัติ
+เช่น FLASK_SECRET_KEY, LINE tokens และ STOCK_PCM_CLEAR_PASSWORD
+
 gitbash
 
 python build_db.py (สร้างฐานข้อมูลและตารางที่จำเป็นสำหรับโปรเจค)
@@ -20,9 +24,9 @@ python app.py (รันแอปพลิเคชัน)
 
 
 LINE(CC)
-LINE_CHANNEL_ACCESS_TOKEN = '3QbgTXY3rgtW3rswVEqu9JRKAJBO4VbacDuVczn+Z+IFPu5BW0FkScnOTbPTtlEAaVj66MPQgwZW3d4OzwvBTD+liN+nWWi9VleKbQtwNU4lgXrfmzihCxLFhikWKBVQ0Ykp8QDK70sfSo5078lTeAdB04t89/1O/w1cDnyilFU=' 
-LINE_ADMIN_USER_ID = 'C65cf63711c8a37424f740c352188a8c4' 
+LINE_CHANNEL_ACCESS_TOKEN = ตั้งผ่าน environment variable
+LINE_ADMIN_USER_ID = ตั้งผ่าน environment variable
 
 LINE(PC1)
-LINE_TEST_CHANNEL_ACCESS_TOKEN = '3QbgTXY3rgtW3rswVEqu9JRKAJBO4VbacDuVczn+Z+IFPu5BW0FkScnOTbPTtlEAaVj66MPQgwZW3d4OzwvBTD+liN+nWWi9VleKbQtwNU4lgXrfmzihCxLFhikWKBVQ0Ykp8QDK70sfSo5078lTeAdB04t89/1O/w1cDnyilFU='
-LINE_TEST_ADMIN_USER_ID = 'C5220a09d21e6761f29f28985edc0a733'
+LINE_TEST_CHANNEL_ACCESS_TOKEN = ตั้งผ่าน environment variable
+LINE_TEST_ADMIN_USER_ID = ตั้งผ่าน environment variable

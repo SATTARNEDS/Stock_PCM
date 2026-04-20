@@ -222,6 +222,7 @@
                                     </td>
                                     <td class="text-end">
                                         <form action="/remove_from_cart" method="POST">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                             <input type="hidden" name="cart_id" value="{{ item['id'] }}">
                                             <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
                                             <input type="hidden" name="product_id" value="{{ item['product_id'] }}">
@@ -244,6 +245,7 @@
                 </div>
                 <div class="modal-footer border-0">
                     <form action="/confirm_withdrawal" method="POST" class="w-100">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
                         {% set medicine_in_cart = namespace(value=false) %}
                         {% for c in cart_items %}
@@ -316,6 +318,7 @@
         const loadMoreSection = document.getElementById('loadMoreSection');
         const loadMoreBtn = document.getElementById('loadMoreBtn');
         const empId = "{{ user['emp_id'] }}";
+        const csrfToken = "{{ csrf_token() }}";
         let currentCategory = {{ current_category|default('')|tojson }};
         if (!currentCategory) currentCategory = '';
         let timeout = null;
@@ -404,6 +407,7 @@
             formData.append('cart_id', cartId);
             formData.append('qty', parseInt(qtyElem.innerText || 0) + delta);
             formData.append('emp_id', empId);
+            formData.append('csrf_token', csrfToken);
 
             fetch('/update_cart_qty', { method: 'POST', body: formData })
                 .then(res => res.json())

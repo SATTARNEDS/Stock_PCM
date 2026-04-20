@@ -50,6 +50,7 @@
                     <div class="tab-content">
                         <div class="tab-pane fade show active" id="old">
                             <form id="stockUpdateForm" method="POST">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <input type="hidden" name="action_type" value="update_stock">
                                 <div class="mb-4">
                                     <label class="form-label fw-medium">1. ค้นหารหัสหรือชื่ออุปกรณ์</label>
@@ -93,6 +94,7 @@
 
                         <div class="tab-pane fade" id="new">
                             <form method="POST">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <input type="hidden" name="action_type" value="new_product">
                                 <div class="row mb-3">
                                     <div class="col-md-6"><label class="fw-medium">รหัสอุปกรณ์</label><input type="text" name="code" class="form-control" required></div>
@@ -196,7 +198,7 @@
             fetch("{{ url_for('add_product') }}", {
                 method: "POST",
                 body: formData,
-                headers: { "X-Requested-With": "XMLHttpRequest" }
+                headers: { "X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": "{{ csrf_token() }}" }
             })
             .then(response => response.json())
             .then(data => {

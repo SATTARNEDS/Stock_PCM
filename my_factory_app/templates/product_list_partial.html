@@ -36,6 +36,7 @@
             
             <div class="text-end">
                 <form action="/add_to_cart" method="POST" class="d-flex gap-1">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
                     <input type="hidden" name="product_id" value="{{ item['id'] }}">
                     <input type="hidden" name="qty_unit" class="qty_unit_value_{{ item['id'] }}" value="{{ 'base' if split_medicine else 'package' }}">

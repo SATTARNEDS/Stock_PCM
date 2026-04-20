@@ -23,14 +23,20 @@
         {% endif %}
     </td>
     <td class="text-center">
-        <button onclick="confirmAction('{{ url_for('approve_request', log_id=log['id']) }}', 'อนุมัติการเบิกนี้?')"
-            class="btn btn-sm btn-success rounded-pill px-3 me-1 shadow-sm">
-            <i class="fas fa-check me-1"></i>อนุมัติ
-        </button>
-        <button onclick="confirmAction('{{ url_for('reject_request', log_id=log['id']) }}', 'ปฏิเสธรายการนี้?', 'warning')"
-            class="btn btn-sm btn-outline-danger rounded-pill px-3 shadow-sm">
-            <i class="fas fa-times me-1"></i>ปฏิเสธ
-        </button>
+        <form action="{{ url_for('approve_request', log_id=log['id']) }}" method="POST" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="button" onclick="confirmAction(this.form, 'อนุมัติการเบิกนี้?')"
+                class="btn btn-sm btn-success rounded-pill px-3 me-1 shadow-sm">
+                <i class="fas fa-check me-1"></i>อนุมัติ
+            </button>
+        </form>
+        <form action="{{ url_for('reject_request', log_id=log['id']) }}" method="POST" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="button" onclick="confirmAction(this.form, 'ปฏิเสธรายการนี้?', 'warning')"
+                class="btn btn-sm btn-outline-danger rounded-pill px-3 shadow-sm">
+                <i class="fas fa-times me-1"></i>ปฏิเสธ
+            </button>
+        </form>
     </td>
 </tr>
 {% else %}

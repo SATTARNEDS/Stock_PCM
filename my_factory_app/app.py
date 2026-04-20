@@ -1,6 +1,7 @@
 import io
 import math
 import re
+import secrets
 import sqlite3
 from datetime import datetime, date, timedelta
 
@@ -14,6 +15,32 @@ from flask_apscheduler import APScheduler
 from io import BytesIO
 from unit_conversion import UnitConversionManager  # ✅ Unit Conversion Support
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_FILE = os.path.join(BASE_DIR, '.env')
+
+def load_env_file(env_path=ENV_FILE):
+    """โหลด environment variables จากไฟล์ .env แบบง่าย ๆ โดยไม่ต้องพึ่ง dependency เพิ่ม"""
+    if not os.path.exists(env_path):
+        return
+
+    try:
+        with open(env_path, 'r', encoding='utf-8') as env_file:
+            for raw_line in env_file:
+                line = raw_line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+
+                key, value = line.split('=', 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except Exception as e:
+        print(f"Warning loading .env: {e}")
+
+load_env_file()
 
 # --- เพิ่ม Config ---
 class Config:
@@ -25,16 +52,69 @@ app.config.from_object(Config())
 scheduler = APScheduler()
 # -------------------------
 
-app.secret_key = 'factory_smart_key_2026'
+configured_secret = os.environ.get('FLASK_SECRET_KEY') or os.environ.get('SECRET_KEY')
+if not configured_secret:
+    configured_secret = secrets.token_hex(32)
+    print('Warning: FLASK_SECRET_KEY not set; using a temporary random secret for this process.')
+
+app.secret_key = configured_secret
+app.config.update(
+    MAX_CONTENT_LENGTH=int(os.environ.get('MAX_UPLOAD_MB', '5')) * 1024 * 1024,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', '0') == '1'
+)
 DB_NAME = 'factory_stock.db'
 THAILAND_TZ = 'Asia/Bangkok'
 SESSION_TIMEOUT_MINUTES = 15
 USER_LOCK_TIMEOUT_MINUTES = 5
+ALLOWED_IMPORT_EXTENSIONS = {'xlsx', 'xlsm', 'xls'}
+SENSITIVE_POST_ENDPOINTS = {
+    'add_to_cart', 'remove_from_cart', 'update_cart_qty', 'confirm_withdrawal',
+    'approve_request', 'reject_request', 'import_excel', 'clear_system_data',
+    'toggle_product_status', 'add_product', 'edit_product', 'add_product_ajax',
+    'write_off_ajax', 'unlock_user_ajax', 'add_user_ajax', 'delete_user',
+    'update_user_ajax', 'save_alert_time', 'daily_alert'
+}
 NO_CACHE_HEADERS = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
     "Pragma": "no-cache",
     "Expires": "0",
 }
+
+def generate_csrf_token():
+    token = session.get('_csrf_token')
+    if not token:
+        token = secrets.token_hex(16)
+        session['_csrf_token'] = token
+    return token
+
+app.jinja_env.globals['csrf_token'] = generate_csrf_token
+
+def validate_csrf_token():
+    expected = session.get('_csrf_token')
+    provided = request.form.get('csrf_token') or request.headers.get('X-CSRF-Token')
+    return bool(expected and provided and secrets.compare_digest(expected, provided))
+
+def is_valid_user_session(emp_id):
+    return bool(emp_id and session.get('user_id') == emp_id)
+
+def user_can_access_product(user_row, product_row):
+    if not user_row or not product_row:
+        return False
+
+    product_location = str(product_row['location'] or '').strip().lower()
+    user_location = str(user_row['location'] or '').strip().lower()
+
+    if not product_location or product_location in ('-', 'general', 'ห้องยา', 'medicine room'):
+        return True
+    if 'general' in product_location:
+        return True
+    if 'pc1' in user_location:
+        return 'pc1' in product_location
+    if 'coil center' in user_location or user_location == 'cc' or ' cc' in f' {user_location}':
+        return ('coil center' in product_location) or (product_location == 'cc') or (' cc' in f' {product_location}')
+    return False
 
 # ==========================================
 # 🕒 ระบบจัดการ Request (ยุบรวมทุกอย่างที่นี่)
@@ -45,9 +125,17 @@ def handle_before_request():
     session.permanent = True
     app.permanent_session_lifetime = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
 
-    # 2. อัปเดตเวลาใช้งานล่าสุดของพนักงาน
+    # 1.5 ป้องกัน CSRF สำหรับคำขอแก้ไขข้อมูลที่สำคัญ
+    if request.method == 'POST' and request.endpoint in SENSITIVE_POST_ENDPOINTS:
+        if not validate_csrf_token():
+            if request.path.startswith('/api/') or request.endpoint == 'update_cart_qty':
+                return jsonify({'success': False, 'message': 'คำขอไม่ปลอดภัยหรือ session หมดอายุ'}), 400
+            flash('❌ คำขอไม่ปลอดภัยหรือ session หมดอายุ กรุณาลองใหม่', 'danger')
+            return redirect(request.referrer or url_for('index'))
+
+    # 2. อัปเดตเวลาใช้งานล่าสุดของพนักงานเฉพาะ session ของตนเอง
     emp_id = request.args.get('emp_id') or request.form.get('emp_id')
-    if not emp_id:
+    if not emp_id or session.get('user_id') != emp_id:
         return
     try:
         update_user_last_seen(emp_id)
@@ -66,11 +154,26 @@ def get_thailand_time():
     return datetime.now(tz)
 
 def is_medicine_product(product_row):
-    """True เมื่อสินค้าเป็นกลุ่มยา (ใช้สำหรับ logic หน่วยเบิกยา)"""
+    """True เมื่อสินค้าเป็นกลุ่มยา โดยหลีกเลี่ยง false positive เช่น น้ำยาล้างจาน"""
     category = str(product_row['category'] or '').strip().lower() if product_row else ''
     name = str(product_row['name'] or '').strip().lower() if product_row else ''
-    medicine_keywords = ('ยา', 'medicine', 'medic', 'drug', 'pharma')
-    return any(keyword in category or keyword in name for keyword in medicine_keywords)
+
+    category_keywords = ('ยา', 'medicine', 'medic', 'drug', 'pharma')
+    if any(keyword in category for keyword in category_keywords):
+        return True
+
+    non_medicine_keywords = (
+        'น้ำยา', 'dish washing', 'washing liquid', 'hand soap', 'softener',
+        'air freshener', 'tissue', 'garbage bag', 'ถุงขยะ', 'กระดาษทิชชู่'
+    )
+    if any(keyword in name for keyword in non_medicine_keywords):
+        return False
+
+    medicine_name_keywords = (
+        'ยาอม', 'ยาแก้', 'ยาเม็ด', 'ยาน้ำ', 'tablet', 'capsule', 'pill',
+        'lozenge', 'paracetamol', 'antacid', 'decolgen', 'oral rehydration', 'medicine'
+    )
+    return any(keyword in name for keyword in medicine_name_keywords)
 
 def is_split_tablet_medicine(product_row):
     """ยาแบบแพ็ค/กล่อง/กระปุก/ขวด ที่ต้องแตกหน่วยเป็นเม็ด"""
@@ -150,17 +253,26 @@ def standardize_date(date_value):
 # ==========================================
 # 📲 ตั้งค่า LINE Messaging API
 # ==========================================
-LINE_CHANNEL_ACCESS_TOKEN = '3QbgTXY3rgtW3rswVEqu9JRKAJBO4VbacDuVczn+Z+IFPu5BW0FkScnOTbPTtlEAaVj66MPQgwZW3d4OzwvBTD+liN+nWWi9VleKbQtwNU4lgXrfmzihCxLFhikWKBVQ0Ykp8QDK70sfSo5078lTeAdB04t89/1O/w1cDnyilFU='
-LINE_ADMIN_USER_ID = 'C65cf63711c8a37424f740c352188a8c4'
-LINE_TEST_CHANNEL_ACCESS_TOKEN = '3QbgTXY3rgtW3rswVEqu9JRKAJBO4VbacDuVczn+Z+IFPu5BW0FkScnOTbPTtlEAaVj66MPQgwZW3d4OzwvBTD+liN+nWWi9VleKbQtwNU4lgXrfmzihCxLFhikWKBVQ0Ykp8QDK70sfSo5078lTeAdB04t89/1O/w1cDnyilFU='
-LINE_TEST_ADMIN_USER_ID = 'C5220a09d21e6761f29f28985edc0a733'
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '')
+LINE_ADMIN_USER_ID = os.environ.get('LINE_ADMIN_USER_ID', '')
+LINE_TEST_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_TEST_CHANNEL_ACCESS_TOKEN', '')
+LINE_TEST_ADMIN_USER_ID = os.environ.get('LINE_TEST_ADMIN_USER_ID', '')
 
 def get_db_connection():
     conn = sqlite3.connect(DB_NAME, timeout=20)
     # ⚠️ สำคัญมาก: ต้องเปิด Journal Mode เป็น WAL
     conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout = 30000;")
     conn.row_factory = sqlite3.Row
     return conn
+
+def start_write_transaction(conn):
+    """ล็อกฐานข้อมูลสำหรับธุรกรรมเขียน เพื่อลด race condition จากหลาย request พร้อมกัน"""
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError as e:
+        if 'within a transaction' not in str(e).lower():
+            raise
 
 def update_user_last_seen(emp_id):
     conn = get_db_connection()
@@ -259,6 +371,10 @@ def index():
 
 @app.route('/logout_user/<emp_id>')
 def logout_user(emp_id):
+    if session.get('user_id') != emp_id and not session.get('admin_logged_in'):
+        flash('⚠️ ไม่สามารถออกจากระบบแทนผู้ใช้อื่นได้', 'danger')
+        return redirect(url_for('index'))
+
     conn = get_db_connection()
     conn.execute('UPDATE users SET is_locked = 0 WHERE emp_id = ?', (emp_id,))
     conn.commit()
@@ -350,21 +466,40 @@ def menu():
 
 @app.route('/add_to_cart', methods=['POST'])
 def add_to_cart():
-    emp_id = request.form.get('emp_id')
-    product_id = request.form.get('product_id')
-    qty = int(request.form.get('qty', 1))
+    emp_id = (request.form.get('emp_id') or '').strip()
+    product_id = request.form.get('product_id', type=int)
     qty_unit = request.form.get('qty_unit', 'package')  # ✅ NEW: base or package unit
     current_search = request.form.get('current_search', '')
     current_cat = request.form.get('current_cat', '')
 
-    conn = get_db_connection()
-    product = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
-    if not product:
-        conn.close()
-        flash('❌ ไม่พบสินค้า', 'danger')
+    if not is_valid_user_session(emp_id):
+        flash('⚠️ session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่', 'danger')
+        return redirect(url_for('index'))
+
+    try:
+        qty = int(request.form.get('qty', 1))
+    except (TypeError, ValueError):
+        flash('❌ จำนวนที่เบิกไม่ถูกต้อง', 'danger')
         return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
 
-    is_medicine = is_medicine_product(product)
+    if not product_id or qty <= 0:
+        flash('❌ จำนวนที่เบิกต้องมากกว่า 0', 'danger')
+        return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
+
+    conn = get_db_connection()
+    start_write_transaction(conn)
+    user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
+    product = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
+    if not user or not product:
+        conn.close()
+        flash('❌ ไม่พบผู้ใช้หรือสินค้า', 'danger')
+        return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
+
+    if not user_can_access_product(user, product):
+        conn.close()
+        flash('❌ คุณไม่มีสิทธิ์เบิกรายการนี้', 'danger')
+        return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
+
     split_medicine = is_split_tablet_medicine(product)
     manager = UnitConversionManager(conn)
 
@@ -377,35 +512,52 @@ def add_to_cart():
         product_info = manager.get_product_unit_info(product_id)
         if qty_unit == 'package':
             qty_to_reserve = int(qty * product_info['conversion_rate'])
+            requested_unit_label = product_info.get('package_unit') or product['unit'] or 'แพ็ก'
         else:
             qty_to_reserve = qty
+            requested_unit_label = product_info.get('base_unit') or 'เม็ด'
 
         stock_check = manager.check_stock_available(product_id, qty_to_reserve)
         can_add = stock_check['available']
     else:
-        # สินค้าทั่วไปให้คง logic เดิม (หน่วยหลักของสินค้า)
         qty_unit = 'package'
         qty_to_reserve = qty
+        requested_unit_label = product['unit']
         can_add = product['stock'] >= qty
 
     if can_add:
-        existing_item = conn.execute('SELECT * FROM carts WHERE emp_id = ? AND product_id = ?', (emp_id, product_id)).fetchone()
-        if existing_item:
-            conn.execute('UPDATE carts SET qty = qty + ? WHERE id = ?', (qty_to_reserve, existing_item['id']))
-        else:
-            conn.execute('INSERT INTO carts (emp_id, product_id, qty) VALUES (?, ?, ?)', (emp_id, product_id, qty_to_reserve))
+        if split_medicine:
+            existing_item = conn.execute('SELECT * FROM carts WHERE emp_id = ? AND product_id = ?', (emp_id, product_id)).fetchone()
+            if existing_item:
+                safe_existing_qty = max(0, int(existing_item['qty'] or 0))
+                conn.execute('UPDATE carts SET qty = ? WHERE id = ?', (safe_existing_qty + qty_to_reserve, existing_item['id']))
+            else:
+                conn.execute('INSERT INTO carts (emp_id, product_id, qty) VALUES (?, ?, ?)', (emp_id, product_id, qty_to_reserve))
 
-        # ยา: ไม่ลด stock ตอนใส่ตะกร้า ปล่อยให้ตัดจริงตอน confirm (FIFO)
-        if split_medicine:
             conn.execute('UPDATE products SET reserved_stock = reserved_stock + ? WHERE id = ?', (qty_to_reserve, product_id))
+            conn.commit()
+            flash(f'🛒 เพิ่ม {product["name"]} ({qty} {requested_unit_label}) เรียบร้อย', 'success')
         else:
-            conn.execute('UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ?', (qty, qty_to_reserve, product_id))
-        conn.commit()
-        if split_medicine:
-            flash(f'🛒 เพิ่ม {product["name"]} ({qty} {"เม็ด" if qty_unit=="base" else "ขวด"}) เรียบร้อย', 'success')
-        else:
-            flash(f'🛒 เพิ่ม {product["name"]} ({qty} {product["unit"]}) เรียบร้อย', 'success')
+            stock_update = conn.execute(
+                'UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ? AND stock >= ?',
+                (qty, qty_to_reserve, product_id, qty)
+            )
+            if stock_update.rowcount == 0:
+                conn.rollback()
+                flash('❌ ของหมดหรือมีไม่พอ', 'danger')
+                conn.close()
+                return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
+
+            existing_item = conn.execute('SELECT * FROM carts WHERE emp_id = ? AND product_id = ?', (emp_id, product_id)).fetchone()
+            if existing_item:
+                safe_existing_qty = max(0, int(existing_item['qty'] or 0))
+                conn.execute('UPDATE carts SET qty = ? WHERE id = ?', (safe_existing_qty + qty_to_reserve, existing_item['id']))
+            else:
+                conn.execute('INSERT INTO carts (emp_id, product_id, qty) VALUES (?, ?, ?)', (emp_id, product_id, qty_to_reserve))
+            conn.commit()
+            flash(f'🛒 เพิ่ม {product["name"]} ({qty} {requested_unit_label}) เรียบร้อย', 'success')
     else:
+        conn.rollback()
         flash('❌ ของหมดหรือมีไม่พอ', 'danger')
     
     conn.close()
@@ -459,22 +611,32 @@ def api_preview_withdrawal():
 
 @app.route('/remove_from_cart', methods=['POST'])
 def remove_from_cart():
-    cart_id = request.form.get('cart_id')
-    emp_id = request.form.get('emp_id')
-    product_id = request.form.get('product_id')
-    qty = int(request.form.get('qty'))
+    cart_id = request.form.get('cart_id', type=int)
+    emp_id = (request.form.get('emp_id') or '').strip()
     current_search = request.form.get('current_search', '')
     current_cat = request.form.get('current_cat', '')
 
-    conn = get_db_connection()
-    product = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
-    is_medicine = is_split_tablet_medicine(product) if product else False
+    if not is_valid_user_session(emp_id):
+        flash('⚠️ session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่', 'danger')
+        return redirect(url_for('index'))
 
-    conn.execute('DELETE FROM carts WHERE id = ?', (cart_id,))
+    conn = get_db_connection()
+    start_write_transaction(conn)
+    cart_item = conn.execute('SELECT * FROM carts WHERE id = ? AND emp_id = ?', (cart_id, emp_id)).fetchone()
+    if not cart_item:
+        conn.close()
+        flash('❌ ไม่พบรายการในตะกร้า', 'danger')
+        return redirect(url_for('menu', emp_id=emp_id, open_cart='true', search=current_search, category=current_cat))
+
+    product = conn.execute('SELECT * FROM products WHERE id = ?', (cart_item['product_id'],)).fetchone()
+    is_medicine = is_split_tablet_medicine(product) if product else False
+    qty = max(0, int(cart_item['qty'] or 0))
+
+    conn.execute('DELETE FROM carts WHERE id = ? AND emp_id = ?', (cart_id, emp_id))
     if is_medicine:
-        conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (qty, product_id))
+        conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (qty, cart_item['product_id']))
     else:
-        conn.execute('UPDATE products SET stock = stock + ?, reserved_stock = reserved_stock - ? WHERE id = ?', (qty, qty, product_id))
+        conn.execute('UPDATE products SET stock = stock + ?, reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (qty, qty, cart_item['product_id']))
     conn.commit()
     conn.close()
     
@@ -482,9 +644,15 @@ def remove_from_cart():
     
 @app.route('/confirm_withdrawal', methods=['POST'])
 def confirm_withdrawal():
-    emp_id = request.form.get('emp_id')
+    emp_id = (request.form.get('emp_id') or '').strip()
     symptom = (request.form.get('symptom') or '').strip()
+
+    if not is_valid_user_session(emp_id):
+        flash('⚠️ session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่', 'danger')
+        return redirect(url_for('index'))
+
     conn = get_db_connection()
+    start_write_transaction(conn)
     
     user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
     cart_items = conn.execute('''
@@ -496,6 +664,11 @@ def confirm_withdrawal():
     if not cart_items: 
         conn.close()
         return redirect(url_for('index'))
+
+    if any(int(item['qty'] or 0) <= 0 for item in cart_items):
+        conn.close()
+        flash('❌ พบจำนวนสินค้าในตะกร้าไม่ถูกต้อง กรุณาลบและเลือกใหม่', 'danger')
+        return redirect(url_for('menu', emp_id=emp_id, open_cart='true'))
     
     has_medicine = any(is_split_tablet_medicine(item) for item in cart_items)
     if has_medicine and not symptom:
@@ -523,8 +696,11 @@ def confirm_withdrawal():
                     product_id=item['product_id'],
                     qty_base_unit=item['qty'],  # ยาเก็บในตะกร้าเป็น base unit
                     emp_id=emp_id,
-                    lot_id=None
+                    lot_id=None,
+                    autocommit=False
                 )
+                if not withdrawal_result.get('success'):
+                    raise RuntimeError(withdrawal_result.get('message', 'ไม่สามารถตัดสต็อกยาได้'))
             else:
                 withdrawal_result = {
                     'full_packages_used': item['qty'],
@@ -570,24 +746,10 @@ def confirm_withdrawal():
             msg_list.append(f"📦 {item_name}\n   🔹 จำนวน: {display_qty} {display_unit}\n   ℹ️ {log_note}")
             
         except Exception as e:
-            # Fallback to old logic if UnitConversionManager fails
-            if "หมวกเซฟตี้" in item_name or "Helmet" in item_name:
-                existing_helmet = conn.execute('''
-                    SELECT id FROM transaction_logs 
-                    WHERE emp_id = ? AND product_id = ? AND action = 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)'
-                ''', (emp_id, item['product_id'])).fetchone()
-                if existing_helmet:
-                    conn.execute('''UPDATE transaction_logs SET qty = ?, timestamp = ?, status = 'Pending' WHERE id = ?''', 
-                                (item['qty'], thai_now, existing_helmet['id']))
-                else:
-                    conn.execute('''INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp) 
-                                   VALUES (?, ?, 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)', ?, 'Pending', ?)''', 
-                                (emp_id, item['product_id'], item['qty'], thai_now))
-            else:
-                conn.execute('''INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp) 
-                               VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, 'Pending', ?)''', 
-                            (emp_id, item['product_id'], item['qty'], thai_now))
-            msg_list.append(f"📦 {item_name}\n   🔹 จำนวน: {item['qty']} {item['unit']}\n   ⚠️ คงเหลือหลังเบิก: {item['stock']}")
+            conn.rollback()
+            conn.close()
+            flash(f'❌ ไม่สามารถยืนยันการเบิกได้: {str(e)}', 'danger')
+            return redirect(url_for('menu', emp_id=emp_id, open_cart='true'))
 
     # ปลด reserved_stock ออกจากรายการที่ยืนยันแล้ว ก่อนล้างตะกร้า
     conn.execute('''
@@ -612,34 +774,54 @@ def confirm_withdrawal():
  # --- เพิ่ม Route สำหรับอัปเดตจำนวนในตะกร้า (AJAX) ---
 @app.route('/update_cart_qty', methods=['POST'])
 def update_cart_qty():
-    cart_id = request.form.get('cart_id')
-    new_qty = int(request.form.get('qty', 1))
-    emp_id = request.form.get('emp_id')
+    cart_id = request.form.get('cart_id', type=int)
+    emp_id = (request.form.get('emp_id') or '').strip()
+
+    if not is_valid_user_session(emp_id):
+        return jsonify({'success': False, 'message': 'session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่'}), 403
+
+    try:
+        new_qty = int(request.form.get('qty', 1))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'message': 'จำนวนไม่ถูกต้อง'}), 400
+
+    if not cart_id or new_qty <= 0:
+        return jsonify({'success': False, 'message': 'จำนวนต้องมากกว่า 0'}), 400
 
     conn = get_db_connection()
-    # ดึงข้อมูลเดิมเพื่อคำนวณส่วนต่างสต็อก
-    item = conn.execute('SELECT * FROM carts WHERE id = ?', (cart_id,)).fetchone()
+    start_write_transaction(conn)
+    item = conn.execute('SELECT * FROM carts WHERE id = ? AND emp_id = ?', (cart_id, emp_id)).fetchone()
     if item:
-        product = conn.execute('SELECT stock, reserved_stock, category, name FROM products WHERE id = ?', (item['product_id'],)).fetchone()
+        product = conn.execute('SELECT * FROM products WHERE id = ?', (item['product_id'],)).fetchone()
         is_medicine = is_split_tablet_medicine(product)
         diff = new_qty - item['qty']
-        
-        # เช็คว่าสต็อกจริงพอให้ปรับเพิ่มไหม
+
         if is_medicine:
             manager = UnitConversionManager(conn)
             stock_check = manager.check_stock_available(item['product_id'], new_qty)
             can_update = stock_check['available']
         else:
-            can_update = product['stock'] >= diff
+            can_update = (diff <= 0) or (product and product['stock'] >= diff)
 
         if can_update:
-            conn.execute('UPDATE carts SET qty = ? WHERE id = ?', (new_qty, cart_id))
             if is_medicine:
+                conn.execute('UPDATE carts SET qty = ? WHERE id = ? AND emp_id = ?', (new_qty, cart_id, emp_id))
                 conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock + ?) WHERE id = ?',
                              (diff, item['product_id']))
             else:
-                conn.execute('UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ?', 
-                             (diff, diff, item['product_id']))
+                if diff > 0:
+                    stock_update = conn.execute(
+                        'UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ? AND stock >= ?',
+                        (diff, diff, item['product_id'], diff)
+                    )
+                    if stock_update.rowcount == 0:
+                        conn.rollback()
+                        conn.close()
+                        return jsonify({'success': False, 'message': 'สินค้าในคลังไม่พอ'}), 409
+                else:
+                    conn.execute('UPDATE products SET stock = stock - ?, reserved_stock = MAX(0, reserved_stock + ?) WHERE id = ?', 
+                                 (diff, diff, item['product_id']))
+                conn.execute('UPDATE carts SET qty = ? WHERE id = ? AND emp_id = ?', (new_qty, cart_id, emp_id))
             conn.commit()
             res = {'success': True}
         else:
@@ -653,6 +835,8 @@ def update_cart_qty():
 @app.route('/api/search_products')
 def api_search_products():
     emp_id = request.args.get('emp_id')
+    if not is_valid_user_session(emp_id):
+        return jsonify({'html': '', 'has_more': False, 'next_page': 1, 'message': 'Unauthorized'}), 401
     search_query = request.args.get('search', '').strip()
     category_filter = request.args.get('category', '').strip()
     page = request.args.get('page', 1, type=int)
@@ -902,8 +1086,11 @@ def admin_dashboard():
                            role=role,
                            selected_loc=selected_loc)
 
-@app.route('/cron/daily_alert')
+@app.route('/cron/daily_alert', methods=['POST'])
 def daily_alert():
+    if not session.get('admin_logged_in'):
+        return "Unauthorized", 401
+
     # 1. เชื่อมต่อฐานข้อมูล
     conn = get_db_connection()
     
@@ -983,12 +1170,14 @@ def get_pending_requests():
     # ส่งกลับเป็น HTML เฉพาะส่วนของแถวตาราง (Partial)
     return render_template('pending_requests_partial.html', pending_logs=pending_logs)
 
-@app.route('/admin/approve/<int:log_id>') # ฟังก์ชันนี้จะถูกเรียกเมื่อแอดมินกดอนุมัติการเบิก
+@app.route('/admin/approve/<int:log_id>', methods=['POST']) # ฟังก์ชันนี้จะถูกเรียกเมื่อแอดมินกดอนุมัติการเบิก
 def approve_request(log_id):
     if not session.get('admin_logged_in'): return redirect(url_for('index'))
     role = session.get('admin_role', 'superadmin')
 
     conn = get_db_connection()
+    start_write_transaction(conn)
+    start_write_transaction(conn)
     if role == 'admin_pc1':
         permission_check = conn.execute('''
             SELECT l.id FROM transaction_logs l
@@ -1011,9 +1200,9 @@ def approve_request(log_id):
             return redirect(url_for('admin_dashboard'))
 
     # 1. ดึงข้อมูลรายการเบิกที่รออนุมัติ
-    log = conn.execute('SELECT * FROM transaction_logs WHERE id=?', (log_id,)).fetchone()
+    log = conn.execute('SELECT * FROM transaction_logs WHERE id=? AND status = "Pending"', (log_id,)).fetchone()
     
-    if log and log['status'] == 'Pending':
+    if log:
         product_id = log['product_id']
         qty_to_withdraw = log['qty']
         
@@ -1040,17 +1229,25 @@ def approve_request(log_id):
             remaining -= take
             last_lot_id = lot['id'] 
 
+        if remaining > 0:
+            conn.rollback()
+            conn.close()
+            flash('❌ จำนวนสินค้าใน lot ไม่พอสำหรับการอนุมัติ', 'danger')
+            return redirect(url_for('admin_dashboard'))
+
         # 4. อัปเดตตารางหลัก
-        # บันทึก lot_id ล่าสุด และใช้เวลาไทยจาก Python แทน SQL เพื่อความแม่นยำ
-        # เปลี่ยนจาก:
-        # thai_now = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
-        # เป็น:
         thai_now = get_thailand_time().strftime('%d/%m/%Y %H:%M:%S')
-        conn.execute('''
+        update_result = conn.execute('''
             UPDATE transaction_logs 
             SET status = "Approved", lot_id = ?, timestamp = ? 
-            WHERE id = ?
+            WHERE id = ? AND status = "Pending"
         ''', (last_lot_id, thai_now, log_id))
+
+        if update_result.rowcount == 0:
+            conn.rollback()
+            conn.close()
+            flash('⚠️ รายการนี้ถูกดำเนินการไปแล้ว', 'warning')
+            return redirect(url_for('admin_dashboard'))
         
         # อัปเดตยอดเบิกสะสมในตารางของหลัก
         conn.execute('UPDATE products SET withdraw = withdraw + ? WHERE id = ?', (qty_to_withdraw, product_id))
@@ -1097,13 +1294,15 @@ def check_safety_alert(product_id): # ฟังก์ชันนี้จะถ
         )
         send_line_message(alert_msg, location=(product['location'] if product and 'location' in product.keys() else ''))
 
-@app.route('/admin/reject/<int:log_id>')
+@app.route('/admin/reject/<int:log_id>', methods=['POST'])
 def reject_request(log_id):
     if not session.get('admin_logged_in'):
         return redirect(url_for('index'))
     role = session.get('admin_role', 'superadmin')
 
+    start_write_transaction(conn)
     conn = get_db_connection()
+    start_write_transaction(conn)
     if role == 'admin_pc1':
         permission_check = conn.execute('''
             SELECT l.id FROM transaction_logs l
@@ -1125,13 +1324,26 @@ def reject_request(log_id):
             flash('❌ คุณไม่มีสิทธิ์ปฏิเสธรายการนี้', 'danger')
             return redirect(url_for('admin_dashboard'))
 
-    log = conn.execute('SELECT * FROM transaction_logs WHERE id=?', (log_id,)).fetchone()
-    if log and log['status'] == 'Pending':
-        conn.execute('UPDATE products SET stock = stock + ?, reserved_stock = reserved_stock - ? WHERE id = ?', 
-                     (log['qty'], log['qty'], log['product_id']))
-        conn.execute('UPDATE transaction_logs SET status = "Rejected" WHERE id = ?', (log_id,))
+    log = conn.execute('SELECT * FROM transaction_logs WHERE id=? AND status = "Pending"', (log_id,)).fetchone()
+    if log:
+        product = conn.execute('SELECT * FROM products WHERE id = ?', (log['product_id'],)).fetchone()
+        is_medicine = is_split_tablet_medicine(product) if product else False
+
+        if is_medicine:
+            conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (log['qty'], log['product_id']))
+        else:
+            conn.execute('UPDATE products SET stock = stock + ?, reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', 
+                         (log['qty'], log['qty'], log['product_id']))
+
+        update_result = conn.execute('UPDATE transaction_logs SET status = "Rejected" WHERE id = ? AND status = "Pending"', (log_id,))
+        if update_result.rowcount == 0:
+            conn.rollback()
+            conn.close()
+            flash('⚠️ รายการนี้ถูกดำเนินการไปแล้ว', 'warning')
+            return redirect(url_for('admin_dashboard'))
+
         conn.commit()
-        flash('❌ ปฏิเสธรายการและคืนสต็อกแล้ว', 'warning')
+        flash('❌ ปฏิเสธรายการเรียบร้อยแล้ว', 'warning')
     conn.close()
     return redirect(url_for('admin_dashboard'))
 
@@ -1340,6 +1552,13 @@ def import_excel():
 
     file = request.files.get('file')
     if not file:
+        flash('❌ กรุณาเลือกไฟล์ก่อนนำเข้า', 'danger')
+        return redirect(url_for('admin_dashboard'))
+
+    filename = secure_filename(file.filename or '')
+    file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    if file_ext not in ALLOWED_IMPORT_EXTENSIONS:
+        flash('❌ รองรับเฉพาะไฟล์ Excel .xlsx, .xlsm, .xls', 'danger')
         return redirect(url_for('admin_dashboard'))
 
     def safe_int(value):
@@ -1912,18 +2131,20 @@ def clear_system_data():
     if session.get('admin_role') != 'superadmin':
         return jsonify({'success': False, 'message': 'ไม่อนุญาต! ฟีเจอร์นี้สำหรับ Super Admin เท่านั้น'}), 403
 
-    target = request.form.get('target')
-    password = request.form.get('password')
+    target = (request.form.get('target') or '').strip().lower()
+    password = request.form.get('password') or ''
 
-    # ========================================================
-    # 🎯 ตั้งค่า "รหัสผ่านพิเศษ" สำหรับล้างข้อมูลตรงนี้ครับ
-    # (เปลี่ยนเป็นรหัสที่คุณต้องการได้เลย)
-    # ========================================================
-    SECURE_CLEAR_PASSWORD = "pcm_admin"
+    SECURE_CLEAR_PASSWORD = os.environ.get('STOCK_PCM_CLEAR_PASSWORD', '')
+
+    if target not in {'logs', 'lots'}:
+        return jsonify({'success': False, 'message': 'target ไม่ถูกต้อง'}), 400
+
+    if not SECURE_CLEAR_PASSWORD:
+        return jsonify({'success': False, 'message': 'ยังไม่ได้ตั้งค่ารหัสผ่านพิเศษใน environment'}), 503
 
     # 2. ตรวจสอบรหัสผ่านพิเศษ
-    if password != SECURE_CLEAR_PASSWORD:
-        return jsonify({'success': False, 'message': 'รหัสผ่านยืนยันไม่ถูกต้อง!'})
+    if not secrets.compare_digest(password, SECURE_CLEAR_PASSWORD):
+        return jsonify({'success': False, 'message': 'รหัสผ่านยืนยันไม่ถูกต้อง!'}), 403
 
     conn = get_db_connection()
     try:
@@ -1943,7 +2164,8 @@ def clear_system_data():
         conn.commit()
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
+        conn.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
     finally:
         conn.close()
 
@@ -2206,6 +2428,9 @@ def update_user_ajax():
 # 1. ฟังก์ชันสร้างตาราง (รันครั้งเดียว)
 @app.route('/setup_dept_table')
 def setup_dept_table():
+    if session.get('admin_role') != 'superadmin':
+        return "Unauthorized", 401
+
     conn = get_db_connection()
     try:
         conn.execute('''
@@ -2442,6 +2667,9 @@ def init_settings_db():
 
 @app.route('/setup_settings')
 def setup_settings():
+    if session.get('admin_role') != 'superadmin':
+        return "Unauthorized", 401
+
     try:
         init_settings_db()
         return "✅ ตาราง settings ถูกสร้างและตั้งค่าเริ่มต้นเรียบร้อยแล้ว!"
@@ -2458,6 +2686,9 @@ def scheduled_daily_alert_task():
 # --- 3. Route สำหรับ Test (เพื่อให้ชัวร์ว่า Path ถูก) ---
 @app.route('/test_alert')
 def test_alert():
+    if not session.get('admin_logged_in'):
+        return "Unauthorized", 401
+
     scheduled_daily_alert()
     return "🚀 สั่งรันระบบแจ้งเตือนเรียบร้อย! เช็ค LINE และ Terminal"
 
@@ -2555,5 +2786,5 @@ if __name__ == '__main__':
         
         scheduler.start()
 
-    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=True) #สำหรับเขียนโค้ด
-    #app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False) #สำหรับใช้งาน
+    debug_mode = os.environ.get('FLASK_DEBUG', '0') == '1'
+    app.run(host='0.0.0.0', port=5000, debug=debug_mode, use_reloader=debug_mode) # ควบคุมผ่าน environment

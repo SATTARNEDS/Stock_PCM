@@ -256,7 +256,7 @@ class UnitConversionManager:
     # 5. APPLY WITHDRAWAL (บันทึกลงฐานข้อมูล)
     # ============================================================================
     
-    def apply_withdrawal(self, product_id, qty_base_unit, emp_id, lot_id=None, use_open_box=True):
+    def apply_withdrawal(self, product_id, qty_base_unit, emp_id, lot_id=None, use_open_box=True, autocommit=True):
         """
         Execute the withdrawal and update inventory
         
@@ -277,12 +277,15 @@ class UnitConversionManager:
             # Get product info
             info = self.get_product_unit_info(product_id)
             
-            # 1. Reduce stock (full packages)
-            self.cursor.execute('''
+            # 1. Reduce stock (full packages) แบบมีเงื่อนไขกันยอดติดลบ
+            stock_update = self.cursor.execute('''
                 UPDATE products 
                 SET stock = stock - ?
-                WHERE id = ?
-            ''', (calc['full_packages_needed'], product_id))
+                WHERE id = ? AND stock >= ?
+            ''', (calc['full_packages_needed'], product_id, calc['full_packages_needed']))
+
+            if stock_update.rowcount == 0:
+                raise ValueError('สต็อกแพ็กไม่พอสำหรับการตัดจ่าย')
             
             # 2. If taking from open_box, reduce it
             if calc['from_open_box'] > 0 and calc.get('open_box_id'):
@@ -316,7 +319,8 @@ class UnitConversionManager:
                 calc['transaction_note']
             ))
             
-            self.conn.commit()
+            if autocommit:
+                self.conn.commit()
             
             return {
                 'success': True,
