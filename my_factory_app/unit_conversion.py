@@ -193,7 +193,7 @@ class UnitConversionManager:
         from_open_box = 0
         full_packages_needed = 0
         new_open_box_qty = 0
-        new_open_box_id = None
+        open_box_id = None
         
         # 1. Try to use existing open box
         if use_open_box and info['has_open_box']:
@@ -204,6 +204,7 @@ class UnitConversionManager:
             ''', (product_id,)).fetchone()
             
             if open_box:
+                open_box_id = open_box['id']
                 take_from_open = min(open_box['base_unit_qty'], qty_remaining)
                 from_open_box = take_from_open
                 qty_remaining -= take_from_open
@@ -227,19 +228,25 @@ class UnitConversionManager:
         
         # Create transaction note
         note_parts = []
+        package_unit = info['package_unit']
         if from_open_box > 0:
-            note_parts.append(f"เบิกจากขวดเปิด {from_open_box} {info['base_unit']}")
+            note_parts.append(f"เบิกจาก{package_unit}ที่เปิดแล้ว {from_open_box} {info['base_unit']}")
         if full_packages_needed > 0:
             if new_open_box_qty > 0:
-                note_parts.append(f"เบิก {full_packages_needed-1} ขวดเต็ม + 1 ขวดเปิด (เหลือ {new_open_box_qty} {info['base_unit']})")
+                full_closed_packages = max(0, full_packages_needed - 1)
+                if full_closed_packages > 0:
+                    note_parts.append(f"เบิก {full_closed_packages} {package_unit}เต็ม + เปิดใหม่ 1 {package_unit} (เหลือ {new_open_box_qty} {info['base_unit']})")
+                else:
+                    note_parts.append(f"เปิดใหม่ 1 {package_unit} (เหลือ {new_open_box_qty} {info['base_unit']})")
             else:
-                note_parts.append(f"เบิก {full_packages_needed} ขวดเต็ม")
+                note_parts.append(f"เบิก {full_packages_needed} {package_unit}เต็ม")
         
         return {
             'can_fulfill': True,
             'from_open_box': from_open_box,
             'full_packages_needed': full_packages_needed,
             'new_open_box_qty': new_open_box_qty,
+            'open_box_id': open_box_id,
             'total_packages_used': total_packages_used,
             'transaction_note': ' + '.join(note_parts),
             'message': f"✅ เบิก {qty_base_unit} {info['base_unit']} = {total_packages_used:.2f} {info['package_unit']}"
@@ -278,13 +285,13 @@ class UnitConversionManager:
             ''', (calc['full_packages_needed'], product_id))
             
             # 2. If taking from open_box, reduce it
-            if calc['from_open_box'] > 0:
+            if calc['from_open_box'] > 0 and calc.get('open_box_id'):
                 self.cursor.execute('''
                     UPDATE open_packages 
-                    SET base_unit_qty = base_unit_qty - ?
-                    WHERE product_id = ? AND status = 'active'
-                    ORDER BY opened_date ASC LIMIT 1
-                ''', (calc['from_open_box'], product_id))
+                    SET base_unit_qty = MAX(0, base_unit_qty - ?),
+                        status = CASE WHEN base_unit_qty - ? <= 0 THEN 'used' ELSE 'active' END
+                    WHERE id = ?
+                ''', (calc['from_open_box'], calc['from_open_box'], calc['open_box_id']))
             
             # 3. Create new open_package if needed
             if calc['new_open_box_qty'] > 0:
@@ -297,8 +304,8 @@ class UnitConversionManager:
             # 4. Log transaction
             self.cursor.execute('''
                 INSERT INTO transaction_logs 
-                (emp_id, product_id, lot_id, action, qty, qty_base_unit, qty_package_unit, note, timestamp)
-                VALUES (?, ?, ?, 'withdraw', ?, ?, ?, ?, datetime('now'))
+                (emp_id, product_id, lot_id, action, qty, qty_base_unit, qty_package_unit, note, status, timestamp)
+                VALUES (?, ?, ?, 'withdraw', ?, ?, ?, ?, 'Approved', datetime('now'))
             ''', (
                 emp_id, 
                 product_id, 

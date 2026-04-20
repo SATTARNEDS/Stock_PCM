@@ -1,5 +1,6 @@
 import io
 import math
+import re
 import sqlite3
 from datetime import datetime, date, timedelta
 
@@ -76,13 +77,14 @@ def is_split_tablet_medicine(product_row):
     if not product_row or not is_medicine_product(product_row):
         return False
 
+    row_keys = product_row.keys() if hasattr(product_row, 'keys') else []
     package_label = str(
-        (product_row['package_unit'] if 'package_unit' in product_row.keys() else None)
-        or product_row['unit']
+        (product_row['package_unit'] if 'package_unit' in row_keys else None)
+        or (product_row['unit'] if 'unit' in row_keys else None)
         or ''
     ).strip().lower()
-    conversion_rate = int(product_row['conversion_rate'] or 1)
-    package_keywords = ('pack', 'package', 'box', 'jar', 'bottle', 'แพ็ค', 'กล่อง', 'กระปุก', 'ขวด')
+    conversion_rate = int((product_row['conversion_rate'] if 'conversion_rate' in row_keys else 1) or 1)
+    package_keywords = ('pack', 'package', 'box', 'jar', 'bottle', 'strip', 'sheet', 'sachet', 'แพ็ค', 'ห่อ', 'แผง', 'ซอง', 'กล่อง', 'กระปุก', 'ขวด')
     return conversion_rate > 1 and any(k in package_label for k in package_keywords)
 
 def enrich_products_for_display(conn, products_list):
@@ -148,8 +150,10 @@ def standardize_date(date_value):
 # ==========================================
 # 📲 ตั้งค่า LINE Messaging API
 # ==========================================
-LINE_CHANNEL_ACCESS_TOKEN = '3QbgTXY3rgtW3rswVEqu9JRKAJBO4VbacDuVczn+Z+IFPu5BW0FkScnOTbPTtlEAaVj66MPQgwZW3d4OzwvBTD+liN+nWWi9VleKbQtwNU4lgXrfmzihCxLFhikWKBVQ0Ykp8QDK70sfSo5078lTeAdB04t89/1O/w1cDnyilFU=' 
-LINE_ADMIN_USER_ID = 'C5220a09d21e6761f29f28985edc0a733' 
+LINE_CHANNEL_ACCESS_TOKEN = '3QbgTXY3rgtW3rswVEqu9JRKAJBO4VbacDuVczn+Z+IFPu5BW0FkScnOTbPTtlEAaVj66MPQgwZW3d4OzwvBTD+liN+nWWi9VleKbQtwNU4lgXrfmzihCxLFhikWKBVQ0Ykp8QDK70sfSo5078lTeAdB04t89/1O/w1cDnyilFU='
+LINE_ADMIN_USER_ID = 'C65cf63711c8a37424f740c352188a8c4'
+LINE_TEST_CHANNEL_ACCESS_TOKEN = '3QbgTXY3rgtW3rswVEqu9JRKAJBO4VbacDuVczn+Z+IFPu5BW0FkScnOTbPTtlEAaVj66MPQgwZW3d4OzwvBTD+liN+nWWi9VleKbQtwNU4lgXrfmzihCxLFhikWKBVQ0Ykp8QDK70sfSo5078lTeAdB04t89/1O/w1cDnyilFU='
+LINE_TEST_ADMIN_USER_ID = 'C5220a09d21e6761f29f28985edc0a733'
 
 def get_db_connection():
     conn = sqlite3.connect(DB_NAME, timeout=20)
@@ -185,15 +189,35 @@ def is_user_currently_locked(user_row):
 
     return (datetime.now() - last_seen) <= timedelta(minutes=USER_LOCK_TIMEOUT_MINUTES)
 
-def send_line_message(message):
-    if not LINE_CHANNEL_ACCESS_TOKEN: return
+def resolve_line_targets(target_group=None, location=None, role=None):
+    """เลือกกลุ่ม LINE ปลายทางตาม location / role"""
+    text = ' '.join(str(v or '') for v in [target_group, location, role]).lower()
+
+    if 'coil center' in text or 'admin_cc' in text or ' cc' in f' {text}' or text == 'cc':
+        return [{'group': 'cc', 'token': LINE_CHANNEL_ACCESS_TOKEN, 'user_id': LINE_ADMIN_USER_ID}]
+
+    if 'pc1' in text or 'admin_pc1' in text:
+        return [{'group': 'pc1', 'token': LINE_TEST_CHANNEL_ACCESS_TOKEN, 'user_id': LINE_TEST_ADMIN_USER_ID}]
+
+    return [
+        {'group': 'cc', 'token': LINE_CHANNEL_ACCESS_TOKEN, 'user_id': LINE_ADMIN_USER_ID},
+        {'group': 'pc1', 'token': LINE_TEST_CHANNEL_ACCESS_TOKEN, 'user_id': LINE_TEST_ADMIN_USER_ID},
+    ]
+
+def send_line_message(message, target_group=None, location=None, role=None):
     url = 'https://api.line.me/v2/bot/message/push'
-    headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'}
-    payload = {'to': LINE_ADMIN_USER_ID, 'messages': [{'type': 'text', 'text': message}]}
-    try:
-        requests.post(url, headers=headers, json=payload)
-    except Exception as e:
-        print(f"Error sending LINE message: {e}")
+    targets = resolve_line_targets(target_group=target_group, location=location, role=role)
+
+    for target in targets:
+        if not target['token'] or not target['user_id']:
+            continue
+
+        headers = {'Content-Type': 'application/json', 'Authorization': f"Bearer {target['token']}"}
+        payload = {'to': target['user_id'], 'messages': [{'type': 'text', 'text': message}]}
+        try:
+            requests.post(url, headers=headers, json=payload)
+        except Exception as e:
+            print(f"Error sending LINE message ({target['group']}): {e}")
 
 # ==========================================
 # 👤 ส่วนของพนักงาน (USER & CART SYSTEM)
@@ -464,7 +488,7 @@ def confirm_withdrawal():
     
     user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
     cart_items = conn.execute('''
-        SELECT c.*, p.name, p.stock, p.unit, p.category
+        SELECT c.*, p.name, p.stock, p.unit, p.category, p.base_unit, p.package_unit, p.conversion_rate
         FROM carts c JOIN products p ON c.product_id = p.id 
         WHERE c.emp_id = ?
     ''', (emp_id,)).fetchall()
@@ -539,7 +563,11 @@ def confirm_withdrawal():
                 ''', (emp_id, item['product_id'], result_qty, item['qty'], withdrawal_result.get('total_packages_used', result_qty), thai_now, result_note))
             
             log_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
-            msg_list.append(f"📦 {item_name}\n   🔹 จำนวน: {item['qty']} {item['unit']}\n   ℹ️ {log_note}")
+            display_qty = item['qty']
+            display_unit = item['unit']
+            if is_medicine:
+                display_unit = item['base_unit'] if 'base_unit' in item.keys() and item['base_unit'] else 'เม็ด'
+            msg_list.append(f"📦 {item_name}\n   🔹 จำนวน: {display_qty} {display_unit}\n   ℹ️ {log_note}")
             
         except Exception as e:
             # Fallback to old logic if UnitConversionManager fails
@@ -561,13 +589,22 @@ def confirm_withdrawal():
                             (emp_id, item['product_id'], item['qty'], thai_now))
             msg_list.append(f"📦 {item_name}\n   🔹 จำนวน: {item['qty']} {item['unit']}\n   ⚠️ คงเหลือหลังเบิก: {item['stock']}")
 
+    # ปลด reserved_stock ออกจากรายการที่ยืนยันแล้ว ก่อนล้างตะกร้า
+    conn.execute('''
+        UPDATE products
+        SET reserved_stock = MAX(0, reserved_stock - COALESCE((
+            SELECT SUM(c.qty) FROM carts c WHERE c.emp_id = ? AND c.product_id = products.id
+        ), 0))
+        WHERE id IN (SELECT product_id FROM carts WHERE emp_id = ?)
+    ''', (emp_id, emp_id))
+
     # ล้างตะกร้า
     conn.execute('DELETE FROM carts WHERE emp_id = ?', (emp_id,))
     conn.commit()
     conn.close()
 
-    # ส่งข้อความเข้า Line
-    send_line_message("\n".join(msg_list))
+    # ส่งข้อความเข้า Line ตามกลุ่มของผู้เบิก
+    send_line_message("\n".join(msg_list), location=(user['location'] if user and 'location' in user.keys() else ''))
     
     flash('✅ ส่งคำขอเรียบร้อย! ระบบบันทึกรอบการเบิกหมวกเซฟตี้ให้คุณแล้ว', 'success')
     return redirect(url_for('menu', emp_id=emp_id))
@@ -1019,10 +1056,27 @@ def approve_request(log_id):
         conn.execute('UPDATE products SET withdraw = withdraw + ? WHERE id = ?', (qty_to_withdraw, product_id))
         
         conn.commit()
-        
+
         # 5. เช็คแจ้งเตือน Safety Stock หลังตัดสต็อก
         check_safety_alert(product_id)
-        
+
+        user_info = conn.execute('SELECT name, department, location FROM users WHERE emp_id = ?', (log['emp_id'],)).fetchone()
+        product_info = conn.execute('SELECT name, unit, base_unit FROM products WHERE id = ?', (product_id,)).fetchone()
+        admin_label = 'Admin CC' if role == 'admin_cc' else ('Admin PC1' if role == 'admin_pc1' else 'Super Admin')
+        is_split_medicine_log = product_info and log['qty_base_unit'] and product_info['base_unit'] and product_info['base_unit'] != product_info['unit']
+        approved_qty = log['qty_base_unit'] if is_split_medicine_log else qty_to_withdraw
+        approved_unit = (product_info['base_unit'] if is_split_medicine_log else (product_info['unit'] if product_info else 'หน่วย'))
+        approval_message = (
+            f"✅ Admin ได้ทำการยืนยันรายการแล้ว\n"
+            f"👤 ผู้เบิก: {user_info['name'] if user_info else log['emp_id']}\n"
+            f"📍 แผนก: {user_info['department'] if user_info else '-'} ({user_info['location'] if user_info else '-'})\n"
+            f"📦 รายการ: {product_info['name'] if product_info else product_id}\n"
+            f"🔢 จำนวน: {approved_qty} {approved_unit}\n"
+            f"🧾 ผู้อนุมัติ: {admin_label}\n"
+            f"🕒 เวลาอนุมัติ: {thai_now}"
+        )
+        send_line_message(approval_message, location=(user_info['location'] if user_info else ''), role=role)
+
         flash('✅ อนุมัติและตัดสต็อกแบบ FIFO เรียบร้อยแล้ว', 'success')
     
     conn.close()
@@ -1030,7 +1084,7 @@ def approve_request(log_id):
 
 def check_safety_alert(product_id): # ฟังก์ชันนี้จะถูกเรียกหลังจากอนุมัติการเบิก เพื่อเช็คว่าของตัวนั้นๆ ต่ำกว่า Safety Stock หรือไม่
     conn = get_db_connection()
-    product = conn.execute('SELECT name, stock, safety_stock, unit FROM products WHERE id = ?', (product_id,)).fetchone()
+    product = conn.execute('SELECT name, stock, safety_stock, unit, location FROM products WHERE id = ?', (product_id,)).fetchone()
     conn.close()
     
     if product and product['stock'] <= product['safety_stock']:
@@ -1041,7 +1095,7 @@ def check_safety_alert(product_id): # ฟังก์ชันนี้จะถ
             f"🚩 จุดสั่งซื้อ (Safety): {product['safety_stock']} {product['unit']}\n"
             f"--- กรุณาพิจารณาสั่งซื้อเพิ่ม ---"
         )
-        send_line_message(alert_msg)
+        send_line_message(alert_msg, location=(product['location'] if product and 'location' in product.keys() else ''))
 
 @app.route('/admin/reject/<int:log_id>')
 def reject_request(log_id):
@@ -1281,49 +1335,203 @@ def export_excel():
 
 @app.route('/admin/import', methods=['POST'])
 def import_excel():
-    if not session.get('admin_logged_in'): return redirect(url_for('index'))
-    file = request.files.get('file')
-    if not file: return redirect(url_for('admin_dashboard'))
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('index'))
 
+    file = request.files.get('file')
+    if not file:
+        return redirect(url_for('admin_dashboard'))
+
+    def safe_int(value):
+        if pd.isna(value) or str(value).strip() == '':
+            return 0
+        try:
+            return int(float(value))
+        except Exception:
+            return 0
+
+    def clean_medicine_name(value):
+        text = str(value or '').strip()
+        if not text or text.lower() == 'nan':
+            return ''
+        text = re.sub(
+            r'\s*1\s*(?:กป|กระปุก|ห่อ|แผง|ซอง|ขวด|pack|box|bottle|bott\.?)?\s*/\s*\d+\s*$',
+            '',
+            text,
+            flags=re.IGNORECASE
+        )
+        text = re.sub(r'\s+', ' ', text)
+        return text.strip(' -/')
+
+    def normalize_lookup_name(value):
+        text = clean_medicine_name(value).lower()
+        text = text.replace('(', ' ').replace(')', ' ')
+        text = re.sub(r'[^0-9a-zA-Zก-๙\s/._-]', '', text)
+        text = re.sub(r'\s+', ' ', text)
+        return text.strip()
+
+    def normalize_medicine_unit(name, unit):
+        normalized_unit = str(unit or '').strip() or 'ชิ้น'
+        lower_name = str(name or '').lower()
+        if 'มายบาซิน' in lower_name and normalized_unit == 'แผง':
+            return 'ห่อ'
+        return normalized_unit
+
+    def infer_medicine_setup(name, unit):
+        raw_unit = normalize_medicine_unit(name, unit)
+        lower_name = str(name or '').lower()
+        lower_unit = raw_unit.lower()
+        pack_match = re.search(
+            r'1\s*(?:กป|กระปุก|ห่อ|แผง|ซอง|ขวด|pack|box|bottle|bott\.?)?\s*/\s*(\d+)',
+            lower_name,
+            flags=re.IGNORECASE
+        )
+        conversion_rate = int(pack_match.group(1)) if pack_match else 1
+
+        tablet_keywords = (
+            'tablet', 'capsule', 'pill', 'lozenge', 'ยาอม', 'ชนิดเม็ด',
+            'paracetamol', 'antacid', 'anti-allergy', 'ดีคอลเจน'
+        )
+        non_tablet_keywords = ('counting dish', 'tray', 'ถาด')
+
+        if any(keyword in lower_name for keyword in non_tablet_keywords):
+            base_unit = raw_unit
+        elif 'เม็ด' in lower_unit or any(keyword in lower_name for keyword in tablet_keywords):
+            base_unit = 'เม็ด'
+        elif conversion_rate > 1:
+            base_unit = 'ชิ้น'
+        else:
+            base_unit = raw_unit
+
+        return base_unit, raw_unit, conversion_rate
+
+    def import_medicine_file(conn, df):
+        rows_to_import = []
+        for _, row in df.iterrows():
+            raw_name = str(row.iloc[1]).strip() if len(row) > 1 and pd.notna(row.iloc[1]) else ''
+            if not raw_name or raw_name.lower() in ('nan', 'รายการ/list'):
+                continue
+
+            raw_no = str(row.iloc[0]).strip() if len(row) > 0 and pd.notna(row.iloc[0]) else ''
+            if raw_no.lower() == 'no.':
+                continue
+
+            name = clean_medicine_name(raw_name)
+            if not name:
+                continue
+
+            stock = safe_int(row.iloc[2]) if len(row) > 2 else 0
+            unit = str(row.iloc[3]).strip() if len(row) > 3 and pd.notna(row.iloc[3]) else 'ชิ้น'
+            unit = normalize_medicine_unit(raw_name, unit)
+            rows_to_import.append({
+                'raw_name': raw_name,
+                'name': name,
+                'stock': stock,
+                'unit': unit
+            })
+
+        updated_count = 0
+        inserted_count = 0
+        candidates = conn.execute('SELECT id, code, name FROM products').fetchall()
+        next_cc_code = conn.execute('''
+            SELECT COALESCE(MAX(CAST(SUBSTR(code, 10) AS INTEGER)), 0)
+            FROM products
+            WHERE code LIKE 'MEDIC-CC-%'
+        ''').fetchone()[0]
+
+        for index, item in enumerate(rows_to_import, start=1):
+            normalized_name = normalize_lookup_name(item['name'])
+            existing = conn.execute(
+                'SELECT id, code, name FROM products WHERE TRIM(name) = TRIM(?)',
+                (item['name'],)
+            ).fetchone()
+
+            if not existing:
+                for product in candidates:
+                    candidate_name = normalize_lookup_name(product['name'])
+                    if not candidate_name or not normalized_name:
+                        continue
+                    if (
+                        candidate_name == normalized_name or
+                        normalized_name in candidate_name or
+                        candidate_name in normalized_name
+                    ):
+                        existing = product
+                        break
+
+            base_unit, package_unit, conversion_rate = infer_medicine_setup(item['raw_name'], item['unit'])
+
+            if existing:
+                conn.execute('''
+                    UPDATE products
+                    SET name=?, category='ยา', unit=?, stock=?, base_unit=?, package_unit=?, conversion_rate=?, is_active=1
+                    WHERE id=?
+                ''', (item['name'], item['unit'], item['stock'], base_unit, package_unit, conversion_rate, existing['id']))
+                updated_count += 1
+            else:
+                next_cc_code += 1
+                generated_code = f"MEDIC-CC-{next_cc_code:03d}"
+                while conn.execute('SELECT 1 FROM products WHERE code = ?', (generated_code,)).fetchone():
+                    next_cc_code += 1
+                    generated_code = f"MEDIC-CC-{next_cc_code:03d}"
+
+                conn.execute('''
+                    INSERT INTO products (
+                        code, name, stock, safety_stock, category, unit, location,
+                        withdraw, reserved_stock, is_active, base_unit, package_unit, conversion_rate
+                    )
+                    VALUES (?, ?, ?, 0, 'ยา', ?, 'ห้องยา', 0, 0, 1, ?, ?, ?)
+                ''', (generated_code, item['name'], item['stock'], item['unit'], base_unit, package_unit, conversion_rate))
+                inserted_count += 1
+
+        return updated_count, inserted_count
+
+    conn = None
     try:
         df = pd.read_excel(file)
-        # ล้างช่องว่างหัวตาราง
         df.columns = df.columns.astype(str).str.strip()
-        
+
         conn = get_db_connection()
         updated_count = 0
         inserted_count = 0
 
-        def safe_int(value):
-            if pd.isna(value) or str(value).strip() == '': return 0
-            try: return int(float(value))
-            except: return 0
+        code_col = next((col for col in df.columns if 'รหัสของ' in col or 'code' in col.lower()), None)
+        preview_text = ' '.join(
+            str(v).strip()
+            for v in df.head(5).fillna('').astype(str).values.flatten().tolist()
+            if str(v).strip()
+        ).lower()
+        is_medicine_file = 'รายการ/list' in preview_text or 'medicine' in str(df.columns[0]).lower()
 
-        for index, row in df.iterrows():
-            # --- ดึงรหัสสินค้า (ใช้ชื่อตามรูปของคุณ) ---
-            code_col = next((col for col in df.columns if 'รหัสของ' in col or 'code' in col.lower()), None)
-            if not code_col: continue
+        if not code_col and is_medicine_file:
+            updated_count, inserted_count = import_medicine_file(conn, df)
+            conn.commit()
+            flash(f'✅ นำเข้ารายการยาสำเร็จ: อัปเดต {updated_count}, เพิ่มใหม่ {inserted_count}', 'success')
+            return redirect(url_for('admin_dashboard'))
+
+        if not code_col:
+            flash('❌ ไม่พบคอลัมน์รหัสสินค้าในไฟล์ที่อัปโหลด', 'danger')
+            return redirect(url_for('admin_dashboard'))
+
+        for _, row in df.iterrows():
             code = str(row[code_col]).strip()
-            if not code or code.lower() == 'nan': continue
+            if not code or code.lower() == 'nan':
+                continue
 
-            # --- ดึงข้อมูลตามชื่อคอลัมน์ในรูปภาพ ---
-            # ใช้การเช็คแบบ "ถ้ามีคำนี้อยู่ในชื่อคอลัมน์" เพื่อป้องกันเรื่องคอลัมน์ซ้ำหรือเว้นวรรค
             name_col = next((col for col in df.columns if 'ชื่อของ' in col), None)
             cat_col = next((col for col in df.columns if 'หมวดหมู่' in col), None)
             unit_col = next((col for col in df.columns if 'หน่วยนับ' in col), None)
-            loc_col = next((col for col in df.columns if 'สถานที่เก็บ' in col or 'Location' in col), None)
-            safe_col = next((col for col in df.columns if 'จุดสั่งซื้อ' in col or 'Safety Stock' in col), None)
+            loc_col = next((col for col in df.columns if 'สถานที่เก็บ' in col or 'location' in col.lower()), None)
+            safe_col = next((col for col in df.columns if 'จุดสั่งซื้อ' in col or 'safety stock' in col.lower()), None)
             stock_col = next((col for col in df.columns if 'จำนวนคงเหลือ' in col), None)
 
-            # กำหนดค่าตัวแปร
-            name = str(row[name_col]).strip() if name_col and pd.notna(row[name_col]) else "No Name"
-            category = str(row[cat_col]).strip() if cat_col and pd.notna(row[cat_col]) else "General"
-            unit = str(row[unit_col]).strip() if unit_col and pd.notna(row[unit_col]) else "PCS"
-            location = str(row[loc_col]).strip() if loc_col and pd.notna(row[loc_col]) else "-"
+            name = str(row[name_col]).strip() if name_col and pd.notna(row[name_col]) else 'No Name'
+            category = str(row[cat_col]).strip() if cat_col and pd.notna(row[cat_col]) else 'General'
+            unit = str(row[unit_col]).strip() if unit_col and pd.notna(row[unit_col]) else 'PCS'
+            location = str(row[loc_col]).strip() if loc_col and pd.notna(row[loc_col]) else '-'
             safety_stock = safe_int(row[safe_col]) if safe_col else 0
             stock = safe_int(row[stock_col]) if stock_col else 0
 
-            # --- ดึงข้อมูล Lot / วันที่รับเข้า / วันหมดอายุ ---
             lot_col = next((col for col in df.columns if 'lot' in col.lower()), None)
             received_col = next((col for col in df.columns if 'วันที่รับเข้า' in col or 'received_date' in col.lower() or 'received date' in col.lower()), None)
             expiry_col = next((col for col in df.columns if 'วันหมดอายุ' in col or 'expiry_date' in col.lower() or 'expiry date' in col.lower()), None)
@@ -1334,33 +1542,29 @@ def import_excel():
             expiry_date = standardize_date(row[expiry_col]) if expiry_col and pd.notna(row[expiry_col]) else ''
             lot_qty = safe_int(row[lot_qty_col]) if lot_qty_col and pd.notna(row[lot_qty_col]) else None
 
-            # --- ส่วนการเช็คสถานะการใช้งาน ---
             active_col = next((col for col in df.columns if 'สถานะ' in col), None)
-            is_active = 1 # ค่าเริ่มต้น
+            is_active = 1
             if active_col and pd.notna(row[active_col]):
                 status_text = str(row[active_col]).strip()
                 is_active = 1 if status_text == 'เปิดใช้งาน' else 0
 
-            # --- บันทึกลง Database ---
             existing = conn.execute('SELECT id FROM products WHERE code = ?', (code,)).fetchone()
-            # -- เพิ่ม is_active ----
             if existing:
                 conn.execute('''
-                    UPDATE products 
-                    SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?, lot_no=?, received_date=?, expiry_date=? 
+                    UPDATE products
+                    SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?, lot_no=?, received_date=?, expiry_date=?
                     WHERE id=?
                 ''', (name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date, existing['id']))
                 product_id = existing['id']
                 updated_count += 1
             else:
                 cursor = conn.execute('''
-                    INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock, is_active, lot_no, received_date, expiry_date) 
+                    INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock, is_active, lot_no, received_date, expiry_date)
                     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
                 ''', (code, name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date))
                 product_id = cursor.lastrowid
                 inserted_count += 1
 
-            # --- จัดการ product_lots ถ้ามี Lot No. ---
             if lot_no:
                 lot_qty = stock if lot_qty is None else lot_qty
                 existing_lot = conn.execute('SELECT id FROM product_lots WHERE product_id = ? AND lot_number = ?', (product_id, lot_no)).fetchone()
@@ -1377,13 +1581,13 @@ def import_excel():
                     ''', (product_id, lot_no, lot_qty, received_date, expiry_date))
 
         conn.commit()
-        conn.close()
         flash(f'✅ นำเข้าสำเร็จ: อัปเดต {updated_count}, เพิ่มใหม่ {inserted_count}', 'success')
     except Exception as e:
         flash(f'❌ ผิดพลาด: {str(e)}', 'danger')
-        
-    return redirect(url_for('admin_dashboard'))
-        
+    finally:
+        if conn:
+            conn.close()
+
     return redirect(url_for('admin_dashboard'))
 
 # 1. ดึงข้อมูลของเดิมมาแสดงในหน้าต่างแก้ไข
