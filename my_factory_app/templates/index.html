@@ -245,6 +245,7 @@
                 {% endwith %}
 
                 <form action="/" method="POST" id="loginFormUser">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="input-group-modern">
                         <span class="input-group-text"><i class="fas fa-id-card"></i></span>
                         <input type="text" name="emp_id" class="form-control" placeholder="Employee ID" autofocus
@@ -269,6 +270,7 @@
                 {% endwith %}
 
                 <form action="/admin_login" method="POST" id="loginFormAdmin">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="input-group-modern">
                         <span class="input-group-text"><i class="fas fa-user"></i></span>
                         <input type="text" name="username" class="form-control" placeholder="Username"

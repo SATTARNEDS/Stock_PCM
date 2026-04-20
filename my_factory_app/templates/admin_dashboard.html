@@ -271,9 +271,12 @@
             </div>
 
             <div class="px-4 py-3 mt-auto border-top border-secondary">
-                <a href="/admin/logout" class="btn btn-outline-danger w-100 rounded-pill fw-medium">
-                    <i class="fas fa-sign-out-alt me-2"></i> ออกจากระบบ
-                </a>
+                <form id="adminLogoutForm" action="/admin/logout" method="POST" class="mb-0">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-outline-danger w-100 rounded-pill fw-medium">
+                        <i class="fas fa-sign-out-alt me-2"></i> ออกจากระบบ
+                    </button>
+                </form>
             </div>
         </div>
     </div>
@@ -1217,6 +1220,11 @@
             return response;
         }
 
+        function submitAdminLogout() {
+            const form = document.getElementById('adminLogoutForm');
+            if (form) form.submit();
+        }
+
         document.addEventListener('DOMContentLoaded', function () {
             // --- 1.1 ตั้งค่าปฏิทิน (Flatpickr) ---
             const dateConfig = { locale: "th", dateFormat: "Y-m-d", altInput: true, altFormat: "d/m/Y", allowInput: true };
@@ -1313,7 +1321,7 @@
         document.addEventListener('keypress', () => idleTime = 0);
         setInterval(() => {
             idleTime++;
-            if (idleTime >= maxIdleTime) window.location.href = "/admin/logout";
+            if (idleTime >= maxIdleTime) submitAdminLogout();
         }, 60000);
     });
 

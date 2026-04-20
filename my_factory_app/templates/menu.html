@@ -127,8 +127,10 @@
                         user['department'] }}</div>
                 </div>
             </div>
-            <a href="{{ url_for('logout_user', emp_id=user['emp_id']) }}"
-                class="btn btn-outline-danger btn-sm rounded-pill px-3">ออกระบบ</a>
+            <form action="{{ url_for('logout_user', emp_id=user['emp_id']) }}" method="POST" class="mb-0">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-danger btn-sm rounded-pill px-3">ออกระบบ</button>
+            </form>
         </div>
     </nav>
 

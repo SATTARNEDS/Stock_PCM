@@ -70,17 +70,81 @@ SESSION_TIMEOUT_MINUTES = 15
 USER_LOCK_TIMEOUT_MINUTES = 5
 ALLOWED_IMPORT_EXTENSIONS = {'xlsx', 'xlsm', 'xls'}
 SENSITIVE_POST_ENDPOINTS = {
+    'index', 'admin_login', 'logout_user', 'admin_logout',
     'add_to_cart', 'remove_from_cart', 'update_cart_qty', 'confirm_withdrawal',
     'approve_request', 'reject_request', 'import_excel', 'clear_system_data',
     'toggle_product_status', 'add_product', 'edit_product', 'add_product_ajax',
-    'write_off_ajax', 'unlock_user_ajax', 'add_user_ajax', 'delete_user',
-    'update_user_ajax', 'save_alert_time', 'daily_alert'
+    'write_off_ajax', 'unlock_user_ajax', 'unlock_user', 'add_user_ajax', 'delete_user',
+    'update_user_ajax', 'save_alert_time', 'daily_alert', 'reset_lock'
 }
 NO_CACHE_HEADERS = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
     "Pragma": "no-cache",
     "Expires": "0",
 }
+MAX_LOGIN_ATTEMPTS = int(os.environ.get('MAX_LOGIN_ATTEMPTS', '5'))
+LOGIN_BLOCK_MINUTES = int(os.environ.get('LOGIN_BLOCK_MINUTES', '5'))
+FAILED_LOGIN_ATTEMPTS = {}
+
+def get_client_ip():
+    forwarded_for = (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
+    return forwarded_for or (request.remote_addr or 'unknown')
+
+def is_auth_rate_limited(scope):
+    key = f"{scope}:{get_client_ip()}"
+    now = datetime.utcnow()
+    entry = FAILED_LOGIN_ATTEMPTS.get(key)
+    if not entry:
+        return False, 0
+
+    blocked_until = entry.get('blocked_until')
+    if blocked_until and now < blocked_until:
+        remaining_seconds = max(0, int((blocked_until - now).total_seconds()))
+        return True, max(1, math.ceil(remaining_seconds / 60))
+
+    if blocked_until and now >= blocked_until:
+        FAILED_LOGIN_ATTEMPTS.pop(key, None)
+
+    return False, 0
+
+def register_failed_attempt(scope):
+    key = f"{scope}:{get_client_ip()}"
+    now = datetime.utcnow()
+    entry = FAILED_LOGIN_ATTEMPTS.get(key, {'count': 0, 'blocked_until': None})
+
+    if entry.get('blocked_until') and now >= entry['blocked_until']:
+        entry = {'count': 0, 'blocked_until': None}
+
+    entry['count'] += 1
+    if entry['count'] >= MAX_LOGIN_ATTEMPTS:
+        entry['blocked_until'] = now + timedelta(minutes=LOGIN_BLOCK_MINUTES)
+
+    FAILED_LOGIN_ATTEMPTS[key] = entry
+    return entry
+
+def clear_failed_attempts(scope):
+    FAILED_LOGIN_ATTEMPTS.pop(f"{scope}:{get_client_ip()}", None)
+
+def clean_input_text(value, max_length=100):
+    text = re.sub(r'\s+', ' ', str(value or '').strip())
+    return text[:max_length]
+
+def normalize_location_value(value):
+    raw = clean_input_text(value, 30)
+    lower = raw.lower()
+    if lower == 'pc1':
+        return 'PC1'
+    if lower in ('cc', 'coil center', 'coilcenter'):
+        return 'Coil Center'
+    if lower in ('general', 'ทั่วไป'):
+        return 'General'
+    return raw
+
+def is_valid_emp_id(emp_id):
+    return bool(re.fullmatch(r'[A-Za-z0-9_-]{1,20}', str(emp_id or '').strip()))
+
+def is_valid_alert_time(value):
+    return bool(re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', str(value or '').strip()))
 
 def generate_csrf_token():
     token = session.get('_csrf_token')
@@ -146,6 +210,10 @@ def handle_before_request():
 def add_header(response):
     # ป้องกัน Cache เพื่อความปลอดภัย
     response.headers.update(NO_CACHE_HEADERS)
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('Referrer-Policy', 'same-origin')
+    response.headers.setdefault('Permissions-Policy', 'geolocation=(), microphone=()')
     return response
 
 # สร้างฟังก์ชันสำหรับดึงเวลาไทย
@@ -338,7 +406,16 @@ def send_line_message(message, target_group=None, location=None, role=None):
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
+        is_limited, wait_minutes = is_auth_rate_limited('user_login')
+        if is_limited:
+            flash(f'⚠️ มีการพยายามเข้าสู่ระบบถี่เกินไป กรุณารอ {wait_minutes} นาที', 'user_error')
+            return render_template('index.html')
+
         emp_id = request.form.get('emp_id', '').strip()
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,20}', emp_id):
+            flash('❌ รูปแบบรหัสพนักงานไม่ถูกต้อง', 'user_error')
+            return render_template('index.html')
+
         conn = get_db_connection()
         user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
         
@@ -350,26 +427,27 @@ def index():
 
             # 4. ป้องกันล็อกอินซ้ำ (ปรับปรุงใหม่: เช็คเวลา last_seen)
             if is_user_currently_locked(user):
-                # ✅ เปลี่ยน category เป็น 'user_error'
                 flash(f'❌ รหัส {emp_id} กำลังใช้งานอยู่ (ต้อง Logout หรือรอ 5 นาที)', 'user_error')
                 conn.close()
-                return render_template('index.html') # 👈 ใช้ render เพื่อให้ Flash แสดงทันที
+                return render_template('index.html')
             
-            # ถ้าผ่าน ให้ตั้งค่า Session และ Lock
-            session['user_id'] = emp_id 
+            clear_failed_attempts('user_login')
+            session.clear()
+            session['user_id'] = emp_id
+            session.permanent = True
             conn.execute("UPDATE users SET is_locked = 1, last_seen = datetime('now', '+7 hours') WHERE emp_id = ?", (emp_id,))
             conn.commit()
             conn.close()
             return redirect(url_for('menu', emp_id=emp_id))
         else:
             conn.close()
-            # ✅ เปลี่ยน category เป็น 'user_error'
+            register_failed_attempt('user_login')
             flash(f'❌ ไม่พบรหัสพนักงาน: {emp_id}', 'user_error')
-            return render_template('index.html') # 👈 ใช้ render เพื่อความชัวร์
+            return render_template('index.html')
             
     return render_template('index.html')
 
-@app.route('/logout_user/<emp_id>')
+@app.route('/logout_user/<emp_id>', methods=['POST'])
 def logout_user(emp_id):
     if session.get('user_id') != emp_id and not session.get('admin_logged_in'):
         flash('⚠️ ไม่สามารถออกจากระบบแทนผู้ใช้อื่นได้', 'danger')
@@ -937,8 +1015,16 @@ def get_estimated_days_left(stock, withdraw_total):
 @app.route('/admin_login', methods=['GET', 'POST'])
 def admin_login():
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
+        is_limited, wait_minutes = is_auth_rate_limited('admin_login')
+        if is_limited:
+            flash(f'⚠️ มีการพยายามเข้าสู่ระบบผู้ดูแลถี่เกินไป กรุณารอ {wait_minutes} นาที', 'admin_error')
+            return render_template('index.html')
+
+        username = (request.form.get('username') or '').strip()
+        password = request.form.get('password') or ''
+        if not username or len(username) > 50 or not password or len(password) > 128:
+            flash('❌ ข้อมูลเข้าสู่ระบบไม่ถูกต้อง', 'admin_error')
+            return render_template('index.html')
         
         conn = get_db_connection()
         admin = conn.execute('SELECT * FROM admins WHERE username = ?', (username,)).fetchone()
@@ -946,14 +1032,15 @@ def admin_login():
         
         # ตรวจสอบรหัสผ่าน
         if admin and check_password_hash(admin['password'], password):
+            clear_failed_attempts('admin_login')
+            session.clear()
             session['admin_logged_in'] = True
             session['admin_name'] = admin['name']
             session['admin_role'] = admin['role']
             session.permanent = True
-            # แก้ไข: ย้ายการตั้งค่า lifetime ไปไว้ที่ตอน config app จะดีกว่า 
-            # แต่ถ้าจะไว้ตรงนี้ให้ใช้ timedelta(minutes=60)
             return redirect(url_for('admin_dashboard'))
         
+        register_failed_attempt('admin_login')
         flash('❌ ชื่อผู้ใช้หรือรหัสผ่านแอดมินไม่ถูกต้อง', 'admin_error')
         
     # สำคัญ: ต้อง render_template กลับไปหน้า index.html (หน้าที่มีทั้ง 2 ฟอร์ม)
@@ -1407,15 +1494,21 @@ def add_product():
 
     admin_name = 'ADMIN:' + session.get('admin_name', 'Unknown')
     
-    # 1. รับค่าจากฟอร์ม (อ้างอิงตามชื่อ name ใน HTML)
-    code = request.form.get('code')
-    name = request.form.get('name')
-    category = request.form.get('category')
-    unit = request.form.get('unit')
-    location = request.form.get('location')
-    safety_stock = request.form.get('safety_stock', 0, type=int)
-    stock = request.form.get('stock', 0, type=int)
+    code = clean_input_text(request.form.get('code'), 40).upper()
+    name = clean_input_text(request.form.get('name'), 150)
+    category = clean_input_text(request.form.get('category'), 60)
+    unit = clean_input_text(request.form.get('unit'), 30)
+    location = normalize_location_value(request.form.get('location'))
+    safety_stock = max(0, request.form.get('safety_stock', 0, type=int) or 0)
+    stock = max(0, request.form.get('stock', 0, type=int) or 0)
     expiry_date = standardize_date(request.form.get('expiry_date', ''))
+
+    if not re.fullmatch(r'[A-Z0-9_-]{2,40}', code):
+        return jsonify({'success': False, 'message': 'รหัสสินค้าไม่ถูกต้อง'}), 400
+    if not name or not category or not unit:
+        return jsonify({'success': False, 'message': 'กรุณากรอกข้อมูลสินค้าให้ครบ'}), 400
+    if location not in ('PC1', 'Coil Center', 'General'):
+        return jsonify({'success': False, 'message': 'สถานที่เก็บไม่ถูกต้อง'}), 400
 
     conn = get_db_connection()
 
@@ -1454,13 +1547,15 @@ def add_product():
         return jsonify({'success': True})
         
     except sqlite3.IntegrityError:
-        return jsonify({'success': False, 'message': 'รหัสสินค้านี้มีซ้ำในระบบแล้ว'})
+        return jsonify({'success': False, 'message': 'รหัสสินค้านี้มีซ้ำในระบบแล้ว'}), 400
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
+        conn.rollback()
+        print(f'Add product error: {e}')
+        return jsonify({'success': False, 'message': 'ไม่สามารถบันทึกข้อมูลสินค้าได้'}), 500
     finally:
         conn.close()
 
-@app.route('/admin/reset_lock')
+@app.route('/admin/reset_lock', methods=['POST'])
 def reset_lock():
     if not session.get('admin_logged_in'): return redirect(url_for('index'))
     conn = get_db_connection()
@@ -1825,15 +1920,18 @@ def edit_product():
     if not session.get('admin_logged_in'): 
         return jsonify({'success': False, 'message': 'Unauthorized'}), 401
     
-    code = request.form.get('code')
-    name = request.form.get('name')
-    unit = request.form.get('unit')
-    base_unit = request.form.get('base_unit', '').strip() or 'เม็ด'
-    package_unit = request.form.get('package_unit', '').strip() or unit
-    conversion_rate = int(request.form.get('conversion_rate', 1) or 1)
-    safety_stock = request.form.get('safety_stock', 0)
-    stock = request.form.get('stock', 0)
+    code = clean_input_text(request.form.get('code'), 40).upper()
+    name = clean_input_text(request.form.get('name'), 150)
+    unit = clean_input_text(request.form.get('unit'), 30)
+    base_unit = clean_input_text(request.form.get('base_unit'), 30) or 'เม็ด'
+    package_unit = clean_input_text(request.form.get('package_unit'), 30) or unit
+    conversion_rate = max(1, int(request.form.get('conversion_rate', 1) or 1))
+    safety_stock = max(0, int(request.form.get('safety_stock', 0) or 0))
+    stock = max(0, int(request.form.get('stock', 0) or 0))
     expiry_date = standardize_date(request.form.get('expiry_date', ''))
+
+    if not code or not name or not unit:
+        return jsonify({'success': False, 'message': 'ข้อมูลสินค้าไม่ครบถ้วน'}), 400
 
     conn = get_db_connection()
     try:
@@ -1843,10 +1941,11 @@ def edit_product():
             WHERE code=?
         ''', (name, unit, base_unit, package_unit, conversion_rate, safety_stock, stock, expiry_date, code))
         conn.commit()
-        # คืนค่า Success เป็น JSON แทนการ Redirect
         return jsonify({'success': True, 'message': 'แก้ไขข้อมูลของเรียบร้อย'})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
+        conn.rollback()
+        print(f'Edit product error: {e}')
+        return jsonify({'success': False, 'message': 'ไม่สามารถแก้ไขข้อมูลสินค้าได้'}), 500
     finally:
         conn.close()
 
@@ -1992,7 +2091,7 @@ def filter_logs():
     response.headers['X-Total-Pages'] = total_pages # ส่งเลขหน้าใหม่ไปให้ JS
     return response
 
-@app.route('/admin/logout')
+@app.route('/admin/logout', methods=['POST'])
 def admin_logout():
     session.clear()
     return redirect(url_for('index'))
@@ -2032,11 +2131,14 @@ def add_product_ajax():
     if not session.get('admin_logged_in'): 
         return jsonify({'success': False, 'message': 'Unauthorized'}), 401
 
-    product_id = request.form.get('product_id')
-    lot_number = request.form.get('lot_number')
-    qty = int(request.form.get('add_qty', 0))
+    product_id = request.form.get('product_id', type=int)
+    lot_number = clean_input_text(request.form.get('lot_number'), 50)
+    qty = int(request.form.get('add_qty', 0) or 0)
     receive_date = request.form.get('receive_date')
     expire_date = standardize_date(request.form.get('expire_date', ''))
+
+    if not product_id or qty <= 0:
+        return jsonify({'success': False, 'message': 'ข้อมูล Lot ไม่ถูกต้อง'}), 400
 
     conn = get_db_connection()
     try:
@@ -2059,7 +2161,9 @@ def add_product_ajax():
         conn.commit()
         return jsonify({'success': True, 'message': 'เพิ่ม Lot ของสำเร็จ!'})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
+        conn.rollback()
+        print(f'Add lot error: {e}')
+        return jsonify({'success': False, 'message': 'ไม่สามารถเพิ่ม Lot ได้'}), 500
     finally:
         conn.close()
 
@@ -2069,9 +2173,9 @@ def write_off_ajax():
         return jsonify({'success': False, 'message': 'Unauthorized'}), 401
 
     admin_name = 'ADMIN:' + session.get('admin_name', 'Unknown')
-    product_id = request.form.get('product_id')
+    product_id = request.form.get('product_id', type=int)
     qty = request.form.get('qty', type=int)
-    reason = request.form.get('reason', 'หมดอายุ')
+    reason = clean_input_text(request.form.get('reason', 'หมดอายุ'), 120)
 
     if not qty or qty <= 0:
         return jsonify({'success': False, 'message': 'จำนวนต้องมากกว่า 0'})
@@ -2316,7 +2420,7 @@ def unlock_user_ajax(emp_id):
     return jsonify({'success': True})
 
 # --- 2. ฟังก์ชันปลดล็อกรายบุคคล ---
-@app.route('/admin/unlock_user/<emp_id>')
+@app.route('/admin/unlock_user/<emp_id>', methods=['POST'])
 def unlock_user(emp_id):
     if not session.get('admin_logged_in'): 
         return redirect(url_for('index'))
@@ -2346,7 +2450,7 @@ def get_online_count():
 @app.route('/admin/list_users')
 def list_users():
     if not session.get('admin_logged_in'): 
-        return jsonify([])
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
         
     role = session.get('admin_role')
     conn = get_db_connection()
@@ -2366,20 +2470,29 @@ def list_users():
 
 @app.route('/admin/add_user_ajax', methods=['POST'])
 def add_user_ajax():
-    if not session.get('admin_logged_in'): return jsonify({'success': False, 'message': 'Unauthorized'})
-    emp_id = request.form.get('emp_id')
-    name = request.form.get('name')
-    dept = request.form.get('department')
-    loc = request.form.get('location')
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    emp_id = clean_input_text(request.form.get('emp_id'), 20)
+    name = clean_input_text(request.form.get('name'), 100)
+    dept = clean_input_text(request.form.get('department'), 100)
+    loc = normalize_location_value(request.form.get('location'))
+
+    if not is_valid_emp_id(emp_id):
+        return jsonify({'success': False, 'message': 'รหัสพนักงานไม่ถูกต้อง'}), 400
+    if not name:
+        return jsonify({'success': False, 'message': 'กรุณาระบุชื่อพนักงาน'}), 400
+    if loc not in ('PC1', 'Coil Center', 'General'):
+        return jsonify({'success': False, 'message': 'สถานที่ไม่ถูกต้อง'}), 400
     
     conn = get_db_connection()
     try:
         conn.execute('INSERT INTO users (emp_id, name, department, location, is_locked) VALUES (?, ?, ?, ?, 0)',
-                     (emp_id, name, dept, loc))
+                     (emp_id, name, dept or '-', loc))
         conn.commit()
         return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'message': 'รหัสพนักงานซ้ำหรือข้อมูลผิดพลาด'})
+    except Exception:
+        return jsonify({'success': False, 'message': 'รหัสพนักงานซ้ำหรือข้อมูลผิดพลาด'}), 400
     finally:
         conn.close()
 
@@ -2395,13 +2508,16 @@ def delete_user(emp_id):
     user = conn.execute('SELECT location FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
     
     if not user:
-        return jsonify({'success': False, 'message': 'ไม่พบพนักงาน'})
+        conn.close()
+        return jsonify({'success': False, 'message': 'ไม่พบพนักงาน'}), 404
         
     # ถ้าไม่ใช่ Super Admin และพนักงานไม่ได้อยู่โรงงานตัวเอง จะลบไม่ได้
     if role == 'admin_pc1' and user['location'] != 'PC1':
-        return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์จัดการพนักงานนอก PC1'})
+        conn.close()
+        return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์จัดการพนักงานนอก PC1'}), 403
     if role == 'admin_cc' and user['location'] != 'Coil Center':
-        return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์จัดการพนักงานนอก CC'})
+        conn.close()
+        return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์จัดการพนักงานนอก CC'}), 403
 
     conn.execute('DELETE FROM users WHERE emp_id = ?', (emp_id,))
     conn.commit()
@@ -2410,17 +2526,24 @@ def delete_user(emp_id):
 
 @app.route('/admin/update_user_ajax', methods=['POST'])
 def update_user_ajax():
-    if not session.get('admin_logged_in'): return jsonify({'success': False})
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
     
-    emp_id = request.form.get('emp_id')
-    name = request.form.get('name')
-    dept = request.form.get('department')
-    loc = request.form.get('location')
+    emp_id = clean_input_text(request.form.get('emp_id'), 20)
+    name = clean_input_text(request.form.get('name'), 100)
+    dept = clean_input_text(request.form.get('department'), 100)
+    loc = normalize_location_value(request.form.get('location'))
+
+    if not is_valid_emp_id(emp_id):
+        return jsonify({'success': False, 'message': 'รหัสพนักงานไม่ถูกต้อง'}), 400
+    if not name:
+        return jsonify({'success': False, 'message': 'กรุณาระบุชื่อพนักงาน'}), 400
+    if loc not in ('PC1', 'Coil Center', 'General'):
+        return jsonify({'success': False, 'message': 'สถานที่ไม่ถูกต้อง'}), 400
     
     conn = get_db_connection()
-    # อัปเดตข้อมูลพนักงานยกเว้นรหัส (รหัสเป็น Key หลักห้ามแก้)
     conn.execute('UPDATE users SET name=?, department=?, location=? WHERE emp_id=?', 
-                 (name, dept, loc, emp_id))
+                 (name, dept or '-', loc, emp_id))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -2470,7 +2593,8 @@ def setup_dept_table():
 # 2. API สำหรับดึงรายชื่อแผนกไปใช้ใน Dropdown
 @app.route('/admin/list_departments')
 def list_departments():
-    if not session.get('admin_logged_in'): return jsonify([])
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
     
     conn = get_db_connection()
     # ดึงชื่อแผนกทั้งหมดแบบไม่ซ้ำกัน ไม่ว่าจะแอดมินคนไหนก็เห็นแผนกเหมือนกันเพื่อเลือกใส่ให้พนักงาน
@@ -2626,7 +2750,7 @@ def update_scheduler_time(new_time):
 @app.route('/admin/get_alert_time')
 def get_alert_time():
     if not session.get('admin_logged_in'): 
-        return jsonify({'error': 'Unauthorized'}), 401
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
     
     conn = get_db_connection()
     # ดึงค่าจากตาราง settings
@@ -2639,15 +2763,18 @@ def get_alert_time():
 # 2. API บันทึกเวลาใหม่
 @app.route('/admin/save_alert_time', methods=['POST'])
 def save_alert_time():
-    if session.get('admin_role') != 'superadmin': return jsonify({'success': False, 'message': 'No Permission'})
-    new_time = request.form.get('alert_time')
+    if session.get('admin_role') != 'superadmin':
+        return jsonify({'success': False, 'message': 'No Permission'}), 403
+
+    new_time = clean_input_text(request.form.get('alert_time'), 5)
+    if not is_valid_alert_time(new_time):
+        return jsonify({'success': False, 'message': 'รูปแบบเวลาไม่ถูกต้อง'}), 400
     
     conn = get_db_connection()
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('daily_alert_time', ?)", (new_time,))
     conn.commit()
     conn.close()
 
-    # 💡 จุดสำคัญ: สั่งให้ Scheduler อัปเดตเวลาทำงานใหม่ทันที
     update_scheduler_time(new_time)
     
     return jsonify({'success': True, 'message': f'เปลี่ยนเวลาเป็น {new_time} น. เรียบร้อย'})
