@@ -290,14 +290,22 @@ def enrich_products_for_display(conn, products_list):
         package_stock = int(item.get('stock') or 0)
         total_base_qty = (package_stock * conversion_rate) + open_base_qty
 
+        # ลบ reserved_stock ออกจาก total เพื่อแสดงยอดที่ยังเบิกได้จริง
+        reserved_stock = int(item.get('reserved_stock') or 0)
+        if split_medicine:
+            available_base = max(0, total_base_qty - reserved_stock)
+        else:
+            available_base = package_stock  # non-split ลด stock จริงใน DB แล้ว
+
         item['is_split_tablet_medicine'] = split_medicine
         item['package_unit_label'] = package_unit
         item['base_unit_label'] = base_unit
         item['open_base_qty'] = open_base_qty
-        item['stock_base_total'] = total_base_qty
-        item['frontend_stock_text'] = f"{total_base_qty} {base_unit}" if split_medicine else f"{package_stock} {item.get('unit', '')}".strip()
+        item['stock_base_total'] = available_base if split_medicine else total_base_qty
+        item['effective_stock'] = available_base  # ใช้เช็ค out-of-stock ใน template
+        item['frontend_stock_text'] = f"{available_base} {base_unit}" if split_medicine else f"{package_stock} {item.get('unit', '')}".strip()
         item['backend_stock_text'] = f"{package_stock} {package_unit} + {open_base_qty} {base_unit}" if split_medicine else f"{package_stock} {item.get('unit', '')}".strip()
-        item['max_withdraw_qty'] = total_base_qty if split_medicine else package_stock
+        item['max_withdraw_qty'] = available_base if split_medicine else package_stock
         enriched.append(item)
 
     return enriched
@@ -549,7 +557,15 @@ def menu():
     ''', (emp_id,)).fetchall()
 
     # --- การแจ้งเตือน: คำขอที่ถูกปฏิเสธใน 7 วันล่าสุด ---
-    dismissed_ids = set(session.get('dismissed_rejections', []))
+    # เก็บ dismissed IDs ใน DB เพื่อไม่ขึ้นทุก login
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS dismissed_notifications
+        (emp_id TEXT, log_id INTEGER, PRIMARY KEY (emp_id, log_id))
+    ''')
+    dismissed_rows = conn.execute(
+        'SELECT log_id FROM dismissed_notifications WHERE emp_id = ?', (emp_id,)
+    ).fetchall()
+    dismissed_ids = {row['log_id'] for row in dismissed_rows}
     rejected_rows = conn.execute(f'''
         SELECT l.id, p.name as product_name, l.qty, p.unit, l.timestamp
         FROM transaction_logs l
@@ -719,7 +735,8 @@ def add_to_cart():
 @app.route('/api/dismiss_notification', methods=['POST'])
 def dismiss_notification():
     """เก็บ ID คำขอที่ถูกปฏิเสธที่ผู้ใช้กด dismiss แล้ว หรือ dismiss แจ้งเตือนหมวก"""
-    if not session.get('user_id'):
+    emp_id = session.get('user_id')
+    if not emp_id:
         return jsonify({'success': False}), 401
     notif_type = request.form.get('type', 'rejection')
     if notif_type == 'helmet':
@@ -727,10 +744,17 @@ def dismiss_notification():
     else:
         log_id = request.form.get('log_id', type=int)
         if log_id:
-            dismissed = list(session.get('dismissed_rejections', []))
-            if log_id not in dismissed:
-                dismissed.append(log_id)
-            session['dismissed_rejections'] = dismissed
+            conn = get_db_connection()
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS dismissed_notifications
+                (emp_id TEXT, log_id INTEGER, PRIMARY KEY (emp_id, log_id))
+            ''')
+            conn.execute(
+                'INSERT OR IGNORE INTO dismissed_notifications (emp_id, log_id) VALUES (?, ?)',
+                (emp_id, log_id)
+            )
+            conn.commit()
+            conn.close()
     return jsonify({'success': True})
 
 @app.route('/api/get_product_unit_info', methods=['GET'])  # ✅ NEW: Get unit info for AJAX
@@ -850,7 +874,7 @@ def confirm_withdrawal():
         flash('❌ พบจำนวนของในตะกร้าไม่ถูกต้อง กรุณาลบและเลือกใหม่', 'danger')
         return redirect(url_for('menu', emp_id=emp_id, open_cart='true'))
     
-    has_medicine = any(is_split_tablet_medicine(item) for item in cart_items)
+    has_medicine = any(is_medicine_product(item) for item in cart_items)  # ยาทุกประเภทต้องระบุอาการ
     if has_medicine and not symptom:
         conn.close()
         flash('❌ รายการเบิกยาต้องระบุอาการก่อนยืนยัน', 'danger')
@@ -1030,6 +1054,7 @@ def api_get_cart():
     items = [dict(row) for row in cart_items]
     for item in items:
         item['is_split_medicine'] = is_split_tablet_medicine(item)
+        item['is_medicine'] = is_medicine_product(item)  # ยาทั่วไป (split หรือไม่)
     return jsonify({'success': True, 'count': len(items), 'items': items})
 
 
@@ -1063,6 +1088,8 @@ def api_get_history():
     items = []
     for row in rows:
         r = dict(row)
+        # is_medicine_product / is_split_tablet_medicine ต้องการ key 'name' แต่ JOIN ใช้ alias 'product_name'
+        r['name'] = r.get('product_name', '')
         is_med = is_split_tablet_medicine(r)
         note = r.get('note') or ''
         symptom = ''

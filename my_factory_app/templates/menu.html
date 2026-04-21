@@ -344,13 +344,14 @@
         });
 
         // Update Qty in Cart
-        function updateQty(cartId, delta, empId) {
+        function updateQty(cartId, delta, empId, productId, isSplit) {
             const qtyElem = document.getElementById('qty-' + cartId);
+            const originalQty = parseInt(qtyElem.textContent.trim()) || 1;
             qtyElem.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
             const formData = new FormData();
             formData.append('cart_id', cartId);
-            formData.append('qty', parseInt(qtyElem.innerText || 0) + delta);
+            formData.append('qty', originalQty + delta);
             formData.append('emp_id', empId);
             formData.append('csrf_token', csrfToken);
 
@@ -358,12 +359,21 @@
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
-                        window.location.href = `?emp_id=${empId}&open_cart=true`;
+                        // อัปเดต stock display ใน product card ด้วย
+                        if (productId) {
+                            if (delta > 0) {
+                                updateProductStockDisplay(String(productId), Math.abs(delta), null);
+                            } else {
+                                restoreProductStockDisplay(String(productId), Math.abs(delta), !!isSplit);
+                            }
+                        }
+                        refreshCart();
                     } else {
                         Swal.fire('ผิดพลาด', data.message, 'error');
-                        fetchProducts(); // Refresh stock
+                        qtyElem.textContent = originalQty;
                     }
-                });
+                })
+                .catch(() => { qtyElem.textContent = originalQty; });
         }
 
         // Confirmation before submit
@@ -502,29 +512,59 @@
             if (!productId) return;
             const stockEl = document.getElementById(`stock-display-${productId}`);
             if (!stockEl) return;
-            // อ่าน stock ปัจจุบันจาก data attribute ของ form
-            let currentStock = parseInt(form?.dataset.productStock ?? stockEl.dataset.stock ?? '0');
-            const unit = form?.dataset.productUnit || '';
+            const addForm = document.querySelector(`#productDisplayArea form[data-product-id="${productId}"]`) || form;
+            // อ่าน currentStock จาก data-current-stock ก่อน (อัพเดตล่าสุด) ถ้าไม่มีค่อยอ่านจาก form
+            let currentStock = parseInt(stockEl.dataset.currentStock)
+                               || parseInt(addForm?.dataset.productStock ?? '0')
+                               || 0;
+            const unit = addForm?.dataset.productUnit || stockEl.dataset.originalUnit || '';
             const newStock = Math.max(0, currentStock - qtyAdded);
-            // อัปเดต data attribute
-            if (form) form.dataset.productStock = newStock;
+            // เก็บใน 2 ที่เพื่อไม่หาย
+            stockEl.dataset.currentStock = newStock;
+            if (addForm) addForm.dataset.productStock = newStock;
             const card = stockEl.closest('.product-card');
             if (newStock <= 0) {
                 stockEl.className = 'out-of-stock-label';
                 stockEl.innerHTML = '● ของหมด';
                 if (card) card.classList.add('out-of-stock');
-                // disable ปุ่ม + และ input
-                const addBtn = form?.querySelector('button[type="submit"]');
-                const qtyInput = form?.querySelector('[name="qty"]');
+                const addBtn = addForm?.querySelector('button[type="submit"]');
+                const qtyInput = addForm?.querySelector('[name="qty"]');
                 if (addBtn) addBtn.disabled = true;
                 if (qtyInput) qtyInput.disabled = true;
             } else {
                 stockEl.className = 'text-primary fw-medium';
                 stockEl.style.fontSize = '0.85rem';
+                // ซ่อน subtext (X แพ็ค + Y ชิ้น) หลัง stock เปลี่ยน เพราะคำนวณฝั่ง client ไม่ได้
                 stockEl.innerHTML = `คงเหลือ: ${newStock} ${escHtml(unit)}`;
-                // อัปเดต max ของ input
-                const qtyInput = form?.querySelector('[name="qty"]');
+                const qtyInput = addForm?.querySelector('[name="qty"]');
                 if (qtyInput) qtyInput.max = newStock;
+            }
+        }
+
+        function restoreProductStockDisplay(productId, qtyRestored, isSplit) {
+            if (!productId || !qtyRestored) return;
+            const addForm = document.querySelector(`#productDisplayArea form[data-product-id="${productId}"]`);
+            const stockEl = document.getElementById(`stock-display-${productId}`);
+            if (!stockEl) return; // product ไม่อยู่ใน view ปัจจุบัน
+            // อ่าน currentStock จาก data-current-stock ก่อน ถ้าไม่มีค่อยอ่านจาก form
+            let currentStock = parseInt(stockEl.dataset.currentStock)
+                               || parseInt(addForm?.dataset.productStock ?? '0')
+                               || 0;
+            const unit = addForm?.dataset.productUnit || stockEl.dataset.originalUnit || '';
+            const newStock = currentStock + qtyRestored;
+            stockEl.dataset.currentStock = newStock;
+            if (addForm) addForm.dataset.productStock = newStock;
+            const card = stockEl.closest('.product-card');
+            if (card) card.classList.remove('out-of-stock');
+            stockEl.className = 'text-primary fw-medium';
+            stockEl.style.fontSize = '0.85rem';
+            // ซ่อน subtext หลัง restore เช่นกัน
+            stockEl.innerHTML = `คงเหลือ: ${newStock} ${unit ? escHtml(unit) : ''}`;
+            if (addForm) {
+                const addBtn = addForm.querySelector('button[type="submit"]');
+                const qtyInput = addForm.querySelector('[name="qty"]');
+                if (addBtn) addBtn.disabled = false;
+                if (qtyInput) { qtyInput.disabled = false; qtyInput.max = newStock; }
             }
         }
 
@@ -556,21 +596,24 @@
                     // สร้าง HTML จาก JSON
                     let hasMed = false;
                     let rows = data.items.map(item => {
-                        const isMed = !!item.is_split_medicine;
+                        const isMed = !!(item.is_medicine || item.is_split_medicine); // ยาทุกประเภท
                         if (isMed) hasMed = true;
-                        const unit = isMed ? (item.base_unit || 'เม็ด') : (item.unit || '');
+                        const unit = item.is_split_medicine ? (item.base_unit || 'เม็ด') : (item.unit || '');
                         return `<tr class="border-bottom">
                             <td><div class="fw-medium">${escHtml(item.name)}</div><small class="text-muted">${escHtml(item.code)}</small></td>
                             <td class="text-center" style="min-width:120px;">
                                 <div class="d-flex align-items-center justify-content-center gap-2">
-                                    <button class="btn btn-sm btn-light border rounded-circle" onclick="updateQty('${item.id}', -1, '${empId}')">-</button>
+                                    <button class="btn btn-sm btn-light border rounded-circle" onclick="updateQty('${item.id}', -1, '${empId}', '${item.product_id}', ${item.is_split_medicine ? 1 : 0})">-</button>
                                     <span id="qty-${item.id}" class="fw-medium mx-1">${item.qty}</span>
-                                    <button class="btn btn-sm btn-light border rounded-circle" onclick="updateQty('${item.id}', 1, '${empId}')">+</button>
+                                    <button class="btn btn-sm btn-light border rounded-circle" onclick="updateQty('${item.id}', 1, '${empId}', '${item.product_id}', ${item.is_split_medicine ? 1 : 0})">+</button>
                                 </div>
                                 <small class="text-muted">${escHtml(unit)}</small>
                             </td>
                             <td class="text-end">
-                                <form action="/remove_from_cart" method="POST">
+                                <form action="/remove_from_cart" method="POST"
+                                      data-product-id="${item.product_id}"
+                                      data-qty="${item.qty}"
+                                      data-is-split="${item.is_split_medicine ? '1' : '0'}">
                                     <input type="hidden" name="csrf_token" value="${csrfToken}">
                                     <input type="hidden" name="cart_id" value="${item.id}">
                                     <input type="hidden" name="emp_id" value="${empId}">
@@ -615,10 +658,12 @@
                 .then(res => res.json())
                 .then(json => {
                     if (json.success) {
-                        refreshCart();
-                        // Refresh รายการของ (stock คืน)
-                        currentPage = 1;
-                        fetchProducts(true);
+                        // คืน stock ใน product card
+                        const productId = form.dataset.productId;
+                        const qty = parseInt(form.dataset.qty) || 0;
+                        const isSplit = form.dataset.isSplit === '1';
+                        restoreProductStockDisplay(productId, qty, isSplit);
+                        refreshCart(); // อัปเดตตะกร้าอย่างเดียว ไม่ reset รายการของ
                     } else {
                         showCartToast(json.message || '❌ เกิดข้อผิดพลาด', false);
                         if (btn) btn.disabled = false;

@@ -38,7 +38,7 @@
                 <div class="card-header bg-white p-0">
                     <ul class="nav nav-tabs nav-fill border-0" id="stockTab" role="tablist">
                         <li class="nav-item">
-                            <button class="nav-link active py-3 fw-medium" id="old-tab" data-bs-toggle="tab" data-bs-target="#old" type="button">📦 รับสินค้าเข้า (เพิ่ม Lot ใหม่)</button>
+                            <button class="nav-link active py-3 fw-medium" id="old-tab" data-bs-toggle="tab" data-bs-target="#old" type="button">📦 รับของเข้า (เพิ่ม Lot ใหม่)</button>
                         </li>
                         <li class="nav-item">
                             <button class="nav-link py-3 fw-medium" id="new-tab" data-bs-toggle="tab" data-bs-target="#new" type="button">✨ ลงทะเบียนอุปกรณ์ใหม่</button>
@@ -128,7 +128,7 @@
                         <table class="table table-hover align-middle mb-0">
                             <thead class="table-light">
                                 <tr>
-                                    <th class="ps-3">รหัส / ชื่อสินค้า</th>
+                                    <th class="ps-3">รหัส / ชื่ออุปกรณ์</th>
                                     <th>Lot No.</th>
                                     <th class="text-center">คงเหลือ</th>
                                     <th>วันที่รับเข้า</th>
@@ -159,7 +159,7 @@
                                     {% endfor %}
                                 {% else %}
                                     <tr>
-                                        <td colspan="6" class="text-center py-4 text-muted">ยังไม่มีข้อมูล Lot สินค้าในคลัง</td>
+                                        <td colspan="6" class="text-center py-4 text-muted">ยังไม่มีข้อมูล Lot ในคลัง</td>
                                     </tr>
                                 {% endif %}
                             </tbody>

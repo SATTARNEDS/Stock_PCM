@@ -47,7 +47,7 @@
         </button>
 
         <button class="btn btn-sm btn-light text-danger border shadow-sm rounded-circle me-1 {% if item['is_active'] == 0 %}disabled{% endif %}"
-            title="ตัดจำหน่ายสินค้า (Scrap)" onclick="{% if item['is_active'] == 1 %}openWriteOffModal('{{ item['code'] }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %} disabled style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
+            title="ตัดจำหน่าย (Scrap)" onclick="{% if item['is_active'] == 1 %}openWriteOffModal('{{ item['code'] }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %} disabled style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
             <i class="fas fa-trash-alt"></i>
         </button>
     </td>
@@ -56,7 +56,7 @@
 <tr>
     <td colspan="7" class="text-center py-5 text-muted">
         <i class="fas fa-box-open fa-2x mb-3 opacity-25 d-block"></i>
-        ไม่พบข้อมูลสินค้าที่ค้นหา
+        ไม่พบข้อมูลที่ค้นหา
     </td>
 </tr>
 {% endfor %}
