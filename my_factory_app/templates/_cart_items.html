@@ -1,0 +1,58 @@
+{% if cart_items %}
+<div class="table-responsive">
+    <table class="table table-borderless align-middle">
+        <tbody>
+            {% for item in cart_items %}
+            {% set pkg = (item['package_unit']|default(item['unit'])|string|lower) %}
+            {% set is_medicine_item = (('ยา' in (item['category']|string)) or ('medicine' in (item['category']|string|lower)) or ('pharma' in (item['category']|string|lower)) or ('drug' in (item['category']|string|lower))) and (('pack' in pkg) or ('package' in pkg) or ('box' in pkg) or ('jar' in pkg) or ('bottle' in pkg) or ('แพ็ค' in pkg) or ('กล่อง' in pkg) or ('กระปุก' in pkg) or ('ขวด' in pkg)) %}
+            {% set display_unit = (item['base_unit'] if item['base_unit'] else 'เม็ด') if is_medicine_item else item['unit'] %}
+            <tr class="border-bottom">
+                <td>
+                    <div class="fw-medium">{{ item['name'] }}</div>
+                    <small class="text-muted">{{ item['code'] }}</small>
+                </td>
+                <td class="text-center" style="min-width: 120px;">
+                    <div class="d-flex align-items-center justify-content-center gap-2">
+                        <button class="btn btn-sm btn-light border rounded-circle"
+                            onclick="updateQty('{{ item['id'] }}', -1, '{{ user['emp_id'] }}')">-</button>
+                        <span id="qty-{{ item['id'] }}" class="fw-medium mx-1">{{ item['qty'] }}</span>
+                        <button class="btn btn-sm btn-light border rounded-circle"
+                            onclick="updateQty('{{ item['id'] }}', 1, '{{ user['emp_id'] }}')">+</button>
+                    </div>
+                    <small class="text-muted">{{ display_unit }}</small>
+                </td>
+                <td class="text-end">
+                    <form action="/remove_from_cart" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="cart_id" value="{{ item['id'] }}">
+                        <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
+                        <input type="hidden" name="product_id" value="{{ item['product_id'] }}">
+                        <input type="hidden" name="qty" value="{{ item['qty'] }}">
+                        <button type="submit" class="btn btn-link text-danger"><i class="fas fa-trash"></i></button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="text-center py-4 text-muted">
+    <i class="fas fa-shopping-cart fa-3x mb-3 opacity-25"></i>
+    <p>ยังไม่มีสินค้าในตะกร้า</p>
+</div>
+{% endif %}
+
+{% set medicine_in_cart = namespace(value=false) %}
+{% for c in cart_items %}
+    {% set c_pkg = (c['package_unit']|default(c['unit'])|string|lower) %}
+    {% if ((('ยา' in (c['category']|string)) or ('medicine' in (c['category']|string|lower)) or ('pharma' in (c['category']|string|lower)) or ('drug' in (c['category']|string|lower))) and (('pack' in c_pkg) or ('package' in c_pkg) or ('box' in c_pkg) or ('jar' in c_pkg) or ('bottle' in c_pkg) or ('แพ็ค' in c_pkg) or ('กล่อง' in c_pkg) or ('กระปุก' in c_pkg) or ('ขวด' in c_pkg))) %}
+        {% set medicine_in_cart.value = true %}
+    {% endif %}
+{% endfor %}
+{% if medicine_in_cart.value %}
+<div class="mb-2 mt-2" id="symptomField">
+    <label class="form-label small fw-medium">อาการผู้ป่วย (จำเป็นสำหรับการเบิกยา)</label>
+    <textarea name="symptom" class="form-control form-control-sm" rows="2" placeholder="เช่น ปวดหัว มีไข้ เจ็บคอ" required></textarea>
+</div>
+{% endif %}

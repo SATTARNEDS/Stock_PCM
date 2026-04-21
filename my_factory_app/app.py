@@ -228,7 +228,7 @@ def get_thailand_time():
     return datetime.now(tz)
 
 def is_medicine_product(product_row):
-    """True เมื่อสินค้าเป็นกลุ่มยา โดยหลีกเลี่ยง false positive เช่น น้ำยาล้างจาน"""
+    """True เมื่อของเป็นกลุ่มยา โดยหลีกเลี่ยง false positive เช่น น้ำยาล้างจาน"""
     category = str(product_row['category'] or '').strip().lower() if product_row else ''
     name = str(product_row['name'] or '').strip().lower() if product_row else ''
 
@@ -508,7 +508,7 @@ def menu():
     cat_rows = conn.execute(cat_query).fetchall()
     all_categories = [row['category'] for row in cat_rows]
 
-    # --- แก้ไขจุดที่ 2: ดึงสินค้าทั้งหมด (รวมที่สต็อกเป็น 0) ---
+    # --- แก้ไขจุดที่ 2: ดึงของทั้งหมด (รวมที่สต็อกเป็น 0) ---
     # เดิม: query = f'SELECT * FROM products WHERE stock > 0 {location_condition}'
     query = f'SELECT * FROM products WHERE 1=1 AND is_active = 1 {location_condition}' 
     params = []
@@ -548,15 +548,48 @@ def menu():
         ORDER BY l.timestamp DESC LIMIT 5
     ''', (emp_id,)).fetchall()
 
+    # --- การแจ้งเตือน: คำขอที่ถูกปฏิเสธใน 7 วันล่าสุด ---
+    dismissed_ids = set(session.get('dismissed_rejections', []))
+    rejected_rows = conn.execute(f'''
+        SELECT l.id, p.name as product_name, l.qty, p.unit, l.timestamp
+        FROM transaction_logs l
+        JOIN products p ON l.product_id = p.id
+        WHERE l.emp_id = ? AND l.status = 'Rejected'
+          AND l.action NOT LIKE 'withdraw%'
+          AND datetime({transaction_timestamp_expr('l')}) >= datetime('now', 'localtime', '-7 days')
+        ORDER BY l.timestamp DESC
+    ''', (emp_id,)).fetchall()
+    rejected_notifications = [dict(r) for r in rejected_rows if r['id'] not in dismissed_ids]
+
+    # --- การแจ้งเตือน: หมวกนิรภัยครบกำหนดเปลี่ยน (>= 23 เดือน) ---
+    helmet_due = False
+    if not session.get('helmet_due_dismissed'):
+        helmet_log = conn.execute(f'''
+            SELECT MAX(datetime({transaction_timestamp_expr('l')})) as last_issue
+            FROM transaction_logs l
+            WHERE l.emp_id = ?
+              AND (l.action LIKE '%หมวก%' OR l.action LIKE '%Helmet%')
+              AND l.status = 'Approved'
+        ''', (emp_id,)).fetchone()
+        if helmet_log and helmet_log['last_issue']:
+            try:
+                last_dt = datetime.strptime(helmet_log['last_issue'][:19], '%Y-%m-%d %H:%M:%S')
+                months_elapsed = (datetime.now() - last_dt).days / 30.0
+                helmet_due = months_elapsed >= 23
+            except Exception:
+                pass
+
     conn.close()
-    return render_template('menu.html', 
-                           user=user, 
-                           products=products_by_category, 
+    return render_template('menu.html',
+                           user=user,
+                           products=products_by_category,
                            all_categories=all_categories,
                            current_category=category_filter,
                            cart_items=cart_list,
                            open_cart=open_cart,
-                           history=history)
+                           history=history,
+                           rejected_notifications=rejected_notifications,
+                           helmet_due=helmet_due)
 
 @app.route('/add_to_cart', methods=['POST'])
 def add_to_cart():
@@ -565,18 +598,25 @@ def add_to_cart():
     qty_unit = request.form.get('qty_unit', 'package')  # ✅ NEW: base or package unit
     current_search = request.form.get('current_search', '')
     current_cat = request.form.get('current_cat', '')
+    is_ajax = request.form.get('_ajax') == '1'
 
     if not is_valid_user_session(emp_id):
+        if is_ajax:
+            return jsonify({'success': False, 'message': '⚠️ session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่'}), 401
         flash('⚠️ session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่', 'danger')
         return redirect(url_for('index'))
 
     try:
         qty = int(request.form.get('qty', 1))
     except (TypeError, ValueError):
+        if is_ajax:
+            return jsonify({'success': False, 'message': '❌ จำนวนที่เบิกไม่ถูกต้อง'}), 400
         flash('❌ จำนวนที่เบิกไม่ถูกต้อง', 'danger')
         return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
 
     if not product_id or qty <= 0:
+        if is_ajax:
+            return jsonify({'success': False, 'message': '❌ จำนวนที่เบิกต้องมากกว่า 0'}), 400
         flash('❌ จำนวนที่เบิกต้องมากกว่า 0', 'danger')
         return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
 
@@ -586,11 +626,15 @@ def add_to_cart():
     product = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
     if not user or not product:
         conn.close()
-        flash('❌ ไม่พบผู้ใช้หรือสินค้า', 'danger')
+        if is_ajax:
+            return jsonify({'success': False, 'message': '❌ ไม่พบผู้ใช้หรือของ'}), 400
+        flash('❌ ไม่พบผู้ใช้หรือของ', 'danger')
         return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
 
     if not user_can_access_product(user, product):
         conn.close()
+        if is_ajax:
+            return jsonify({'success': False, 'message': '❌ คุณไม่มีสิทธิ์เบิกรายการนี้'}), 403
         flash('❌ คุณไม่มีสิทธิ์เบิกรายการนี้', 'danger')
         return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
 
@@ -600,6 +644,8 @@ def add_to_cart():
     if split_medicine:
         if qty_unit not in ('base', 'package'):
             conn.close()
+            if is_ajax:
+                return jsonify({'success': False, 'message': '❌ หน่วยเบิกยาไม่ถูกต้อง'}), 400
             flash('❌ หน่วยเบิกยาไม่ถูกต้อง', 'danger')
             return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
 
@@ -630,7 +676,11 @@ def add_to_cart():
 
             conn.execute('UPDATE products SET reserved_stock = reserved_stock + ? WHERE id = ?', (qty_to_reserve, product_id))
             conn.commit()
-            flash(f'🛒 เพิ่ม {product["name"]} ({qty} {requested_unit_label}) เรียบร้อย', 'success')
+            success_msg = f'🛒 เพิ่ม {product["name"]} ({qty} {requested_unit_label}) เรียบร้อย'
+            if is_ajax:
+                conn.close()
+                return jsonify({'success': True, 'message': success_msg})
+            flash(success_msg, 'success')
         else:
             stock_update = conn.execute(
                 'UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ? AND stock >= ?',
@@ -638,8 +688,10 @@ def add_to_cart():
             )
             if stock_update.rowcount == 0:
                 conn.rollback()
-                flash('❌ ของหมดหรือมีไม่พอ', 'danger')
                 conn.close()
+                if is_ajax:
+                    return jsonify({'success': False, 'message': '❌ ของหมดหรือมีไม่พอ'}), 400
+                flash('❌ ของหมดหรือมีไม่พอ', 'danger')
                 return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
 
             existing_item = conn.execute('SELECT * FROM carts WHERE emp_id = ? AND product_id = ?', (emp_id, product_id)).fetchone()
@@ -649,13 +701,37 @@ def add_to_cart():
             else:
                 conn.execute('INSERT INTO carts (emp_id, product_id, qty) VALUES (?, ?, ?)', (emp_id, product_id, qty_to_reserve))
             conn.commit()
-            flash(f'🛒 เพิ่ม {product["name"]} ({qty} {requested_unit_label}) เรียบร้อย', 'success')
+            success_msg = f'🛒 เพิ่ม {product["name"]} ({qty} {requested_unit_label}) เรียบร้อย'
+            if is_ajax:
+                conn.close()
+                return jsonify({'success': True, 'message': success_msg})
+            flash(success_msg, 'success')
     else:
         conn.rollback()
+        if is_ajax:
+            conn.close()
+            return jsonify({'success': False, 'message': '❌ ของหมดหรือมีไม่พอ'}), 400
         flash('❌ ของหมดหรือมีไม่พอ', 'danger')
-    
+
     conn.close()
     return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
+
+@app.route('/api/dismiss_notification', methods=['POST'])
+def dismiss_notification():
+    """เก็บ ID คำขอที่ถูกปฏิเสธที่ผู้ใช้กด dismiss แล้ว หรือ dismiss แจ้งเตือนหมวก"""
+    if not session.get('user_id'):
+        return jsonify({'success': False}), 401
+    notif_type = request.form.get('type', 'rejection')
+    if notif_type == 'helmet':
+        session['helmet_due_dismissed'] = True
+    else:
+        log_id = request.form.get('log_id', type=int)
+        if log_id:
+            dismissed = list(session.get('dismissed_rejections', []))
+            if log_id not in dismissed:
+                dismissed.append(log_id)
+            session['dismissed_rejections'] = dismissed
+    return jsonify({'success': True})
 
 @app.route('/api/get_product_unit_info', methods=['GET'])  # ✅ NEW: Get unit info for AJAX
 def api_get_product_unit_info():
@@ -709,8 +785,11 @@ def remove_from_cart():
     emp_id = (request.form.get('emp_id') or '').strip()
     current_search = request.form.get('current_search', '')
     current_cat = request.form.get('current_cat', '')
+    is_ajax = request.form.get('_ajax') == '1'
 
     if not is_valid_user_session(emp_id):
+        if is_ajax:
+            return jsonify({'success': False, 'message': '⚠️ session ไม่ถูกต้อง'}), 401
         flash('⚠️ session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่', 'danger')
         return redirect(url_for('index'))
 
@@ -719,6 +798,8 @@ def remove_from_cart():
     cart_item = conn.execute('SELECT * FROM carts WHERE id = ? AND emp_id = ?', (cart_id, emp_id)).fetchone()
     if not cart_item:
         conn.close()
+        if is_ajax:
+            return jsonify({'success': False, 'message': '❌ ไม่พบรายการในตะกร้า'}), 400
         flash('❌ ไม่พบรายการในตะกร้า', 'danger')
         return redirect(url_for('menu', emp_id=emp_id, open_cart='true', search=current_search, category=current_cat))
 
@@ -732,8 +813,13 @@ def remove_from_cart():
     else:
         conn.execute('UPDATE products SET stock = stock + ?, reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (qty, qty, cart_item['product_id']))
     conn.commit()
+
+    if is_ajax:
+        new_count = conn.execute('SELECT COUNT(*) FROM carts WHERE emp_id = ?', (emp_id,)).fetchone()[0]
+        conn.close()
+        return jsonify({'success': True, 'new_count': new_count})
+
     conn.close()
-    
     return redirect(url_for('menu', emp_id=emp_id, open_cart='true', search=current_search, category=current_cat))
     
 @app.route('/confirm_withdrawal', methods=['POST'])
@@ -761,7 +847,7 @@ def confirm_withdrawal():
 
     if any(int(item['qty'] or 0) <= 0 for item in cart_items):
         conn.close()
-        flash('❌ พบจำนวนสินค้าในตะกร้าไม่ถูกต้อง กรุณาลบและเลือกใหม่', 'danger')
+        flash('❌ พบจำนวนของในตะกร้าไม่ถูกต้อง กรุณาลบและเลือกใหม่', 'danger')
         return redirect(url_for('menu', emp_id=emp_id, open_cart='true'))
     
     has_medicine = any(is_split_tablet_medicine(item) for item in cart_items)
@@ -911,7 +997,7 @@ def update_cart_qty():
                     if stock_update.rowcount == 0:
                         conn.rollback()
                         conn.close()
-                        return jsonify({'success': False, 'message': 'สินค้าในคลังไม่พอ'}), 409
+                        return jsonify({'success': False, 'message': 'ของในคลังไม่พอ'}), 409
                 else:
                     conn.execute('UPDATE products SET stock = stock - ?, reserved_stock = MAX(0, reserved_stock + ?) WHERE id = ?', 
                                  (diff, diff, item['product_id']))
@@ -919,12 +1005,85 @@ def update_cart_qty():
             conn.commit()
             res = {'success': True}
         else:
-            res = {'success': False, 'message': 'สินค้าในคลังไม่พอ'}
+            res = {'success': False, 'message': 'ของในคลังไม่พอ'}
     else:
         res = {'success': False, 'message': 'ไม่พบรายการในตะกร้า'}
     
     conn.close()
     return jsonify(res)
+
+@app.route('/api/get_cart')
+def api_get_cart():
+    emp_id = request.args.get('emp_id', '').strip()
+    if not is_valid_user_session(emp_id):
+        return jsonify({'success': False}), 401
+
+    conn = get_db_connection()
+    cart_items = conn.execute('''
+        SELECT c.id, c.product_id, c.qty,
+               p.name, p.code, p.category, p.unit, p.base_unit, p.package_unit, p.conversion_rate
+        FROM carts c JOIN products p ON c.product_id = p.id
+        WHERE c.emp_id = ?
+    ''', (emp_id,)).fetchall()
+    conn.close()
+
+    items = [dict(row) for row in cart_items]
+    for item in items:
+        item['is_split_medicine'] = is_split_tablet_medicine(item)
+    return jsonify({'success': True, 'count': len(items), 'items': items})
+
+
+@app.route('/api/get_history')
+def api_get_history():
+    emp_id = request.args.get('emp_id', '').strip()
+    page = request.args.get('page', 1, type=int)
+    if not is_valid_user_session(emp_id):
+        return jsonify({'success': False}), 401
+
+    per_page = 5
+    offset = (page - 1) * per_page
+
+    conn = get_db_connection()
+    total = conn.execute(
+        'SELECT COUNT(*) FROM transaction_logs WHERE emp_id = ?', (emp_id,)
+    ).fetchone()[0]
+
+    rows = conn.execute('''
+        SELECT l.id, l.action, l.qty, l.qty_base_unit, l.status, l.note, l.timestamp,
+               p.name as product_name, p.unit, p.category, p.base_unit,
+               p.package_unit, p.conversion_rate
+        FROM transaction_logs l
+        JOIN products p ON l.product_id = p.id
+        WHERE l.emp_id = ?
+        ORDER BY l.timestamp DESC
+        LIMIT ? OFFSET ?
+    ''', (emp_id, per_page, offset)).fetchall()
+    conn.close()
+
+    items = []
+    for row in rows:
+        r = dict(row)
+        is_med = is_split_tablet_medicine(r)
+        note = r.get('note') or ''
+        symptom = ''
+        if 'อาการ: ' in note:
+            parts = note.split(' | ', 1)
+            symptom = parts[0].replace('อาการ: ', '', 1)
+        r['is_split_medicine'] = is_med
+        r['symptom'] = symptom
+        r['display_qty'] = r['qty_base_unit'] if is_med and r.get('qty_base_unit') else r['qty']
+        r['display_unit'] = (r['base_unit'] or 'เม็ด') if is_med and r.get('qty_base_unit') else (r['unit'] or '')
+        items.append(r)
+
+    total_pages = math.ceil(total / per_page) if total > 0 else 1
+    return jsonify({
+        'success': True,
+        'items': items,
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'total_pages': total_pages
+    })
 
 @app.route('/api/search_products')
 def api_search_products():
@@ -1368,7 +1527,7 @@ def approve_request(log_id):
 
         if remaining > 0:
             conn.rollback()
-            flash('❌ จำนวนสินค้าใน lot ไม่พอสำหรับการอนุมัติ', 'danger')
+            flash('❌ จำนวนของใน lot ไม่พอสำหรับการอนุมัติ', 'danger')
             return redirect(url_for('admin_dashboard'))
 
         thai_now = get_thailand_time().strftime('%d/%m/%Y %H:%M:%S')
@@ -1546,7 +1705,7 @@ def toggle_product_status(product_id):
         conn.close()
         return jsonify({'success': True, 'new_status': new_status})
     conn.close()
-    return jsonify({'success': False, 'message': 'ไม่พบสินค้า'})
+    return jsonify({'success': False, 'message': 'ไม่พบของ'})
 
 @app.route('/admin/add_product', methods=['POST'])
 def add_product():
@@ -1565,16 +1724,16 @@ def add_product():
     expiry_date = standardize_date(request.form.get('expiry_date', ''))
 
     if not re.fullmatch(r'[A-Z0-9_-]{2,40}', code):
-        return jsonify({'success': False, 'message': 'รหัสสินค้าไม่ถูกต้อง'}), 400
+        return jsonify({'success': False, 'message': 'รหัสของไม่ถูกต้อง'}), 400
     if not name or not category or not unit:
-        return jsonify({'success': False, 'message': 'กรุณากรอกข้อมูลสินค้าให้ครบ'}), 400
+        return jsonify({'success': False, 'message': 'กรุณากรอกข้อมูลของให้ครบ'}), 400
     if location not in ('PC1', 'Coil Center', 'General'):
         return jsonify({'success': False, 'message': 'สถานที่เก็บไม่ถูกต้อง'}), 400
 
     conn = get_db_connection()
 
     try:
-        # 2. เพิ่มสินค้าลงตารางหลัก พร้อมบันทึกข้อมูล Lot ถ้ามี
+        # 2. เพิ่มของลงตารางหลัก พร้อมบันทึกข้อมูล Lot ถ้ามี
         if stock > 0:
             from datetime import datetime
             lot_number = datetime.now().strftime('%d%m%Y') + "-NEW"
@@ -1608,11 +1767,11 @@ def add_product():
         return jsonify({'success': True})
         
     except sqlite3.IntegrityError:
-        return jsonify({'success': False, 'message': 'รหัสสินค้านี้มีซ้ำในระบบแล้ว'}), 400
+        return jsonify({'success': False, 'message': 'รหัสของชิ้นนี้มีซ้ำในระบบแล้ว'}), 400
     except Exception as e:
         conn.rollback()
         print(f'Add product error: {e}')
-        return jsonify({'success': False, 'message': 'ไม่สามารถบันทึกข้อมูลสินค้าได้'}), 500
+        return jsonify({'success': False, 'message': 'ไม่สามารถบันทึกข้อมูลของได้'}), 500
     finally:
         conn.close()
 
@@ -1646,7 +1805,7 @@ def export_excel():
         location_filter = "" # ดึงทั้งหมด
         filename = "Inventory_ALL.xlsx"
         
-    # 2. Query ดึงข้อมูลสินค้าและ Lot ที่เกี่ยวข้อง
+    # 2. Query ดึงข้อมูลของและ Lot ที่เกี่ยวข้อง
     query = f'''
         SELECT 
             p.code as 'รหัสของ',
@@ -2018,7 +2177,7 @@ def edit_product():
     expiry_date = standardize_date(request.form.get('expiry_date', ''))
 
     if not code or not name or not unit:
-        return jsonify({'success': False, 'message': 'ข้อมูลสินค้าไม่ครบถ้วน'}), 400
+        return jsonify({'success': False, 'message': 'ข้อมูลของไม่ครบถ้วน'}), 400
 
     conn = get_db_connection()
     try:
@@ -2032,7 +2191,7 @@ def edit_product():
     except Exception as e:
         conn.rollback()
         print(f'Edit product error: {e}')
-        return jsonify({'success': False, 'message': 'ไม่สามารถแก้ไขข้อมูลสินค้าได้'}), 500
+        return jsonify({'success': False, 'message': 'ไม่สามารถแก้ไขข้อมูลของได้'}), 500
     finally:
         conn.close()
 
@@ -2153,7 +2312,7 @@ def filter_logs():
     total_logs = conn.execute(count_query).fetchone()[0]
     total_pages = math.ceil(total_logs / per_page) #
 
-    # 3. Query ข้อมูล Log พร้อม Join กับ Users และ Products เพื่อดึงชื่อพนักงานและชื่อสินค้า
+    # 3. Query ข้อมูล Log พร้อม Join กับ Users และ Products เพื่อดึงชื่อพนักงานและชื่อของ
     query = f'''
         SELECT l.*, 
                COALESCE(u.name, SUBSTR(l.emp_id, 7)) as emp_name, 
@@ -2349,7 +2508,7 @@ def clear_system_data():
             # 1. ล้างตาราง Lot
             conn.execute("DELETE FROM product_lots")
             conn.execute("DELETE FROM sqlite_sequence WHERE name='product_lots'")
-            # 2. รีเซ็ตจำนวนสินค้าและวันหมดอายุในตารางหลักให้กลับเป็นศูนย์
+            # 2. รีเซ็ตจำนวนของและวันหมดอายุในตารางหลักให้กลับเป็นศูนย์
             conn.execute("UPDATE products SET stock = 0, expiry_date = ''")
 
         conn.commit()
@@ -2728,7 +2887,7 @@ def scheduled_daily_alert():
         expiring_items = conn.execute(expiry_query).fetchall()
 
         # ==========================================
-        # 2. เช็คหมวกเซฟตี้ (แยกตามพนักงาน, สินค้า และ Lot)
+        # 2. เช็คหมวกเซฟตี้ (แยกตามพนักงาน, ของ และ Lot)
         # ==========================================
         helmet_query = '''
             SELECT 
@@ -2948,8 +3107,8 @@ def export_monthly_excel():
             l.timestamp as "วัน/เวลา",
             u.name as "ผู้เบิก",
             u.department as "แผนก",
-            p.code as "รหัสสินค้า",
-            p.name as "รายการสินค้า",
+            p.code as "รหัสของ",
+            p.name as "รายการของ",
             l.qty as "จำนวน",
             p.unit as "หน่วย",
             l.status as "สถานะ"

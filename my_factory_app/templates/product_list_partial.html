@@ -21,9 +21,9 @@
                 <div class="text-muted extra-small" style="font-size: 0.75rem;">รหัส: {{ item['code'] }}</div>
                 
                 {% if item['stock'] <= 0 %}
-                    <span class="out-of-stock-label">● สินค้าหมด</span>
+                    <span class="out-of-stock-label" id="stock-display-{{ item['id'] }}">● ของหมด</span>
                 {% else %}
-                    <span class="text-primary fw-medium" style="font-size: 0.85rem;">
+                    <span class="text-primary fw-medium" style="font-size: 0.85rem;" id="stock-display-{{ item['id'] }}">
                         {% if split_medicine %}
                         คงเหลือ: {{ item['frontend_stock_text'] }}
                         <br><small class="text-muted">({{ item['backend_stock_text'] }})</small>
@@ -35,7 +35,11 @@
             </div>
             
             <div class="text-end">
-                <form action="/add_to_cart" method="POST" class="d-flex gap-1">
+                <form action="/add_to_cart" method="POST" class="d-flex gap-1"
+                      data-product-id="{{ item['id'] }}"
+                      data-product-unit="{{ item['base_unit_label']|e if split_medicine else item['unit']|e }}"
+                      data-product-stock="{{ item['stock_base_total'] if split_medicine else item['stock'] }}"
+                      data-is-split="{{ '1' if split_medicine else '0' }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
                     <input type="hidden" name="product_id" value="{{ item['id'] }}">

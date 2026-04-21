@@ -170,6 +170,37 @@
         {% endif %}
         {% endwith %}
 
+        {# --- แจ้งเตือนหมวกนิรภัยครบกำหนดเปลี่ยน --- #}
+        {% if helmet_due %}
+        <div class="alert alert-warning d-flex align-items-start gap-2 rounded-3 border-0 shadow-sm py-2 mb-3 small" id="helmetAlert">
+            <i class="fas fa-hard-hat mt-1"></i>
+            <div class="flex-grow-1">
+                <strong>แจ้งเตือน:</strong> หมวกนิรภัยของคุณครบกำหนดเปลี่ยนแล้ว (ทุก 2 ปี) กรุณาทำคำขอเบิกหมวกใหม่
+            </div>
+            <button type="button" class="btn-close btn-sm ms-auto" onclick="dismissNotification('helmet', null, 'helmetAlert')"></button>
+        </div>
+        {% endif %}
+
+        {# --- แจ้งเตือนคำขอที่ถูกปฏิเสธ --- #}
+        {% for notif in rejected_notifications %}
+        <div class="alert alert-danger d-flex align-items-start gap-2 rounded-3 border-0 shadow-sm py-2 mb-2 small" id="rejection-{{ notif.id }}">
+            <i class="fas fa-times-circle mt-1"></i>
+            <div class="flex-grow-1">
+                <strong>คำขอเบิกถูกปฏิเสธ:</strong> {{ notif.product_name }}
+                ({{ notif.qty }} {{ notif.unit }}) — {{ notif.timestamp }}
+            </div>
+            <button type="button" class="btn-close btn-sm ms-auto" onclick="dismissNotification('rejection', {{ notif.id }}, 'rejection-{{ notif.id }}')"></button>
+        </div>
+        {% endfor %}
+
+        {# --- Toast สำหรับ AJAX add-to-cart --- #}
+        <div id="cartToast" class="toast align-items-center border-0 shadow position-fixed bottom-0 start-0 m-3" role="alert" style="z-index:9999;">
+            <div class="d-flex">
+                <div class="toast-body small" id="cartToastBody"></div>
+                <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+
         <div class="row g-3" id="productDisplayArea">
             {% include 'product_list_partial.html' %}
         </div>
@@ -182,11 +213,9 @@
     <div class="cart-float">
         <button class="btn btn-warning shadow-lg btn-cart" data-bs-toggle="modal" data-bs-target="#cartModal">
             <i class="fas fa-shopping-basket fa-lg"></i>
-            {% if cart_items %}
-            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+            <span id="cartBadge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" {% if not cart_items %}style="display:none"{% endif %}>
                 {{ cart_items|length }}
             </span>
-            {% endif %}
         </button>
     </div>
 
@@ -197,73 +226,15 @@
                     <h5 class="modal-title fw-medium"><i class="fas fa-cart-arrow-down me-2"></i>ตะกร้าของฉัน</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body p-3">
-                    {% if cart_items %}
-                    <div class="table-responsive">
-                        <table class="table table-borderless align-middle">
-                            <tbody>
-                                {% for item in cart_items %}
-                                {% set pkg = (item['package_unit']|default(item['unit'])|string|lower) %}
-                                {% set is_medicine_item = (('ยา' in (item['category']|string)) or ('medicine' in (item['category']|string|lower)) or ('pharma' in (item['category']|string|lower)) or ('drug' in (item['category']|string|lower))) and (('pack' in pkg) or ('package' in pkg) or ('box' in pkg) or ('jar' in pkg) or ('bottle' in pkg) or ('แพ็ค' in pkg) or ('กล่อง' in pkg) or ('กระปุก' in pkg) or ('ขวด' in pkg)) %}
-                                {% set display_unit = (item['base_unit'] if item['base_unit'] else 'เม็ด') if is_medicine_item else item['unit'] %}
-                                <tr class="border-bottom">
-                                    <td>
-                                        <div class="fw-medium">{{ item['name'] }}</div>
-                                        <small class="text-muted">{{ item['code'] }}</small>
-                                    </td>
-                                    <td class="text-center" style="min-width: 120px;">
-                                        <div class="d-flex align-items-center justify-content-center gap-2">
-                                            <button class="btn btn-sm btn-light border rounded-circle"
-                                                onclick="updateQty('{{ item['id'] }}', -1, '{{ user['emp_id'] }}')">-</button>
-                                            <span id="qty-{{ item['id'] }}" class="fw-medium mx-1">{{ item['qty']
-                                                }}</span>
-                                            <button class="btn btn-sm btn-light border rounded-circle"
-                                                onclick="updateQty('{{ item['id'] }}', 1, '{{ user['emp_id'] }}')">+</button>
-                                        </div>
-                                        <small class="text-muted">{{ display_unit }}</small>
-                                    </td>
-                                    <td class="text-end">
-                                        <form action="/remove_from_cart" method="POST">
-                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                            <input type="hidden" name="cart_id" value="{{ item['id'] }}">
-                                            <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
-                                            <input type="hidden" name="product_id" value="{{ item['product_id'] }}">
-                                            <input type="hidden" name="qty" value="{{ item['qty'] }}">
-                                            <button type="submit" class="btn btn-link text-danger"><i
-                                                    class="fas fa-trash"></i></button>
-                                        </form>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% else %}
-                    <div class="text-center py-4 text-muted">
-                        <i class="fas fa-shopping-cart fa-3x mb-3 opacity-25"></i>
-                        <p>ยังไม่มีสินค้าในตะกร้า</p>
-                    </div>
-                    {% endif %}
+                <div class="modal-body p-3" id="cartModalBody">
+                    <div class="text-center py-3"><span class="spinner-border spinner-border-sm"></span></div>
                 </div>
                 <div class="modal-footer border-0">
-                    <form action="/confirm_withdrawal" method="POST" class="w-100">
+                    <form action="/confirm_withdrawal" method="POST" class="w-100" id="confirmWithdrawalForm">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
-                        {% set medicine_in_cart = namespace(value=false) %}
-                        {% for c in cart_items %}
-                            {% set c_pkg = (c['package_unit']|default(c['unit'])|string|lower) %}
-                            {% if ((('ยา' in (c['category']|string)) or ('medicine' in (c['category']|string|lower)) or ('pharma' in (c['category']|string|lower)) or ('drug' in (c['category']|string|lower))) and (('pack' in c_pkg) or ('package' in c_pkg) or ('box' in c_pkg) or ('jar' in c_pkg) or ('bottle' in c_pkg) or ('แพ็ค' in c_pkg) or ('กล่อง' in c_pkg) or ('กระปุก' in c_pkg) or ('ขวด' in c_pkg))) %}
-                                {% set medicine_in_cart.value = true %}
-                            {% endif %}
-                        {% endfor %}
-                        {% if medicine_in_cart.value %}
-                        <div class="mb-2">
-                            <label class="form-label small fw-medium">อาการผู้ป่วย (จำเป็นสำหรับการเบิกยา)</label>
-                            <textarea name="symptom" class="form-control form-control-sm" rows="2" placeholder="เช่น ปวดหัว มีไข้ เจ็บคอ" required></textarea>
-                        </div>
-                        {% endif %}
-                        <button type="submit" class="btn btn-success w-100 rounded-pill py-3 fw-medium" {% if not
-                            cart_items %}disabled{% endif %}>
+                        <div id="symptomFieldWrapper"></div>
+                        <button type="submit" class="btn btn-success w-100 rounded-pill py-3 fw-medium" id="confirmWithdrawalBtn" disabled>
                             ยืนยันการเบิกพัสดุ
                         </button>
                     </form>
@@ -273,40 +244,19 @@
     </div>
 
     <div class="modal fade" id="historyModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content border-0 rounded-4">
                 <div class="modal-header">
-                    <h5 class="modal-title fw-medium">🕒 ประวัติล่าสุด</h5>
+                    <h5 class="modal-title fw-medium">🕒 ประวัติการเบิก</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body p-0">
-                    <div class="list-group list-group-flush">
-                        {% if history %}
-                            {% for h in history %}
-                            {% set h_pkg = (h['package_unit']|default(h['unit'])|string|lower) %}
-                            {% set is_medicine_history = (('ยา' in (h['category']|string)) or ('medicine' in (h['category']|string|lower)) or ('pharma' in (h['category']|string|lower)) or ('drug' in (h['category']|string|lower))) and (('pack' in h_pkg) or ('package' in h_pkg) or ('box' in h_pkg) or ('jar' in h_pkg) or ('bottle' in h_pkg) or ('แพ็ค' in h_pkg) or ('กล่อง' in h_pkg) or ('กระปุก' in h_pkg) or ('ขวด' in h_pkg)) %}
-                            {% set history_qty = h['qty_base_unit'] if is_medicine_history and h['qty_base_unit'] is not none else h['qty'] %}
-                            {% set history_unit = (h['base_unit'] if h['base_unit'] else 'เม็ด') if is_medicine_history else h['unit'] %}
-                            <div class="list-group-item p-3">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <div>
-                                        <div class="fw-medium">{{ h['product_name'] }}</div>
-                                        <small class="text-muted">{{ h['timestamp'] }}</small>
-                                    </div>
-                                    <span
-                                        class="badge {% if h['status'] == 'Approved' %}bg-success{% elif h['status'] == 'Pending' %}bg-warning text-dark{% else %}bg-danger{% endif %} rounded-pill">
-                                        {{ history_qty }} {{ history_unit }}
-                                    </span>
-                                </div>
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                            <div class="text-center p-4 text-muted">
-                                <i class="fas fa-clock fa-2x mb-2"></i>
-                                <div>ยังไม่มีประวัติล่าสุด</div>
-                            </div>
-                        {% endif %}
-                    </div>
+                <div class="modal-body p-0" id="historyModalBody">
+                    <div class="text-center py-4"><span class="spinner-border spinner-border-sm"></span></div>
+                </div>
+                <div class="modal-footer d-flex justify-content-between align-items-center py-2" id="historyModalPager" style="display:none!important">
+                    <button class="btn btn-sm btn-outline-secondary" id="historyPrevBtn" onclick="loadHistory(historyCurrentPage - 1)">‹ ก่อนหน้า</button>
+                    <small class="text-muted" id="historyPageLabel"></small>
+                    <button class="btn btn-sm btn-outline-secondary" id="historyNextBtn" onclick="loadHistory(historyCurrentPage + 1)">ถัดไป ›</button>
                 </div>
             </div>
         </div>
@@ -393,13 +343,6 @@
             fetchProducts(false);
         });
 
-        window.onload = () => {
-            updateCategoryButtons();
-            if (new URLSearchParams(window.location.search).get('open_cart') === 'true') {
-                new bootstrap.Modal(document.getElementById('cartModal')).show();
-            }
-        };
-
         // Update Qty in Cart
         function updateQty(cartId, delta, empId) {
             const qtyElem = document.getElementById('qty-' + cartId);
@@ -428,7 +371,7 @@
             e.preventDefault();
             Swal.fire({
                 title: 'ยืนยันการเบิก?',
-                text: "ข้อมูลจะถูกส่งไปยังแผนกคลังสินค้า",
+                text: "ข้อมูลจะถูกส่งไปยังแผนก GA เพื่อดำเนินการต่อ",
                 icon: 'question',
                 showCancelButton: true,
                 confirmButtonText: 'ยืนยัน',
@@ -441,7 +384,9 @@
             updateCategoryButtons();
             fetchProducts(true);
             if (new URLSearchParams(window.location.search).get('open_cart') === 'true') {
-                new bootstrap.Modal(document.getElementById('cartModal')).show();
+                refreshCart();
+                const cartModal = new bootstrap.Modal(document.getElementById('cartModal'));
+                cartModal.show();
             }
         };
 
@@ -464,7 +409,7 @@
                     }
                 });
             } else {
-                // ไม่ใช่ยา: ซ่อน preview และใช้หน่วยหลักสินค้า
+                // ไม่ใช่ยา: ซ่อน preview และใช้หน่วยหลักของ
                 qtyUnitInput.value = 'package';
                 if (previewDiv) previewDiv.style.display = 'none';
                 return;
@@ -495,6 +440,264 @@
                     previewDiv.style.display = 'none';
                 });
         }
+
+        // ====== AJAX Add-to-Cart (ไม่เด้งหน้า) ======
+        document.addEventListener('submit', function(e) {
+            const form = e.target.closest('form[action="/add_to_cart"]');
+            if (!form) return;
+            e.preventDefault();
+
+            // เพิ่ม hidden fields สำหรับ context
+            const setHidden = (name, value) => {
+                let el = form.querySelector(`[name="${name}"]`);
+                if (!el) { el = document.createElement('input'); el.type = 'hidden'; el.name = name; form.appendChild(el); }
+                el.value = value;
+            };
+            setHidden('_ajax', '1');
+            setHidden('current_search', document.getElementById('searchInput') ? document.getElementById('searchInput').value.trim() : '');
+            setHidden('current_cat', typeof currentCategory !== 'undefined' ? currentCategory : '');
+
+            const data = new FormData(form);
+            const btn = form.querySelector('button[type="submit"]');
+            if (btn) btn.disabled = true;
+
+            fetch('/add_to_cart', { method: 'POST', body: data })
+                .then(res => res.json())
+                .then(json => {
+                    showCartToast(json.message, json.success);
+                    if (json.success) {
+                        // อัปเดต badge ตระกร้า
+                        updateCartBadge(1);
+                        // อัปเดต stock เฉพาะ card ที่กด (ไม่ reload หน้า ไม่เสียตำแหน่ง scroll)
+                        const productId = form.dataset.productId;
+                        const qtyAdded = parseInt(form.querySelector('[name="qty"]')?.value) || 1;
+                        updateProductStockDisplay(productId, qtyAdded, form);
+                    }
+                })
+                .catch(() => showCartToast('❌ เกิดข้อผิดพลาด ลองใหม่อีกครั้ง', false))
+                .finally(() => { if (btn) btn.disabled = false; });
+        });
+
+        function showCartToast(msg, success) {
+            const toastEl = document.getElementById('cartToast');
+            const toastBody = document.getElementById('cartToastBody');
+            if (!toastEl || !toastBody) return;
+            toastBody.textContent = msg;
+            toastEl.className = 'toast align-items-center border-0 shadow position-fixed bottom-0 start-0 m-3 '
+                + (success ? 'text-bg-success' : 'text-bg-danger');
+            const toast = new bootstrap.Toast(toastEl, { delay: 3000 });
+            toast.show();
+        }
+
+        function updateCartBadge(delta) {
+            const badge = document.getElementById('cartBadge');
+            if (!badge) return;
+            let count = parseInt(badge.textContent.trim()) || 0;
+            count = Math.max(0, count + delta);
+            badge.textContent = count;
+            badge.style.display = count > 0 ? '' : 'none';
+        }
+
+        function updateProductStockDisplay(productId, qtyAdded, form) {
+            if (!productId) return;
+            const stockEl = document.getElementById(`stock-display-${productId}`);
+            if (!stockEl) return;
+            // อ่าน stock ปัจจุบันจาก data attribute ของ form
+            let currentStock = parseInt(form?.dataset.productStock ?? stockEl.dataset.stock ?? '0');
+            const unit = form?.dataset.productUnit || '';
+            const newStock = Math.max(0, currentStock - qtyAdded);
+            // อัปเดต data attribute
+            if (form) form.dataset.productStock = newStock;
+            const card = stockEl.closest('.product-card');
+            if (newStock <= 0) {
+                stockEl.className = 'out-of-stock-label';
+                stockEl.innerHTML = '● ของหมด';
+                if (card) card.classList.add('out-of-stock');
+                // disable ปุ่ม + และ input
+                const addBtn = form?.querySelector('button[type="submit"]');
+                const qtyInput = form?.querySelector('[name="qty"]');
+                if (addBtn) addBtn.disabled = true;
+                if (qtyInput) qtyInput.disabled = true;
+            } else {
+                stockEl.className = 'text-primary fw-medium';
+                stockEl.style.fontSize = '0.85rem';
+                stockEl.innerHTML = `คงเหลือ: ${newStock} ${escHtml(unit)}`;
+                // อัปเดต max ของ input
+                const qtyInput = form?.querySelector('[name="qty"]');
+                if (qtyInput) qtyInput.max = newStock;
+            }
+        }
+
+        // Refresh cart modal content via AJAX
+        function refreshCart() {
+            fetch(`/api/get_cart?emp_id=${encodeURIComponent(empId)}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.success) { console.warn('refreshCart: not success', data); return; }
+                    const body = document.getElementById('cartModalBody');
+                    if (!body) return;
+
+                    // อัปเดต badge
+                    const badge = document.getElementById('cartBadge');
+                    if (badge) {
+                        badge.textContent = data.count;
+                        badge.style.display = data.count > 0 ? '' : 'none';
+                    }
+                    // อัปเดตปุ่ม confirm
+                    const confirmBtn = document.getElementById('confirmWithdrawalBtn');
+                    if (confirmBtn) confirmBtn.disabled = data.count === 0;
+
+                    if (data.count === 0) {
+                        body.innerHTML = '<div class="text-center py-4 text-muted"><i class="fas fa-shopping-cart fa-3x mb-3 opacity-25"></i><p>ยังไม่มีของในตะกร้า</p></div>';
+                        document.getElementById('symptomFieldWrapper').innerHTML = '';
+                        return;
+                    }
+
+                    // สร้าง HTML จาก JSON
+                    let hasMed = false;
+                    let rows = data.items.map(item => {
+                        const isMed = !!item.is_split_medicine;
+                        if (isMed) hasMed = true;
+                        const unit = isMed ? (item.base_unit || 'เม็ด') : (item.unit || '');
+                        return `<tr class="border-bottom">
+                            <td><div class="fw-medium">${escHtml(item.name)}</div><small class="text-muted">${escHtml(item.code)}</small></td>
+                            <td class="text-center" style="min-width:120px;">
+                                <div class="d-flex align-items-center justify-content-center gap-2">
+                                    <button class="btn btn-sm btn-light border rounded-circle" onclick="updateQty('${item.id}', -1, '${empId}')">-</button>
+                                    <span id="qty-${item.id}" class="fw-medium mx-1">${item.qty}</span>
+                                    <button class="btn btn-sm btn-light border rounded-circle" onclick="updateQty('${item.id}', 1, '${empId}')">+</button>
+                                </div>
+                                <small class="text-muted">${escHtml(unit)}</small>
+                            </td>
+                            <td class="text-end">
+                                <form action="/remove_from_cart" method="POST">
+                                    <input type="hidden" name="csrf_token" value="${csrfToken}">
+                                    <input type="hidden" name="cart_id" value="${item.id}">
+                                    <input type="hidden" name="emp_id" value="${empId}">
+                                    <input type="hidden" name="product_id" value="${item.product_id}">
+                                    <input type="hidden" name="qty" value="${item.qty}">
+                                    <button type="submit" class="btn btn-link text-danger"><i class="fas fa-trash"></i></button>
+                                </form>
+                            </td>
+                        </tr>`;
+                    }).join('');
+                    body.innerHTML = `<div class="table-responsive"><table class="table table-borderless align-middle"><tbody>${rows}</tbody></table></div>`;
+
+                    // symptom field สำหรับยา
+                    const sw = document.getElementById('symptomFieldWrapper');
+                    if (sw) {
+                        sw.innerHTML = hasMed ? `<div class="mb-2"><label class="form-label small fw-medium">อาการผู้ป่วย (จำเป็นสำหรับการเบิกยา)</label><textarea name="symptom" class="form-control form-control-sm" rows="2" placeholder="เช่น ปวดหัว มีไข้ เจ็บคอ" required></textarea></div>` : '';
+                    }
+                })
+                .catch(err => { console.error('refreshCart error:', err); });
+        }
+
+        function escHtml(s) {
+            return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        // เปิด modal → refresh cart (ผ่านทั้ง event และ onclick เพื่อความแน่ใจ)
+        document.getElementById('cartModal').addEventListener('show.bs.modal', refreshCart);
+        document.querySelector('.btn-cart').addEventListener('click', refreshCart);
+
+        // AJAX Remove from Cart
+        document.addEventListener('submit', function(e) {
+            const form = e.target.closest('form[action="/remove_from_cart"]');
+            if (!form) return;
+            e.preventDefault();
+
+            const data = new FormData(form);
+            data.append('_ajax', '1');
+            const btn = form.querySelector('button[type="submit"]');
+            if (btn) btn.disabled = true;
+
+            fetch('/remove_from_cart', { method: 'POST', body: data })
+                .then(res => res.json())
+                .then(json => {
+                    if (json.success) {
+                        refreshCart();
+                        // Refresh รายการของ (stock คืน)
+                        currentPage = 1;
+                        fetchProducts(true);
+                    } else {
+                        showCartToast(json.message || '❌ เกิดข้อผิดพลาด', false);
+                        if (btn) btn.disabled = false;
+                    }
+                })
+                .catch(() => { showCartToast('❌ เกิดข้อผิดพลาด ลองใหม่อีกครั้ง', false); if (btn) btn.disabled = false; });
+        });
+
+        function dismissNotification(type, logId, elementId) {
+            const el = document.getElementById(elementId);
+            if (el) el.remove();
+            const data = new FormData();
+            data.append('type', type);
+            if (logId) data.append('log_id', logId);
+            fetch('/api/dismiss_notification', { method: 'POST', body: data });
+        }
+
+        // ====== ประวัติการเบิก (AJAX + Pagination) ======
+        let historyCurrentPage = 1;
+
+        function loadHistory(page) {
+            if (page < 1) return;
+            historyCurrentPage = page;
+            const body = document.getElementById('historyModalBody');
+            const pager = document.getElementById('historyModalPager');
+            body.innerHTML = '<div class="text-center py-4"><span class="spinner-border spinner-border-sm"></span></div>';
+
+            fetch(`/api/get_history?emp_id=${encodeURIComponent(empId)}&page=${page}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success || data.items.length === 0) {
+                        body.innerHTML = '<div class="text-center p-4 text-muted"><i class="fas fa-clock fa-2x mb-2 d-block"></i>ยังไม่มีประวัติการเบิก</div>';
+                        pager.style.setProperty('display', 'none', 'important');
+                        return;
+                    }
+
+                    const statusMap = {
+                        'Approved': ['bg-success', '✅ อนุมัติ'],
+                        'Pending': ['bg-warning text-dark', '⏳ รออนุมัติ'],
+                        'Rejected': ['bg-danger', '❌ ปฏิเสธ']
+                    };
+
+                    const items = data.items.map(h => {
+                        const [badgeClass, statusLabel] = statusMap[h.status] || ['bg-secondary', h.status];
+                        const symptomHtml = h.symptom
+                            ? `<div class="text-info small mt-1">🩺 อาการ: ${escHtml(h.symptom)}</div>` : '';
+                        return `<div class="list-group-item px-3 py-2">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div class="flex-grow-1" style="min-width:0">
+                                    <div class="fw-medium text-truncate">${escHtml(h.product_name)}</div>
+                                    <small class="text-muted">${escHtml(h.timestamp)}</small>
+                                    ${symptomHtml}
+                                </div>
+                                <div class="text-end flex-shrink-0">
+                                    <div class="fw-medium">${escHtml(String(h.display_qty))} ${escHtml(h.display_unit)}</div>
+                                    <span class="badge ${badgeClass} rounded-pill small">${statusLabel}</span>
+                                </div>
+                            </div>
+                        </div>`;
+                    }).join('');
+
+                    body.innerHTML = `<div class="list-group list-group-flush">${items}</div>`;
+
+                    // อัปเดต pager
+                    document.getElementById('historyPageLabel').textContent = `หน้า ${data.page} / ${data.total_pages}`;
+                    document.getElementById('historyPrevBtn').disabled = data.page <= 1;
+                    document.getElementById('historyNextBtn').disabled = data.page >= data.total_pages;
+                    pager.style.removeProperty('display');
+                    pager.style.display = 'flex';
+                })
+                .catch(() => {
+                    body.innerHTML = '<div class="text-center p-4 text-danger">เกิดข้อผิดพลาด ลองใหม่อีกครั้ง</div>';
+                });
+        }
+
+        document.getElementById('historyModal').addEventListener('show.bs.modal', () => {
+            historyCurrentPage = 1;
+            loadHistory(1);
+        });
     </script>
 </body>
 
