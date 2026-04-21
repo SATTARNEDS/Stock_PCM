@@ -1113,6 +1113,7 @@ def admin_dashboard():
         WHERE l.status = 'Approved'
           AND l.emp_id NOT LIKE 'ADMIN:%'
           AND TRIM(COALESCE(u.department, '')) <> ''
+          AND l.action <> 'withdraw'
           AND datetime({transaction_timestamp_expr('l')}) >= datetime('now', 'localtime', '-30 days')
         GROUP BY u.department
         HAVING total_qty > 0
