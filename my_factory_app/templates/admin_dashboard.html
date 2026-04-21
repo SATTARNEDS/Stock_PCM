@@ -226,7 +226,7 @@
             </div>
 
             <div class="flex-grow-1 overflow-auto">
-                <div class="nav-category text-white-50">คลังสินค้า</div>
+                <div class="nav-category text-white-50">คลัง</div>
                 <a href="#" class="nav-link active">
                     <i class="fas fa-home me-2"></i> หน้าหลักสต็อก
                 </a>
@@ -489,7 +489,7 @@
 
                                     <button
                                         class="btn btn-sm btn-light text-danger border shadow-sm rounded-circle me-1 {% if item['is_active'] == 0 %}disabled{% endif %}"
-                                        title="ตัดจำหน่ายสินค้า (Scrap)" onclick="{% if item['is_active'] == 1 %}openWriteOffModal('{{ item.code }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %}disabled style="cursor: not-allowed; opacity: 0.5;"{% endif %}>
+                                        title="ตัดจำหน่ายของ (Scrap)" onclick="{% if item['is_active'] == 1 %}openWriteOffModal('{{ item.code }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %}disabled style="cursor: not-allowed; opacity: 0.5;"{% endif %}>
                                         <i class="fas fa-trash-alt"></i>
                                     </button>
                                 </td>
@@ -562,7 +562,7 @@
                                     <i class="fas fa-boxes fa-2x text-muted"></i>
                                 </div>
                                 <h6 class="fw-medium text-muted mb-1">ยังไม่มีข้อมูลการเบิกจ่าย</h6>
-                                <p class="small text-muted mb-0">ข้อมูลจะแสดงเมื่อมีรายการเบิกสินค้า</p>
+                                <p class="small text-muted mb-0">ข้อมูลจะแสดงเมื่อมีรายการเบิกของ</p>
                             </div>
                             {% endif %}
                         </div>
@@ -964,7 +964,7 @@
                         <input type="hidden" id="addLot_product_id" name="product_id">
 
                         <div class="mb-3">
-                            <label class="form-label text-muted small fw-medium">สินค้าที่ต้องการเพิ่ม</label>
+                            <label class="form-label text-muted small fw-medium">ของที่ต้องการเพิ่ม</label>
                             <input type="text" id="addLot_product_display"
                                 class="form-control bg-light fw-medium text-primary" readonly>
                         </div>
@@ -1011,7 +1011,7 @@
         <div class="modal-dialog">
             <div class="modal-content border-0 shadow-lg">
                 <div class="modal-header bg-danger text-white border-0">
-                    <h5 class="modal-title fw-medium"><i class="fas fa-trash-alt me-2"></i>ตัดจำหน่ายสินค้า (Scrap)</h5>
+                    <h5 class="modal-title fw-medium"><i class="fas fa-trash-alt me-2"></i>ตัดจำหน่ายของ (Scrap)</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body bg-light">
@@ -1019,7 +1019,7 @@
                         <input type="hidden" name="product_id" id="writeOff_product_id">
 
                         <div class="mb-3">
-                            <label class="form-label text-muted small fw-medium">รหัส / ชื่อสินค้า</label>
+                            <label class="form-label text-muted small fw-medium">รหัส / ชื่อของ</label>
                             <input type="text" id="writeOff_product_display" class="form-control text-muted bg-white"
                                 readonly>
                         </div>
@@ -1040,7 +1040,7 @@
                         <div class="mb-3">
                             <label class="form-label text-muted small fw-medium">เหตุผลการตัดจำหน่าย *</label>
                             <select name="reason" class="form-select shadow-none" required>
-                                <option value="สินค้าหมดอายุ">สินค้าหมดอายุ</option>
+                                <option value="ของหมดอายุ">ของหมดอายุ</option>
                                 <option value="ชำรุด / เสียหาย">ชำรุด / เสียหาย</option>
                                 <option value="สูญหาย">สูญหาย</option>
                                 <option value="อื่นๆ">อื่นๆ</option>
@@ -1190,7 +1190,7 @@
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-center">
                                 <div>
-                                    <h6 class="fw-medium text-danger mb-1">ล้างสต็อกสินค้า</h6>
+                                    <h6 class="fw-medium text-danger mb-1">ล้างสต็อกของ</h6>
                                     <small class="text-muted">ลบล็อตและปรับสต็อกเป็น 0</small>
                                 </div>
                                 <button class="btn btn-outline-danger btn-sm rounded-pill px-3"
@@ -1390,7 +1390,7 @@
         }
 
         // ==========================================
-        // 3. ระบบจัดการสินค้า (สต็อก)
+        // 3. ระบบจัดการของ (สต็อก)
         // ==========================================
         function loadStock() {
             const cat = document.getElementById('stockCatSelector').value;
@@ -1444,7 +1444,7 @@
         function openAddLotModal(code) {
             fetch('/admin/get_product/' + code).then(checkAuth).then(res => res.json()).then(data => {
                 if (data.is_active === 0 || data.is_active === '0') {
-                    Swal.fire({ icon: 'warning', title: 'ไม่สามารถเพิ่มสต็อกได้', text: 'สินค้านี้ถูกปิดใช้งานอยู่', confirmButtonText: 'ตกลง' });
+                    Swal.fire({ icon: 'warning', title: 'ไม่สามารถเพิ่มสต็อกได้', text: 'ของชิ้นนี้ถูกปิดใช้งานอยู่', confirmButtonText: 'ตกลง' });
                     return;
                 }
 
@@ -1488,7 +1488,7 @@
         function editProductModal(code) {
             fetch('/admin/get_product/' + code).then(checkAuth).then(res => res.json()).then(data => {
                 if (data.is_active === 0 || data.is_active === '0') {
-                    Swal.fire({ icon: 'warning', title: 'ไม่สามารถแก้ไขได้', text: 'สินค้านี้ถูกปิดใช้งานอยู่', confirmButtonText: 'ตกลง' });
+                    Swal.fire({ icon: 'warning', title: 'ไม่สามารถแก้ไขได้', text: 'ของชิ้นนี้ถูกปิดใช้งานอยู่', confirmButtonText: 'ตกลง' });
                     return;
                 }
 
@@ -1605,7 +1605,7 @@
                         data: {
                             labels: data.labels,
                             datasets: [{
-                                label: `รายการสินค้าที่ถูกเบิก ประจำเดือน ${month}/${parseInt(year) + 543}`,
+                                label: `รายการของที่ถูกเบิก ประจำเดือน ${month}/${parseInt(year) + 543}`,
                                 data: data.values,
                                 backgroundColor: gradient2,
                                 borderColor: 'rgba(54, 162, 235, 0.95)',
@@ -1625,7 +1625,7 @@
                                 legend: { display: false },
                                 title: {
                                     display: true,
-                                    text: `ยอดเบิกสินค้าประจำเดือน ${month}/${parseInt(year) + 543}`,
+                                    text: `ยอดเบิกของประจำเดือน ${month}/${parseInt(year) + 543}`,
                                     color: '#212529',
                                     font: { size: 14, weight: '600' },
                                     padding: { bottom: 10 }
@@ -1831,11 +1831,11 @@
                 }
             });
         }
-        // เปิดหน้าต่างและดึงข้อมูลสินค้ามาแสดง
+        // เปิดหน้าต่างและดึงข้อมูลของมาแสดง
         function openWriteOffModal(code) {
             fetch('/admin/get_product/' + code).then(checkAuth).then(res => res.json()).then(data => {
                 if (data.is_active === 0 || data.is_active === '0') {
-                    Swal.fire({ icon: 'warning', title: 'ไม่สามารถตัดจำหน่ายได้', text: 'สินค้านี้ถูกปิดใช้งานอยู่', confirmButtonText: 'ตกลง' });
+                    Swal.fire({ icon: 'warning', title: 'ไม่สามารถตัดจำหน่ายได้', text: 'ของชิ้นนี้ถูกปิดใช้งานอยู่', confirmButtonText: 'ตกลง' });
                     return;
                 }
 
@@ -1888,7 +1888,7 @@
         // ฟังก์ชันล้างข้อมูลระบบ
         function confirmClearData(target) {
             let titleText = target === 'logs' ? 'ล้างประวัติการทำรายการ (Logs)' : 'ล้างสต็อกทั้งหมด (Lots & Stock)';
-            let warningText = target === 'logs' ? 'ประวัติทั้งหมดจะถูกลบทิ้งอย่างถาวร ไม่สามารถกู้คืนได้!' : 'สินค้าทุกรายการจะกลายเป็น 0 ชิ้น และล็อตทั้งหมดจะถูกลบทิ้ง!';
+            let warningText = target === 'logs' ? 'ประวัติทั้งหมดจะถูกลบทิ้งอย่างถาวร ไม่สามารถกู้คืนได้!' : 'ของทุกรายการจะกลายเป็น 0 ชิ้น และล็อตทั้งหมดจะถูกลบทิ้ง!';
 
             Swal.fire({
                 title: '⚠️ ยืนยันการ Set Zero',
