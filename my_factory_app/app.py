@@ -1265,7 +1265,8 @@ def daily_alert():
                 msg += f"📦 {item['name']}\n🗓️ หมดอายุ: {show_date}\n──────────────\n"
 
         if loc_helmets:
-            if msg: msg += f"👷 [{location_label}] ครบกำหนดเปลี่ยนหมวกเซฟตี้\n"
+            if msg:msg += "\n"
+            msg += f"👷 [{location_label}] ครบกำหนดเปลี่ยนหมวกเซฟตี้\n"
             for alert in loc_helmets:
                 msg += f"👤 {alert['emp_name']} ({alert['department']})\n📦 {alert['product_name']}\n📅 เบิกเมื่อ: {alert['timestamp']}\n──────────────\n"
 
@@ -1668,34 +1669,36 @@ def export_excel():
     # อ่านข้อมูลเข้า Pandas
     df = pd.read_sql_query(query, conn)
     conn.close()
-    
-   # 3. สร้างไฟล์ Excel ใน Memory
+
+    def _auto_col_widths(writer, sheet_name, df_sheet):
+        """ปรับความกว้างคอลัมน์อัตโนมัติ"""
+        worksheet = writer.sheets[sheet_name]
+        for i, col in enumerate(df_sheet.columns):
+            header_len = len(str(col))
+            data_len = df_sheet[col].astype(str).str.len().max() if len(df_sheet) > 0 else 0
+            data_len = 0 if pd.isna(data_len) else data_len
+            worksheet.set_column(i, i, int(max(header_len, data_len) + 2))
+
+    # 3. สร้างไฟล์ Excel ใน Memory แยก Sheet ตามหมวดหมู่
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Inventory_Stock')
-        
-        # ปรับความกว้างของคอลัมน์ (แก้ Error float no len ตรงนี้)
-        worksheet = writer.sheets['Inventory_Stock']
-        for i, col in enumerate(df.columns):
-            # 1. ความยาวของชื่อหัวคอลัมน์
-            header_len = len(str(col))
-            
-            # 2. ความยาวของข้อมูลในคอลัมน์ (แปลงเป็น str ก่อนเสมอเพื่อป้องกัน Error)
-            # ใช้ .astype(str) เพื่อแปลงตัวเลข/ค่าว่าง เป็นข้อความก่อนใช้ .len()
-            if len(df) > 0:
-                data_len = df[col].astype(str).str.len().max()
-            else:
-                data_len = 0
-                
-            # ป้องกันกรณีที่ max() คืนค่าเป็น NaN (ค่าว่าง)
-            data_len = 0 if pd.isna(data_len) else data_len
-            
-            # 3. เลือกความยาวที่มากที่สุด แล้วบวกพื้นที่เผื่อไว้ 2
-            column_len = max(header_len, data_len) + 2
-            worksheet.set_column(i, i, int(column_len))
-            
+        # --- Sheet "ทั้งหมด" รวมทุก record ---
+        df.to_excel(writer, index=False, sheet_name='ทั้งหมด')
+        _auto_col_widths(writer, 'ทั้งหมด', df)
+
+        # --- แยก Sheet ตามหมวดหมู่ ---
+        categories = df['หมวดหมู่'].dropna().unique()
+        for cat in sorted(categories):
+            df_cat = df[df['หมวดหมู่'] == cat].copy()
+            if df_cat.empty:
+                continue
+            # ตัดชื่อ Sheet ให้ไม่เกิน 31 ตัวอักษร (ข้อจำกัดของ Excel)
+            sheet_name = str(cat)[:31]
+            df_cat.to_excel(writer, index=False, sheet_name=sheet_name)
+            _auto_col_widths(writer, sheet_name, df_cat)
+
     output.seek(0)
-    
+
     # โหลดไฟล์ลงเครื่อง
     return send_file(output, as_attachment=True, download_name=filename)
 
@@ -1861,34 +1864,34 @@ def import_excel():
 
     conn = None
     try:
-        df = pd.read_excel(file)
-        df.columns = df.columns.astype(str).str.strip()
+        # อ่านทุก Sheet (รองรับทั้งไฟล์ single-sheet เก่า และไฟล์ multi-sheet ใหม่)
+        all_sheets = pd.read_excel(file, sheet_name=None)
 
         conn = get_db_connection()
         updated_count = 0
         inserted_count = 0
+        medicine_done = False
 
-        code_col = next((col for col in df.columns if 'รหัสของ' in col or 'code' in col.lower()), None)
-        preview_text = ' '.join(
-            str(v).strip()
-            for v in df.head(5).fillna('').astype(str).values.flatten().tolist()
-            if str(v).strip()
-        ).lower()
-        is_medicine_file = 'รายการ/list' in preview_text or 'medicine' in str(df.columns[0]).lower()
+        for sheet_name, df in all_sheets.items():
+            df.columns = df.columns.astype(str).str.strip()
 
-        if not code_col and is_medicine_file:
-            updated_count, inserted_count = import_medicine_file(conn, df)
-            conn.commit()
-            flash(f'✅ นำเข้ารายการยาสำเร็จ: อัปเดต {updated_count}, เพิ่มใหม่ {inserted_count}', 'success')
-            return redirect(url_for('admin_dashboard'))
+            code_col = next((col for col in df.columns if 'รหัสของ' in col or 'code' in col.lower()), None)
+            preview_text = ' '.join(
+                str(v).strip()
+                for v in df.head(5).fillna('').astype(str).values.flatten().tolist()
+                if str(v).strip()
+            ).lower()
+            is_medicine_file = 'รายการ/list' in preview_text or 'medicine' in str(df.columns[0]).lower()
 
-        if not code_col:
-            flash('❌ ไม่พบคอลัมน์รหัสสินค้าในไฟล์ที่อัปโหลด', 'danger')
-            return redirect(url_for('admin_dashboard'))
+            if not code_col and is_medicine_file and not medicine_done:
+                u, i = import_medicine_file(conn, df)
+                updated_count += u
+                inserted_count += i
+                medicine_done = True
+                continue
 
-        for _, row in df.iterrows():
-            code = str(row[code_col]).strip()
-            if not code or code.lower() == 'nan':
+            if not code_col:
+                # Sheet ที่ไม่มี code column (เช่น Sheet "ทั้งหมด" ที่อาจซ้ำกับ sheet หมวดหมู่) → ข้ามไป
                 continue
 
             name_col = next((col for col in df.columns if 'ชื่อของ' in col), None)
@@ -1897,61 +1900,85 @@ def import_excel():
             loc_col = next((col for col in df.columns if 'สถานที่เก็บ' in col or 'location' in col.lower()), None)
             safe_col = next((col for col in df.columns if 'จุดสั่งซื้อ' in col or 'safety stock' in col.lower()), None)
             stock_col = next((col for col in df.columns if 'จำนวนคงเหลือ' in col), None)
-
-            name = str(row[name_col]).strip() if name_col and pd.notna(row[name_col]) else 'No Name'
-            category = str(row[cat_col]).strip() if cat_col and pd.notna(row[cat_col]) else 'General'
-            unit = str(row[unit_col]).strip() if unit_col and pd.notna(row[unit_col]) else 'PCS'
-            location = str(row[loc_col]).strip() if loc_col and pd.notna(row[loc_col]) else '-'
-            safety_stock = safe_int(row[safe_col]) if safe_col else 0
-            stock = safe_int(row[stock_col]) if stock_col else 0
-
             lot_col = next((col for col in df.columns if 'lot' in col.lower()), None)
             received_col = next((col for col in df.columns if 'วันที่รับเข้า' in col or 'received_date' in col.lower() or 'received date' in col.lower()), None)
             expiry_col = next((col for col in df.columns if 'วันหมดอายุ' in col or 'expiry_date' in col.lower() or 'expiry date' in col.lower()), None)
             lot_qty_col = next((col for col in df.columns if 'จำนวนใน lot' in col.lower() or 'lot qty' in col.lower() or 'lot quantity' in col.lower()), None)
-
-            lot_no = str(row[lot_col]).strip() if lot_col and pd.notna(row[lot_col]) else ''
-            received_date = standardize_date(row[received_col]) if received_col and pd.notna(row[received_col]) else ''
-            expiry_date = standardize_date(row[expiry_col]) if expiry_col and pd.notna(row[expiry_col]) else ''
-            lot_qty = safe_int(row[lot_qty_col]) if lot_qty_col and pd.notna(row[lot_qty_col]) else None
-
             active_col = next((col for col in df.columns if 'สถานะ' in col), None)
-            is_active = 1
-            if active_col and pd.notna(row[active_col]):
-                status_text = str(row[active_col]).strip()
-                is_active = 1 if status_text == 'เปิดใช้งาน' else 0
 
-            existing = conn.execute('SELECT id FROM products WHERE code = ?', (code,)).fetchone()
-            if existing:
-                conn.execute('''
-                    UPDATE products
-                    SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?, lot_no=?, received_date=?, expiry_date=?
-                    WHERE id=?
-                ''', (name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date, existing['id']))
-                product_id = existing['id']
-                updated_count += 1
-            else:
-                cursor = conn.execute('''
-                    INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock, is_active, lot_no, received_date, expiry_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
-                ''', (code, name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date))
-                product_id = cursor.lastrowid
-                inserted_count += 1
+            for _, row in df.iterrows():
+                code = str(row[code_col]).strip()
+                if not code or code.lower() == 'nan':
+                    continue
 
-            if lot_no:
-                lot_qty = stock if lot_qty is None else lot_qty
-                existing_lot = conn.execute('SELECT id FROM product_lots WHERE product_id = ? AND lot_number = ?', (product_id, lot_no)).fetchone()
-                if existing_lot:
+                name = str(row[name_col]).strip() if name_col and pd.notna(row[name_col]) else 'No Name'
+                category = str(row[cat_col]).strip() if cat_col and pd.notna(row[cat_col]) else 'General'
+                unit = str(row[unit_col]).strip() if unit_col and pd.notna(row[unit_col]) else 'PCS'
+                location = str(row[loc_col]).strip() if loc_col and pd.notna(row[loc_col]) else '-'
+                safety_stock = safe_int(row[safe_col]) if safe_col else 0
+                stock = safe_int(row[stock_col]) if stock_col else 0
+
+                lot_no = str(row[lot_col]).strip() if lot_col and pd.notna(row[lot_col]) else ''
+                received_date = standardize_date(row[received_col]) if received_col and pd.notna(row[received_col]) else ''
+                expiry_date = standardize_date(row[expiry_col]) if expiry_col and pd.notna(row[expiry_col]) else ''
+                lot_qty = safe_int(row[lot_qty_col]) if lot_qty_col and pd.notna(row[lot_qty_col]) else None
+
+                is_active = 1
+                if active_col and pd.notna(row[active_col]):
+                    status_text = str(row[active_col]).strip()
+                    is_active = 1 if status_text == 'เปิดใช้งาน' else 0
+
+                existing = conn.execute('SELECT id FROM products WHERE code = ?', (code,)).fetchone()
+                if existing:
                     conn.execute('''
-                        UPDATE product_lots
-                        SET qty = ?, received_date = ?, expiry_date = ?
-                        WHERE id = ?
-                    ''', (lot_qty, received_date, expiry_date, existing_lot['id']))
+                        UPDATE products
+                        SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?, lot_no=?, received_date=?, expiry_date=?
+                        WHERE id=?
+                    ''', (name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date, existing['id']))
+                    product_id = existing['id']
+                    updated_count += 1
                 else:
-                    conn.execute('''
-                        INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (product_id, lot_no, lot_qty, received_date, expiry_date))
+                    cursor = conn.execute('''
+                        INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock, is_active, lot_no, received_date, expiry_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
+                    ''', (code, name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date))
+                    product_id = cursor.lastrowid
+                    inserted_count += 1
+
+                effective_lot_qty = stock if lot_qty is None else lot_qty
+                if lot_no:
+                    # มี Lot No. → upsert ด้วย lot_number
+                    existing_lot = conn.execute(
+                        'SELECT id FROM product_lots WHERE product_id = ? AND lot_number = ?',
+                        (product_id, lot_no)
+                    ).fetchone()
+                    if existing_lot:
+                        conn.execute('''
+                            UPDATE product_lots
+                            SET qty = ?, received_date = ?, expiry_date = ?
+                            WHERE id = ?
+                        ''', (effective_lot_qty, received_date, expiry_date, existing_lot['id']))
+                    else:
+                        conn.execute('''
+                            INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
+                            VALUES (?, ?, ?, ?, ?)
+                        ''', (product_id, lot_no, effective_lot_qty, received_date, expiry_date))
+                elif effective_lot_qty > 0:
+                    # ไม่มี Lot No. แต่มีจำนวน → upsert ด้วย received_date (เช่น อุปกรณ์ IT)
+                    existing_lot = conn.execute(
+                        'SELECT id FROM product_lots WHERE product_id = ? AND (lot_number IS NULL OR lot_number = "") AND received_date = ?',
+                        (product_id, received_date)
+                    ).fetchone()
+                    if existing_lot:
+                        conn.execute(
+                            'UPDATE product_lots SET qty = ?, expiry_date = ? WHERE id = ?',
+                            (effective_lot_qty, expiry_date, existing_lot['id'])
+                        )
+                    else:
+                        conn.execute('''
+                            INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
+                            VALUES (?, NULL, ?, ?, ?)
+                        ''', (product_id, effective_lot_qty, received_date, expiry_date))
 
         conn.commit()
         flash(f'✅ นำเข้าสำเร็จ: อัปเดต {updated_count}, เพิ่มใหม่ {inserted_count}', 'success')
