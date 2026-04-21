@@ -939,7 +939,7 @@ def api_search_products():
     conn = get_db_connection()
     user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
     
-    # Logic การกรอง Location (ยกมาจาก menu เดิมของคุณ)
+    # Logic การกรอง Location ตามสิทธิ์ของ User
     location_condition = ""
     if user and user['location']:
         if 'PC1' in user['location']:
@@ -1203,51 +1203,78 @@ def daily_alert():
     if not session.get('admin_logged_in'):
         return "Unauthorized", 401
 
-    # 1. เชื่อมต่อฐานข้อมูล
     conn = get_db_connection()
-    
-    # --- ส่วนที่ 1: เช็คของใกล้หมดอายุ (ภายใน 30 วัน) ---
+
+    # --- ส่วนที่ 1: เช็คของใกล้หมดอายุ (ภายใน 30 วัน) จาก product_lots ---
     expiry_query = '''
-        SELECT name, expiry_date, category FROM products 
-        WHERE expiry_date IS NOT NULL AND expiry_date != '' 
-        AND expiry_date <= date('now', '+30 days')
-        AND (category LIKE '%ยา%' OR name LIKE '%Safety Helmet%' OR name LIKE '%Coffee%' OR name LIKE '%Tea%')
+        SELECT p.name, p.category, p.location,
+            CASE
+                WHEN pl.expiry_date LIKE '%/%/%' THEN substr(pl.expiry_date,7,4)||'-'||substr(pl.expiry_date,4,2)||'-'||substr(pl.expiry_date,1,2)
+                ELSE trim(pl.expiry_date)
+            END AS formatted_expiry
+        FROM product_lots pl
+        JOIN products p ON pl.product_id = p.id
+        WHERE pl.qty > 0
+        AND pl.expiry_date IS NOT NULL AND trim(pl.expiry_date) != ''
+        AND (p.category LIKE '%ยา%' OR p.name LIKE '%Helmet%' OR p.name LIKE '%Coffee%' OR p.name LIKE '%Tea%')
+        AND (
+            CASE
+                WHEN pl.expiry_date LIKE '%/%/%' THEN substr(pl.expiry_date,7,4)||'-'||substr(pl.expiry_date,4,2)||'-'||substr(pl.expiry_date,1,2)
+                ELSE trim(pl.expiry_date)
+            END
+        ) <= date('now', '+7 hours', '+30 days')
+        ORDER BY formatted_expiry ASC
     '''
     expiring_items = conn.execute(expiry_query).fetchall()
 
     # --- ส่วนที่ 2: เช็คหมวกเซฟตี้ครบ 2 ปี (ย้อนหลัง 23 เดือนขึ้นไป) ---
     helmet_query = '''
-        SELECT u.name as emp_name, u.department, p.name as product_name, l.timestamp
+        SELECT u.name as emp_name, u.department, u.location, p.name as product_name, l.timestamp
         FROM transaction_logs l
         JOIN users u ON l.emp_id = u.emp_id
         JOIN products p ON l.product_id = p.id
-        WHERE p.name LIKE '%Helmet%' 
+        WHERE (p.name LIKE '%หมวก%' OR p.name LIKE '%Helmet%' OR l.action LIKE '%หมวก%')
         AND l.status = 'Approved'
         AND l.timestamp <= datetime('now', '+7 hours', '-23 months')
     '''
     helmet_alerts = conn.execute(helmet_query).fetchall()
     conn.close()
 
-    # --- ส่วนที่ 3: รวมข้อความและส่งเข้า LINE ---
-    alert_triggered = False
-    message = ""
+    # --- ส่วนที่ 3: จัดกลุ่มแยก CC / PC1 แล้วส่งแยกกัน ---
+    def is_cc_location(loc):
+        loc = str(loc or '').lower()
+        return 'coil center' in loc or loc == 'cc' or ' cc' in f' {loc}'
 
-    if expiring_items:
-        alert_triggered = True
-        message += "\n⚠️ [แจ้งเตือนของใกล้หมดอายุ]\n"
-        for item in expiring_items:
-            message += f"📦 {item['name']}\n📅 หมดอายุ: {item['expiry_date']}\n"
+    def is_pc1_location(loc):
+        return 'pc1' in str(loc or '').lower()
 
-    if helmet_alerts:
-        alert_triggered = True
-        message += "\n👷 [ครบกำหนดเปลี่ยนหมวกเซฟตี้]\n"
-        for alert in helmet_alerts:
-            message += f"👤 คุณ{alert['emp_name']} ({alert['department']})\n📦 {alert['product_name']}\n📅 เบิกเมื่อ: {alert['timestamp']}\n"
+    sent_messages = []
 
-    # ถ้ามีรายการผิดปกติ ให้ส่ง LINE ทันที
-    if alert_triggered:
-        send_line_message(message)
-        return f"Alert sent: {message}", 200
+    for location_label, location_check in [('CC', is_cc_location), ('PC1', is_pc1_location)]:
+        location_key = 'cc' if location_label == 'CC' else 'pc1'
+        msg = ""
+
+        loc_expiry = [i for i in expiring_items if location_check(i['location'])]
+        loc_helmets = [h for h in helmet_alerts if location_check(h['location'])]
+
+        if loc_expiry:
+            msg += f"⚠️ [{location_label}] แจ้งเตือนของใกล้หมดอายุ\n"
+            for item in loc_expiry:
+                date_parts = item['formatted_expiry'].split('-')
+                show_date = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}" if len(date_parts) == 3 else item['formatted_expiry']
+                msg += f"📦 {item['name']}\n🗓️ หมดอายุ: {show_date}\n──────────────\n"
+
+        if loc_helmets:
+            if msg: msg += f"👷 [{location_label}] ครบกำหนดเปลี่ยนหมวกเซฟตี้\n"
+            for alert in loc_helmets:
+                msg += f"👤 {alert['emp_name']} ({alert['department']})\n📦 {alert['product_name']}\n📅 เบิกเมื่อ: {alert['timestamp']}\n──────────────\n"
+
+        if msg:
+            send_line_message(msg.strip(), location=location_key)
+            sent_messages.append(f"[{location_label}] {msg[:80]}...")
+
+    if sent_messages:
+        return f"Alert sent: {'|'.join(sent_messages)}", 200
     else:
         return "No alerts today", 200
 
@@ -1360,9 +1387,9 @@ def approve_request(log_id):
         check_safety_alert(product_id)
 
         user_info = conn.execute('SELECT name, department, location FROM users WHERE emp_id = ?', (log['emp_id'],)).fetchone()
-        product_info = conn.execute('SELECT name, unit, base_unit FROM products WHERE id = ?', (product_id,)).fetchone()
+        product_info = conn.execute('SELECT name, unit, base_unit, package_unit, conversion_rate, category FROM products WHERE id = ?', (product_id,)).fetchone()
         admin_label = 'Admin CC' if role == 'admin_cc' else ('Admin PC1' if role == 'admin_pc1' else 'Super Admin')
-        is_split_medicine_log = product_info and log['qty_base_unit'] and product_info['base_unit'] and product_info['base_unit'] != product_info['unit']
+        is_split_medicine_log = is_split_tablet_medicine(product_info) and log['qty_base_unit']
         approved_qty = log['qty_base_unit'] if is_split_medicine_log else qty_to_withdraw
         approved_unit = (product_info['base_unit'] if is_split_medicine_log else (product_info['unit'] if product_info else 'หน่วย'))
         approval_message = (
@@ -2067,7 +2094,7 @@ def filter_logs():
     
     conn = get_db_connection()
     
-    # 2. สร้าง Filter (ใช้โค้ดเดิมของคุณ)
+    # 2. สร้าง Filter สำหรับ Log ตาม Role และ Location
     role_log_filter = ""
     if role == 'admin_pc1':
         role_log_filter = " AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')"
@@ -2098,7 +2125,7 @@ def filter_logs():
     total_logs = conn.execute(count_query).fetchone()[0]
     total_pages = math.ceil(total_logs / per_page) #
 
-    # 3. Query ข้อมูล (ใช้โค้ดเดิมของคุณ)
+    # 3. Query ข้อมูล Log พร้อม Join กับ Users และ Products เพื่อดึงชื่อพนักงานและชื่อสินค้า
     query = f'''
         SELECT l.*, 
                COALESCE(u.name, SUBSTR(l.emp_id, 7)) as emp_name, 
@@ -2649,42 +2676,25 @@ def scheduled_daily_alert():
         conn = get_db_connection()
         
         # ==========================================
-        # 1. แจ้งเตือนของใกล้หมดอายุ (ครอบคลุมของเก่าและ Lot ใหม่)
+        # 1. แจ้งเตือนของใกล้หมดอายุ (จาก product_lots รองรับทั้งของเก่า + Lot ใหม่)
         # ==========================================
-        # ใช้ Subquery แปลงวันที่ให้เป็น YYYY-MM-DD ก่อน แล้วค่อยเอามาเปรียบเทียบ
         expiry_query = '''
-            SELECT name, formatted_expiry AS expiry_date, category FROM (
-                -- ส่วนที่ 1: ของเก่าจากตารางหลัก (products)
-                SELECT 
-                    name, 
-                    CASE 
-                        WHEN expiry_date LIKE '%/%/%' THEN substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2)
-                        ELSE trim(expiry_date)
-                    END AS formatted_expiry, 
-                    category 
-                FROM products 
-                WHERE stock > 0 
-                AND expiry_date IS NOT NULL AND trim(expiry_date) != ''
-                AND (category LIKE '%ยา%' OR name LIKE '%Helmet%' OR name LIKE '%Coffee%')
-                
-                UNION
-                
-                -- ส่วนที่ 2: ของใหม่จากตาราง Lot (product_lots)
-                SELECT 
-                    p.name, 
-                    CASE 
-                        WHEN pl.expiry_date LIKE '%/%/%' THEN substr(pl.expiry_date, 7, 4) || '-' || substr(pl.expiry_date, 4, 2) || '-' || substr(pl.expiry_date, 1, 2)
-                        ELSE trim(pl.expiry_date)
-                    END AS formatted_expiry, 
-                    p.category 
-                FROM product_lots pl
-                JOIN products p ON pl.product_id = p.id
-                WHERE pl.qty > 0 
-                AND pl.expiry_date IS NOT NULL AND trim(pl.expiry_date) != ''
-                AND (p.category LIKE '%ยา%' OR p.name LIKE '%Helmet%' OR p.name LIKE '%Coffee%')
-            )
-            -- กรองเอาเฉพาะอันที่หมดอายุหรือใกล้หมดอายุ (ภายใน 30 วัน)
-            WHERE formatted_expiry <= date('now', '+7 hours', '+30 days')
+            SELECT p.name, p.category, p.location,
+                CASE
+                    WHEN pl.expiry_date LIKE '%/%/%' THEN substr(pl.expiry_date,7,4)||'-'||substr(pl.expiry_date,4,2)||'-'||substr(pl.expiry_date,1,2)
+                    ELSE trim(pl.expiry_date)
+                END AS formatted_expiry
+            FROM product_lots pl
+            JOIN products p ON pl.product_id = p.id
+            WHERE pl.qty > 0
+            AND pl.expiry_date IS NOT NULL AND trim(pl.expiry_date) != ''
+            AND (p.category LIKE '%ยา%' OR p.name LIKE '%Helmet%' OR p.name LIKE '%Coffee%')
+            AND (
+                CASE
+                    WHEN pl.expiry_date LIKE '%/%/%' THEN substr(pl.expiry_date,7,4)||'-'||substr(pl.expiry_date,4,2)||'-'||substr(pl.expiry_date,1,2)
+                    ELSE trim(pl.expiry_date)
+                END
+            ) <= date('now', '+7 hours', '+30 days')
             ORDER BY formatted_expiry ASC
         '''
         expiring_items = conn.execute(expiry_query).fetchall()
@@ -2698,7 +2708,7 @@ def scheduled_daily_alert():
                 u.department, 
                 u.location, 
                 p.name AS product_name,
-                l.lot_id, -- ดึง Lot ID ออกมาด้วย
+                l.lot_id,
                 MAX(
                     CASE 
                         WHEN l.timestamp LIKE '%/%/%' THEN 
@@ -2711,47 +2721,52 @@ def scheduled_daily_alert():
             JOIN products p ON l.product_id = p.id
             WHERE (p.name LIKE '%หมวก%' OR p.name LIKE '%Helmet%' OR l.action LIKE '%หมวก%')
             AND l.status = 'Approved'
-            GROUP BY u.emp_id, p.id, l.lot_id  -- 🎯 จุดสำคัญ: สั่งให้แยกการเช็คอายุตาม คน + สินค้า + Lot
+            GROUP BY u.emp_id, p.id, l.lot_id
             HAVING last_timestamp <= datetime('now', '+7 hours', '-23 months')
         '''
         helmet_alerts = conn.execute(helmet_query).fetchall()
         conn.close()
         
         # ==========================================
-        # 3. รวมข้อความและส่งเข้า LINE
+        # 3. จัดกลุ่มแยก CC / PC1 แล้วส่งแยกกัน
         # ==========================================
-        message = ""
-        
-        if expiring_items:
-            message += "⚠️ [แจ้งเตือนของใกล้หมดอายุ]\n"
-            for item in expiring_items:
-                # 🎯 สลับตำแหน่งวันที่จาก YYYY-MM-DD เป็น DD/MM/YYYY
-                date_parts = item['expiry_date'].split('-')
-                show_date = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}" if len(date_parts) == 3 else item['expiry_date']
+        def is_cc_location(loc):
+            loc = str(loc or '').lower()
+            return 'coil center' in loc or loc == 'cc' or ' cc' in f' {loc}'
 
-                message += f"📦 {item['name']} ({item['category']})\n"
-                message += f"🗓️ หมดอายุ: {show_date}\n"
-                message += "--------------------------\n"
+        def is_pc1_location(loc):
+            return 'pc1' in str(loc or '').lower()
 
-        if helmet_alerts:
-            if message != "": message += "\n" 
-            message += "👷 [ครบกำหนดเปลี่ยนหมวกเซฟตี้]\n"
-            for alert in helmet_alerts:
-                emp_info = f"{alert['emp_name']} ({alert['department']} - {alert['location']})"
-                lot_text = f" [Lot: {alert['lot_id']}]" if alert['lot_id'] else ""
-                
-                # 🎯 ตัดเวลาทิ้งแล้วสลับตำแหน่งวันที่จาก YYYY-MM-DD เป็น DD/MM/YYYY
-                last_date = alert['last_timestamp'][:10]
-                date_parts = last_date.split('-')
-                show_date = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}" if len(date_parts) == 3 else last_date
-                
-                message += f"👤 {emp_info}\n"
-                message += f"📦 รายการ: {alert['product_name']}{lot_text}\n"
-                message += f"🗓️ เบิกล่าสุด: {show_date}\n"
-                message += "--------------------------\n"
-            
-        if message:
-            send_line_message(message.strip())
+        for location_label, location_check, location_key in [
+            ('CC', is_cc_location, 'cc'),
+            ('PC1', is_pc1_location, 'pc1')
+        ]:
+            msg = ""
+
+            loc_expiry = [i for i in expiring_items if location_check(i['location'])]
+            loc_helmets = [h for h in helmet_alerts if location_check(h['location'])]
+
+            if loc_expiry:
+                msg += f"⚠️ [{location_label}] แจ้งเตือนของใกล้หมดอายุ\n"
+                for item in loc_expiry:
+                    date_parts = item['formatted_expiry'].split('-')
+                    show_date = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}" if len(date_parts) == 3 else item['formatted_expiry']
+                    msg += f"📦 {item['name']} ({item['category']})\n🗓️ หมดอายุ: {show_date}\n──────────────\n"
+
+            if loc_helmets:
+                if msg: msg += "\n"
+                msg += f"👷 [{location_label}] ครบกำหนดเปลี่ยนหมวกเซฟตี้\n"
+                for alert in loc_helmets:
+                    lot_text = f" [Lot: {alert['lot_id']}]" if alert['lot_id'] else ""
+                    last_date = alert['last_timestamp'][:10]
+                    date_parts = last_date.split('-')
+                    show_date = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}" if len(date_parts) == 3 else last_date
+                    msg += f"👤 {alert['emp_name']} ({alert['department']})\n"
+                    msg += f"📦 {alert['product_name']}{lot_text}\n"
+                    msg += f"🗓️ เบิกล่าสุด: {show_date}\n──────────────\n"
+
+            if msg:
+                send_line_message(msg.strip(), location=location_key)
 
 def update_scheduler_time(new_time):
     """
@@ -2867,7 +2882,7 @@ def get_monthly_report_data():
     month = request.args.get('month')
     year = request.args.get('year')
     
-    # ดึงข้อมูลวันที่ทั้ง 2 รูปแบบที่พบใน DB ของคุณ
+    # ดึงข้อมูลวันที่ทั้ง 2 รูปแบบที่พบใน DB มาใช้ในการกรองข้อมูล
     pattern1 = f'{year}-{month}-%'   # yyyy-mm-dd
     pattern2 = f'%/{month}/{year} %' # dd/mm/yyyy
     
@@ -2943,7 +2958,7 @@ if __name__ == '__main__':
         # 3. เพิ่ม Job เข้าไปในระบบ (ถ้ามีอยู่แล้วให้ทับของเก่า)
         scheduler.add_job(
             id='Daily_Alert_Job',
-            func=scheduled_daily_alert, # ชื่อฟังก์ชันส่ง LINE ที่คุณมีอยู่แล้ว
+            func=scheduled_daily_alert, # ชื่อฟังก์ชันส่ง LINE 
             trigger='cron',
             hour=int(h),
             minute=int(m),

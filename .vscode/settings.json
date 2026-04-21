@@ -1,4 +1,10 @@
 {
+  "markdown-pdf.styles": [
+    "my_factory_app/pdf-export.css"
+  ],
+  "markdown-pdf.scale": 0.8,
+  "markdown-pdf.mermaidServer": "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js",
+  "markdown-pdf.executablePath": "",
   "html.validate.styles": false,
   "html.validate.scripts": false,
   "htmlhint.enable": false,

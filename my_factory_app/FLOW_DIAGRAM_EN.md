@@ -1,3 +1,15 @@
+<style>
+  svg[id^="mermaid"] {
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+  .mermaid {
+    text-align: center;
+    overflow: hidden;
+  }
+</style>
+
 # Stock_PCM System Workflow Summary
 
 > This document is prepared as a formal English version for supervisors, managers, and stakeholders who require a clear overview of the current system workflow and operational logic.
@@ -183,11 +195,11 @@ flowchart TD
 
 The current system supports the following notification types:
 
-1. New withdrawal request notification
-2. Approval result notification
-3. Low stock warning
-4. Product expiry alert
-5. Safety helmet lifecycle alert
+1. New withdrawal request — routed to the admin group matching the requester's location
+2. Approval result — routed to the LINE group matching the requester's location
+3. Low stock warning — routed by item location
+4. Product expiry alert — sent separately per location via Daily Alert Job
+5. Safety helmet lifecycle alert — sent separately per location via Daily Alert Job
 
 ### Vertical Mermaid Notification Flow
 
@@ -195,34 +207,51 @@ The current system supports the following notification types:
 flowchart TD
     A[System event occurs] --> B{Event type}
 
-    B -->|New request| C[Send LINE notification to admin]
-    B -->|Approval completed| D[Send approval result notification]
-    B -->|Low stock| E[Send reorder warning]
-    B -->|Expiry approaching| F[Send expiry alert]
-    B -->|Helmet lifecycle due| G[Send helmet replacement alert]
+    B -->|New request| C[Send LINE to admin\nmatching requester location]
+    B -->|Approval completed| D[Send LINE approval result\nto requester location group]
+    B -->|Low stock| E[Send reorder warning\nto item location group]
+    B -->|Daily Alert Job| F{Group data by location}
 
-    C --> H{Route by site}
-    D --> H
-    E --> H
-    F --> H
-    G --> H
+    F -->|CC item expiring| G[Send expiry alert → CC LINE group]
+    F -->|PC1 item expiring| H[Send expiry alert → PC1 LINE group]
+    F -->|CC employee helmet due| I[Send helmet alert → CC LINE group]
+    F -->|PC1 employee helmet due| J[Send helmet alert → PC1 LINE group]
 
-    H -->|CC| I[Send to CC LINE group]
-    H -->|PC1| J[Send to PC1 LINE group]
-    H -->|Scheduled system alert| K[Send through Daily Alert Job]
+    C --> K{Route by site}
+    D --> K
+    E --> K
+    K -->|CC| L[CC LINE group]
+    K -->|PC1| M[PC1 LINE group]
+
+    classDef event fill:#EDE7F6,stroke:#5E35B1,color:#311B92,stroke-width:2px;
+    classDef linecc fill:#E8F5E9,stroke:#2E7D32,color:#1B5E20,stroke-width:2px;
+    classDef linepc1 fill:#E1F5FE,stroke:#0277BD,color:#01579B,stroke-width:2px;
+    classDef schedule fill:#FFF8E1,stroke:#F9A825,color:#F57F17,stroke-width:2px;
+
+    class A,B,C,D,E,F event;
+    class G,I,L linecc;
+    class H,J,M linepc1;
+    class K schedule;
 ```
 
 ### Additional notification details
 
-#### Expiry notification
-- The system checks items that contain expiry_date
-- Alerts are generated for items approaching expiry within 30 days
-- This applies especially to medicines and expiry-controlled materials
+#### Expiry notification (Daily Alert)
+- Checks expiry from `product_lots` table (covers both legacy and new lots)
+- Alerts are generated for items within 30 days of expiry
+- **Sent separately by location**: CC items → CC group, PC1 items → PC1 group
+- Prevents data confusion between the two operational sites
 
-#### Safety helmet lifecycle notification
-- The system reviews approved helmet withdrawal history
-- Alerts are generated when a helmet is near or has reached its replacement cycle
-- This supports practical safety compliance in daily operations
+#### Safety helmet lifecycle notification (Daily Alert)
+- Reviews approved helmet withdrawal history, grouped by employee location
+- Alerts when a helmet has been in use for 23 months or more
+- **Sent separately by location**: CC employees → CC group, PC1 employees → PC1 group
+
+#### Unit display in approval notifications
+- The system uses `is_split_tablet_medicine()` to determine whether an item is a split-unit medicine
+- Standard items display quantity using `products.unit` (e.g., gallon, piece)
+- Split-unit medicines display quantity using `products.base_unit` (e.g., tablet)
+- This prevents incorrect unit labels from appearing in approval messages
 
 ---
 
@@ -273,8 +302,9 @@ At the current stage, the system supports the following functions:
 - FIFO control through both open_packages and product_lots
 - Approval and rejection workflow for requests
 - Low stock warning logic
-- Expiry-date notification support
-- Safety helmet lifecycle alert support
+- Expiry-date alerts checked from `product_lots`, **sent separately to CC and PC1 groups**
+- Safety helmet lifecycle alerts **sent separately to CC and PC1 groups** based on employee location
+- Approval notifications display correct unit using `is_split_tablet_medicine()` logic
 - Vertical Mermaid workflow diagrams for clear presentation
 
 ---
