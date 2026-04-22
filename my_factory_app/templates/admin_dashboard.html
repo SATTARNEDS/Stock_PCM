@@ -652,9 +652,7 @@
                             <button onclick="filterLogs('CC')" id="btn-log-cc"
                                 class="btn btn-sm rounded-pill px-3 btn-light text-muted border-0 fw-medium">CC</button>
                         </div>
-                        {% endif %}
-                        <span class="badge bg-light text-primary rounded-pill px-3 py-2 shadow-sm">หน้า {{ page
-                            }}</span>
+                        {% endif %}                       
                     </div>
                 </div>
                 <div class="card-body p-0 table-responsive">
@@ -719,12 +717,13 @@
                             <div class="col-md-6">
                                 <label class="form-label fw-medium text-muted small">หมวดหมู่ (Category)</label>
                                 <select id="productCategory" name="category" class="form-select shadow-none" required
-                                    onchange="generateNextCode()">
+                                    onchange="generateNextCode(); toggleAddSplitFields()">
                                     <option value="">-- เลือกหมวดหมู่ --</option>
                                     <option value="แม่บ้าน">แม่บ้าน</option>
                                     <option value="Safety">เซฟตี้</option>
                                     <option value="ยา">ยา</option>
                                     <option value="ของใช้สำนักงาน">ของใช้สำนักงาน</option>
+                                    <option value="IT อุปกรณ์">IT อุปกรณ์</option>
                                     <option value="อื่นๆ">อื่นๆ</option>
                                 </select>
                             </div>
@@ -768,6 +767,36 @@
                                 <label class="form-label fw-medium text-muted small">วันหมดอายุ</label>
                                 <input type="text" id="date_picker_expiry" name="expiry_date" placeholder="DD/MM/YYYY"
                                     class="form-control shadow-none">
+                            </div>
+
+                            <!-- แยกหน่วยย่อย (ยาเท่านั้น) -->
+                            <div class="col-12" id="addSplitUnitToggleRow" style="display:none;">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="addEnableSplit"
+                                        onchange="toggleAddSplitDetail()">
+                                    <label class="form-check-label fw-medium small" for="addEnableSplit">
+                                        <i class="fas fa-pills me-1 text-info"></i>แยกหน่วยย่อย (เช่น กล่อง → เม็ด)
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-12" id="addSplitDetailRow" style="display:none;">
+                                <div class="row g-3 p-3 rounded-3" style="background:#f0f8ff; border:1px dashed #86b7fe;">
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-medium text-muted small">หน่วยแพ็ค/กล่อง/กระปุก</label>
+                                        <input type="text" id="add_package_unit" name="package_unit" class="form-control shadow-none"
+                                            placeholder="เช่น กล่อง, ขวด, กระปุก">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-medium text-muted small">หน่วยย่อย</label>
+                                        <input type="text" id="add_base_unit" name="base_unit" class="form-control shadow-none"
+                                            placeholder="เช่น เม็ด, แคปซูล">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-medium text-muted small">1 แพ็ค มีจำนวน (หน่วยย่อย)</label>
+                                        <input type="number" id="add_conversion_rate" name="conversion_rate" class="form-control shadow-none"
+                                            min="1" step="1" value="1">
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1412,6 +1441,36 @@
         }
 
         const adminCsrfToken = '{{ csrf_token() }}';
+
+        function toggleAddSplitFields() {
+            const cat = document.getElementById('productCategory').value;
+            const toggleRow = document.getElementById('addSplitUnitToggleRow');
+            const detailRow = document.getElementById('addSplitDetailRow');
+            const cb = document.getElementById('addEnableSplit');
+            if (cat === 'ยา') {
+                toggleRow.style.display = '';
+            } else {
+                toggleRow.style.display = 'none';
+                detailRow.style.display = 'none';
+                if (cb) cb.checked = false;
+                // clear values when hidden
+                ['add_package_unit','add_base_unit','add_conversion_rate'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) { el.value = el.type === 'number' ? '1' : ''; }
+                });
+            }
+        }
+        function toggleAddSplitDetail() {
+            const cb = document.getElementById('addEnableSplit');
+            const detailRow = document.getElementById('addSplitDetailRow');
+            detailRow.style.display = cb.checked ? '' : 'none';
+            if (!cb.checked) {
+                ['add_package_unit','add_base_unit','add_conversion_rate'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) { el.value = el.type === 'number' ? '1' : ''; }
+                });
+            }
+        }
 
         function submitAddProduct() {
             const form = document.querySelector('#addProductModal form');

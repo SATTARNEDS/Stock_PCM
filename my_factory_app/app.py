@@ -66,7 +66,7 @@ app.config.update(
     TEMPLATES_AUTO_RELOAD=True
 )
 app.jinja_env.auto_reload = True
-DB_NAME = 'factory_stock.db'
+DB_NAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'factory_stock.db')
 THAILAND_TZ = 'Asia/Bangkok'
 SESSION_TIMEOUT_MINUTES = 15
 USER_LOCK_TIMEOUT_MINUTES = 5
@@ -579,12 +579,15 @@ def menu():
 
     # --- การแจ้งเตือน: หมวกนิรภัยครบกำหนดเปลี่ยน (>= 23 เดือน) ---
     helmet_due = False
+    helmet_last_date = None
     if not session.get('helmet_due_dismissed'):
         helmet_log = conn.execute(f'''
             SELECT MAX(datetime({transaction_timestamp_expr('l')})) as last_issue
             FROM transaction_logs l
+            JOIN products p ON l.product_id = p.id
             WHERE l.emp_id = ?
-              AND (l.action LIKE '%หมวก%' OR l.action LIKE '%Helmet%')
+              AND (p.name LIKE '%หมวก%' OR p.name LIKE '%Helmet%'
+                   OR l.action LIKE '%หมวก%' OR l.action LIKE '%Helmet%')
               AND l.status = 'Approved'
         ''', (emp_id,)).fetchone()
         if helmet_log and helmet_log['last_issue']:
@@ -592,6 +595,8 @@ def menu():
                 last_dt = datetime.strptime(helmet_log['last_issue'][:19], '%Y-%m-%d %H:%M:%S')
                 months_elapsed = (datetime.now() - last_dt).days / 30.0
                 helmet_due = months_elapsed >= 23
+                if helmet_due:
+                    helmet_last_date = last_dt.strftime('%d/%m/%Y')
             except Exception:
                 pass
 
@@ -605,7 +610,8 @@ def menu():
                            open_cart=open_cart,
                            history=history,
                            rejected_notifications=rejected_notifications,
-                           helmet_due=helmet_due)
+                           helmet_due=helmet_due,
+                           helmet_last_date=helmet_last_date)
 
 @app.route('/add_to_cart', methods=['POST'])
 def add_to_cart():
@@ -1749,6 +1755,14 @@ def add_product():
     safety_stock = max(0, request.form.get('safety_stock', 0, type=int) or 0)
     stock = max(0, request.form.get('stock', 0, type=int) or 0)
     expiry_date = standardize_date(request.form.get('expiry_date', ''))
+    package_unit = clean_input_text(request.form.get('package_unit', ''), 30) or None
+    base_unit = clean_input_text(request.form.get('base_unit', ''), 30) or None
+    conversion_rate = max(1, request.form.get('conversion_rate', 1, type=int) or 1)
+    # Only store split-unit info when both package_unit and base_unit are provided
+    if not package_unit or not base_unit:
+        package_unit = None
+        base_unit = None
+        conversion_rate = 1
 
     if not re.fullmatch(r'[A-Z0-9_-]{2,40}', code):
         return jsonify({'success': False, 'message': 'รหัสของไม่ถูกต้อง'}), 400
@@ -1766,14 +1780,14 @@ def add_product():
             lot_number = datetime.now().strftime('%d%m%Y') + "-NEW"
             receive_date = datetime.now().strftime('%Y-%m-%d')
             cursor = conn.execute('''
-                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_no, received_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_number, receive_date))
+                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_no, received_date, package_unit, base_unit, conversion_rate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_number, receive_date, package_unit, base_unit, conversion_rate))
         else:
             cursor = conn.execute('''
-                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (code, name, category, unit, location, safety_stock, stock, ''))
+                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, package_unit, base_unit, conversion_rate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (code, name, category, unit, location, safety_stock, stock, '', package_unit, base_unit, conversion_rate))
         
         product_id = cursor.lastrowid
 
@@ -3163,7 +3177,10 @@ if __name__ == '__main__':
         
         # 2. ดึงเวลาจาก Database มาตั้งค่าเริ่มต้น
         conn = get_db_connection()
-        saved_time = conn.execute("SELECT value FROM settings WHERE key = 'daily_alert_time'").fetchone()
+        try:
+            saved_time = conn.execute("SELECT value FROM settings WHERE key = 'daily_alert_time'").fetchone()
+        except Exception:
+            saved_time = None
         conn.close()
         
         alert_time = saved_time['value'] if saved_time else "08:30"

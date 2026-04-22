@@ -175,7 +175,7 @@
         <div class="alert alert-warning d-flex align-items-start gap-2 rounded-3 border-0 shadow-sm py-2 mb-3 small" id="helmetAlert">
             <i class="fas fa-hard-hat mt-1"></i>
             <div class="flex-grow-1">
-                <strong>แจ้งเตือน:</strong> หมวกนิรภัยของคุณครบกำหนดเปลี่ยนแล้ว (ทุก 2 ปี) กรุณาทำคำขอเบิกหมวกใหม่
+                <strong>แจ้งเตือน:</strong> หมวกนิรภัยของคุณครบกำหนดเปลี่ยนแล้ว (ทุก 2 ปี) กรุณาทำคำขอเบิกหมวกใหม่{% if helmet_last_date %} <span class="text-muted">(เบิกล่าสุด: {{ helmet_last_date }})</span>{% endif %}
             </div>
             <button type="button" class="btn-close btn-sm ms-auto" onclick="dismissNotification('helmet', null, 'helmetAlert')"></button>
         </div>
