@@ -1698,24 +1698,28 @@ def get_next_code():
         'Safety': 'SAF',
         'ยา': 'MEDIC',
         'ของใช้สำนักงาน': 'STAT',
+        'IT อุปกรณ์': 'IT',
         'อื่นๆ': 'ITEM'
     }
     cat_prefix = prefix_map.get(category, 'ITEM') # ถ้าหาไม่เจอให้ใช้ ITEM
     loc_prefix = 'PC1' if 'PC1' in location else 'CC'
 
     conn = get_db_connection()
-    # 2. ค้นหารหัสล่าสุดของ หมวดหมู่ และ สถานที่ นี้
-    query = "SELECT code FROM products WHERE category = ? AND location LIKE ? ORDER BY code DESC LIMIT 1"
-    row = conn.execute(query, (category, f"%{loc_prefix}%")).fetchone()
+    # 2. ค้นหารหัสล่าสุดจาก prefix ของรหัส (ไม่พึ่ง category text ใน DB)
+    code_pattern = f"{cat_prefix}-{loc_prefix}-%"
+    row = conn.execute(
+        "SELECT code FROM products WHERE code LIKE ? ORDER BY LENGTH(code) DESC, code DESC LIMIT 1",
+        (code_pattern,)
+    ).fetchone()
     conn.close()
 
     # 3. คำนวณเลขถัดไป
     next_number = 1
     if row and row['code']:
         last_code = row['code']
-        # สมมติรหัสเก่าคือ MAID-PC1-001 เราจะแยกเอาเลข 001 มา +1
+        # รหัสเก่าคือ MAID-PC1-001 หรือ IT-PC1-010 — แยกเอาส่วนตัวเลขท้ายสุด
         parts = last_code.split('-')
-        if len(parts) >= 3 and parts[-1].isdigit():
+        if parts and parts[-1].isdigit():
             next_number = int(parts[-1]) + 1
 
     # 4. สร้างรหัสใหม่ เช่น MAID-PC1-002
