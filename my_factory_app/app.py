@@ -161,6 +161,24 @@ def generate_csrf_token():
 
 app.jinja_env.globals['csrf_token'] = generate_csrf_token
 
+def format_timestamp(ts):
+    """แปลง timestamp ทุกรูปแบบให้เป็น DD/MM/YYYY HH:MM เสมอ"""
+    if not ts:
+        return ''
+    ts = str(ts).strip()
+    # รูปแบบ DD/MM/YYYY HH:MM:SS หรือ DD/MM/YYYY HH:MM
+    if len(ts) >= 10 and ts[2:3] == '/' and ts[5:6] == '/':
+        return ts[:16]
+    # รูปแบบ YYYY-MM-DD HH:MM:SS หรือ YYYY-MM-DDTHH:MM:SS
+    ts_norm = ts[:19].replace('T', ' ')
+    try:
+        dt = datetime.strptime(ts_norm, '%Y-%m-%d %H:%M:%S')
+        return dt.strftime('%d/%m/%Y %H:%M')
+    except ValueError:
+        return ts[:16]
+
+app.jinja_env.filters['format_ts'] = format_timestamp
+
 def validate_csrf_token():
     expected = session.get('_csrf_token')
     provided = request.form.get('csrf_token') or request.headers.get('X-CSRF-Token')
@@ -1106,6 +1124,7 @@ def api_get_history():
         r['symptom'] = symptom
         r['display_qty'] = r['qty_base_unit'] if is_med and r.get('qty_base_unit') else r['qty']
         r['display_unit'] = (r['base_unit'] or 'เม็ด') if is_med and r.get('qty_base_unit') else (r['unit'] or '')
+        r['timestamp'] = format_timestamp(r.get('timestamp', ''))
         items.append(r)
 
     total_pages = math.ceil(total / per_page) if total > 0 else 1
@@ -1244,6 +1263,7 @@ def admin_login():
             session.clear()
             session['admin_logged_in'] = True
             session['admin_name'] = admin['name']
+            session['admin_username'] = admin['username']
             session['admin_role'] = admin['role']
             session.permanent = True
             return redirect(url_for('admin_dashboard'))
@@ -2386,6 +2406,38 @@ def filter_logs():
 def admin_logout():
     session.clear()
     return redirect(url_for('index'))
+
+@app.route('/admin/change_password', methods=['POST'])
+def change_password():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    old_password = data.get('old_password', '')
+    new_password = data.get('new_password', '')
+
+    if not old_password or not new_password or len(new_password) < 8 or len(new_password) > 128:
+        return jsonify({'success': False, 'message': 'ข้อมูลไม่ถูกต้อง'}), 400
+
+    username = session.get('admin_username', '')
+    if not username:
+        return jsonify({'success': False, 'message': 'Session หมดอายุ'}), 401
+    conn = get_db_connection()
+    try:
+        admin = conn.execute('SELECT * FROM admins WHERE username = ?', (username,)).fetchone()
+        if not admin or not check_password_hash(admin['password'], old_password):
+            return jsonify({'success': False, 'message': 'รหัสผ่านเดิมไม่ถูกต้อง'}), 400
+
+        new_hash = generate_password_hash(new_password)
+        conn.execute('UPDATE admins SET password = ? WHERE username = ?', (new_hash, username))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        print(f'Change password error: {e}')
+        return jsonify({'success': False, 'message': 'ไม่สามารถเปลี่ยนรหัสผ่านได้'}), 500
+    finally:
+        conn.close()
 
 # --- ฟังก์ชันเบิกของแบบ FIFO ---
 def withdraw_fifo_logic(product_id, qty_to_withdraw, emp_id):

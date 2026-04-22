@@ -1,7 +1,7 @@
 {% for log in logs %}
 {% if log['status'] != 'Pending' %}
 <tr>
-    <td class="small">{{ log['timestamp'] }}</td>
+    <td class="small">{{ log['timestamp'] | format_ts }}</td>
     <td>
         <div class="fw-medium">{{ log['emp_name'] or log['emp_id'] }}</div>
         <small class="text-muted">

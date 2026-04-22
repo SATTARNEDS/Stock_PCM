@@ -270,6 +270,10 @@
             </div>
 
             <div class="px-4 py-3 mt-auto border-top border-secondary">
+                <button type="button" class="btn btn-outline-light w-100 rounded-pill fw-medium mb-2"
+                    onclick="openChangePasswordModal()">
+                    <i class="fas fa-key me-2"></i> เปลี่ยนรหัสผ่าน
+                </button>
                 <form id="adminLogoutForm" action="/admin/logout" method="POST" class="mb-0">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-outline-danger w-100 rounded-pill fw-medium">
@@ -1235,6 +1239,46 @@
         </div>
     </div>
     {% endif %}
+    <!-- Back to Top Button -->
+    <button id="backToTopBtn" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="กลับด้านบน"
+        style="display:none;position:fixed;bottom:28px;right:28px;z-index:9999;
+               width:46px;height:46px;border-radius:50%;border:none;
+               background:#0d6efd;color:#fff;font-size:1.2rem;
+               box-shadow:0 4px 12px rgba(0,0,0,.25);cursor:pointer;transition:opacity .3s">
+        <i class="fas fa-chevron-up"></i>
+    </button>
+
+    <!-- Change Password Modal -->
+    <div class="modal fade" id="changePasswordModal" tabindex="-1">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-dark text-white border-0">
+                    <h5 class="modal-title fw-medium"><i class="fas fa-key text-warning me-2"></i>เปลี่ยนรหัสผ่าน</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div id="changePwAlert" class="d-none"></div>
+                    <div class="mb-3">
+                        <label class="form-label fw-medium text-muted small">รหัสผ่านเดิม</label>
+                        <input type="password" id="oldPassword" class="form-control shadow-none" autocomplete="current-password">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-medium text-muted small">รหัสผ่านใหม่</label>
+                        <input type="password" id="newPassword" class="form-control shadow-none" autocomplete="new-password">
+                    </div>
+                    <div class="mb-1">
+                        <label class="form-label fw-medium text-muted small">ยืนยันรหัสผ่านใหม่</label>
+                        <input type="password" id="confirmPassword" class="form-control shadow-none" autocomplete="new-password">
+                    </div>
+                </div>
+                <div class="modal-footer border-0 bg-light">
+                    <button type="button" class="btn btn-secondary rounded-pill px-4" data-bs-dismiss="modal">ยกเลิก</button>
+                    <button type="button" class="btn btn-primary rounded-pill px-4 fw-medium" onclick="submitChangePassword()">บันทึก</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <form id="importForm" action="{{ url_for('import_excel') }}" method="POST" enctype="multipart/form-data"
         style="display: none;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -1269,6 +1313,51 @@
         function submitAdminLogout() {
             const form = document.getElementById('adminLogoutForm');
             if (form) form.submit();
+        }
+
+        // Back to Top
+        window.addEventListener('scroll', function() {
+            const btn = document.getElementById('backToTopBtn');
+            if (btn) btn.style.display = window.scrollY > 300 ? 'block' : 'none';
+        });
+
+        // Change Password
+        function openChangePasswordModal() {
+            document.getElementById('oldPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+            const alert = document.getElementById('changePwAlert');
+            alert.className = 'd-none'; alert.textContent = '';
+            new bootstrap.Modal(document.getElementById('changePasswordModal')).show();
+        }
+        function submitChangePassword() {
+            const oldPw = document.getElementById('oldPassword').value;
+            const newPw = document.getElementById('newPassword').value;
+            const confirmPw = document.getElementById('confirmPassword').value;
+            const alertEl = document.getElementById('changePwAlert');
+            alertEl.className = 'd-none'; alertEl.textContent = '';
+            if (!oldPw || !newPw || !confirmPw) {
+                alertEl.className = 'alert alert-warning small py-2'; alertEl.textContent = 'กรุณากรอกข้อมูลให้ครบ'; return;
+            }
+            if (newPw !== confirmPw) {
+                alertEl.className = 'alert alert-danger small py-2'; alertEl.textContent = 'รหัสผ่านใหม่ไม่ตรงกัน'; return;
+            }
+            if (newPw.length < 8) {
+                alertEl.className = 'alert alert-warning small py-2'; alertEl.textContent = 'รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร'; return;
+            }
+            fetch('/admin/change_password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': adminCsrfToken },
+                body: JSON.stringify({ old_password: oldPw, new_password: newPw, csrf_token: adminCsrfToken })
+            }).then(checkAuth).then(r => r.json()).then(data => {
+                if (data.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('changePasswordModal')).hide();
+                    Swal.fire({ icon: 'success', title: 'เปลี่ยนรหัสผ่านสำเร็จ', timer: 1800, showConfirmButton: false });
+                } else {
+                    alertEl.className = 'alert alert-danger small py-2';
+                    alertEl.textContent = data.message || 'เกิดข้อผิดพลาด';
+                }
+            }).catch(() => { alertEl.className = 'alert alert-danger small py-2'; alertEl.textContent = 'ไม่สามารถเชื่อมต่อได้'; });
         }
 
         document.addEventListener('DOMContentLoaded', function () {

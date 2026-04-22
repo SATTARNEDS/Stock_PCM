@@ -187,7 +187,7 @@
             <i class="fas fa-times-circle mt-1"></i>
             <div class="flex-grow-1">
                 <strong>คำขอเบิกถูกปฏิเสธ:</strong> {{ notif.product_name }}
-                ({{ notif.qty }} {{ notif.unit }}) — {{ notif.timestamp }}
+                ({{ notif.qty }} {{ notif.unit }}) — {{ notif.timestamp | format_ts }}
             </div>
             <button type="button" class="btn-close btn-sm ms-auto" onclick="dismissNotification('rejection', {{ notif.id }}, 'rejection-{{ notif.id }}')"></button>
         </div>
