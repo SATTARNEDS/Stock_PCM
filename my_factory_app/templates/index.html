@@ -19,7 +19,10 @@
         }
 
         body {
-            background: #f1f5f9;
+            background:
+                radial-gradient(circle at 12% 10%, #d7ecff 0%, rgba(215, 236, 255, 0) 34%),
+                radial-gradient(circle at 88% 88%, #ffe9cc 0%, rgba(255, 233, 204, 0) 40%),
+                linear-gradient(145deg, #edf4ff 0%, #f4f7ff 52%, #f7fbf4 100%);
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -27,19 +30,50 @@
             font-family: 'Mitr', sans-serif;
             margin: 0;
             padding: 15px;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        body::before,
+        body::after {
+            content: "";
+            position: fixed;
+            width: 360px;
+            height: 360px;
+            border-radius: 50%;
+            filter: blur(50px);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        body::before {
+            background: rgba(13, 110, 253, 0.18);
+            top: -120px;
+            right: -90px;
+        }
+
+        body::after {
+            background: rgba(12, 170, 132, 0.14);
+            bottom: -130px;
+            left: -110px;
         }
 
         /* Container หลัก - แก้ไขความสูงและความกว้างให้สมดุล */
         .auth-container {
             position: relative;
-            background: var(--white);
+            background: rgba(255, 255, 255, 0.88);
             width: 900px;
             max-width: 100%;
             min-height: 580px;
             border-radius: 32px;
-            box-shadow: 0 25px 70px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 30px 70px rgba(15, 43, 79, 0.18);
             overflow: hidden;
             display: flex;
+            border: 1px solid rgba(255, 255, 255, 0.7);
+            -webkit-backdrop-filter: blur(8px);
+            backdrop-filter: blur(8px);
+            z-index: 1;
+            animation: cardFloatIn 0.7s ease forwards;
         }
 
         /* ฝั่งฟอร์ม (สีขาว) */
@@ -68,7 +102,7 @@
             left: 50%;
             width: 50%;
             height: 100%;
-            background: linear-gradient(135deg, #0d6efd 0%, #084298 100%);
+            background: linear-gradient(145deg, #0d6efd 0%, #0a4ca0 60%, #072d66 100%);
             color: white;
             display: flex;
             flex-direction: column;
@@ -78,6 +112,29 @@
             padding: 40px;
             transition: var(--transition);
             z-index: 2;
+            overflow: hidden;
+        }
+
+        .side-panel::before,
+        .side-panel::after {
+            content: "";
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.16);
+        }
+
+        .side-panel::before {
+            width: 220px;
+            height: 220px;
+            right: -90px;
+            top: -80px;
+        }
+
+        .side-panel::after {
+            width: 170px;
+            height: 170px;
+            left: -70px;
+            bottom: -75px;
         }
 
         /* สลับฝั่งเมื่อเป็น Admin */
@@ -98,7 +155,7 @@
                 flex-direction: column;
                 width: 100%;
                 max-width: 420px;
-                min-height: auto;
+                min-height: 0;
             }
 
             .form-box {
@@ -196,6 +253,15 @@
             border-color: white;
         }
 
+        .is-hidden {
+            display: none;
+        }
+
+        .panel-icon {
+            font-size: 3.5rem;
+            margin-bottom: 1rem;
+        }
+
         /* Alert Styling - แก้ไขบั๊กแถบแดงยาวเกินไป */
         .alert-mini {
             padding: 12px 16px;
@@ -219,6 +285,18 @@
             to {
                 opacity: 1;
                 transform: translateY(0);
+            }
+        }
+
+        @keyframes cardFloatIn {
+            from {
+                opacity: 0;
+                transform: translateY(18px) scale(0.98);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
             }
         }
     </style>
@@ -255,7 +333,7 @@
                 </form>
             </div>
 
-            <div class="form-content" id="adminForm" style="display: none;">
+            <div class="form-content is-hidden" id="adminForm">
                 <h2 class="text-center fw-medium mb-1">Admin Access</h2>
                 <p class="text-muted text-center mb-4 small">ลงชื่อเข้าใช้สิทธิ์ผู้ดูแลระบบ</p>
 
@@ -287,14 +365,14 @@
 
         <div class="side-panel">
             <div id="sideContentUser">
-                <div style="font-size: 3.5rem; margin-bottom: 1rem;">🏭</div>
+                <div class="panel-icon">🏭</div>
                 <h3 class="fw-medium">STOCK SYSTEM</h3>
                 <p class="small opacity-75 px-3">ระบบจัดการเบิกจ่ายพัสดุอุปกรณ์<br>PPE, Medicine, Maid Equipment, Stationary, IT stock</p>
                 <button class="btn-outline-white" onclick="toggleMode(true)">แอดมินระบบ?</button>
             </div>
 
-            <div id="sideContentAdmin" style="display: none;">
-                <div style="font-size: 3.5rem; margin-bottom: 1rem;"><i class="fas fa-user-shield"></i></div>
+            <div id="sideContentAdmin" class="is-hidden">
+                <div class="panel-icon"><i class="fas fa-user-shield"></i></div>
                 <h3 class="fw-medium">ADMIN MODE</h3>
                 <p class="small opacity-75 px-3">เข้าถึงสิทธิ์การจัดการหลังบ้าน<br>และดูรายงานสรุปทั้งหมด</p>
                 <button class="btn-outline-white" onclick="toggleMode(false)">ไปหน้าพนักงาน</button>
