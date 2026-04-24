@@ -30,3 +30,6 @@ LINE_ADMIN_USER_ID = ตั้งผ่าน environment variable
 LINE(PC1)
 LINE_TEST_CHANNEL_ACCESS_TOKEN = ตั้งผ่าน environment variable
 LINE_TEST_ADMIN_USER_ID = ตั้งผ่าน environment variable
+
+
+cd "C:\Users\sattarned\Documents\GitHub\PCM\my_factory_app"; ..\.venv\Scripts\python.exe app.py

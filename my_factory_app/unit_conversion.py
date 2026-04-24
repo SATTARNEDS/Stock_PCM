@@ -326,6 +326,8 @@ class UnitConversionManager:
                 'success': True,
                 'message': calc['message'] + ' ✅ บันทึกสำเร็จ',
                 'transaction_note': calc['transaction_note'],
+                'full_packages_needed': calc['full_packages_needed'],
+                'total_packages_used': calc['total_packages_used'],
                 'stock_remaining': info['stock_package_unit'] - calc['full_packages_needed']
             }
             

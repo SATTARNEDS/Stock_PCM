@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เลือกเมนูการใช้งาน</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --ink: #1b2a3a;
+            --brand-a: #0459c7;
+            --brand-b: #16a3bf;
+        }
+
+        body {
+            font-family: "Mitr", sans-serif;
+            color: var(--ink);
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 12% 15%, rgba(4, 89, 199, 0.13), transparent 34%),
+                radial-gradient(circle at 88% 8%, rgba(22, 163, 191, 0.16), transparent 31%),
+                linear-gradient(145deg, #eff6ff 0%, #f8fbff 52%, #f4faf8 100%);
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid rgba(10, 76, 138, 0.12);
+            box-shadow: 0 18px 36px rgba(12, 48, 90, 0.09);
+            -webkit-backdrop-filter: blur(8px);
+            backdrop-filter: blur(8px);
+        }
+
+        .service-card {
+            transition: transform 0.24s ease, box-shadow 0.24s ease;
+            border-radius: 18px;
+            overflow: hidden;
+        }
+
+        .service-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 18px 36px rgba(12, 48, 90, 0.14);
+        }
+
+        .service-head {
+            background: linear-gradient(130deg, var(--brand-a), var(--brand-b));
+            color: #fff;
+        }
+
+        .service-head.warning {
+            background: linear-gradient(130deg, #b57400, #ec9d00);
+        }
+
+        .service-head.secondary {
+            background: linear-gradient(130deg, #5f6a7a, #7c8799);
+        }
+
+        .badge-counter {
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+
+        .stat-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .stat-pill.pending   { background: #fff3cd; color: #7a5000; }
+        .stat-pill.done      { background: #d1e7dd; color: #0a6640; }
+        .stat-pill.lowstock  { background: #f8d7da; color: #842029; }
+        .stat-pill.ok        { background: #d1e7dd; color: #0a6640; }
+        .stat-pill.neutral   { background: #e9ecef; color: #495057; }
+    </style>
+</head>
+
+<body>
+    <div class="container py-4 py-lg-5">
+        <div class="glass rounded-4 p-4 p-lg-5 mb-4">
+            <div class="d-flex flex-wrap justify-content-between gap-3 align-items-center">
+                <div>
+                    <div class="small text-muted">{{ user['location'] }} | {{ user['department'] }}</div>
+                    <h1 class="h3 mb-1 fw-medium">เลือกเมนูการใช้งาน</h1>
+                    <div class="text-muted">พนักงาน: {{ user['name'] }} ({{ user['emp_id'] }})</div>
+                </div>
+                <form action="{{ url_for('logout_user', emp_id=user['emp_id']) }}" method="POST" class="mb-0">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-outline-danger rounded-pill px-4">
+                        <i class="fas fa-sign-out-alt me-1"></i> ออกจากระบบ
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }} border-0 shadow-sm rounded-4 mb-3">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <div class="row g-4">
+            <div class="col-md-6 col-xl-4">
+                <div class="card service-card border-0 glass h-100">
+                    <div class="card-body p-0">
+                        <div class="service-head p-4">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <h2 class="h5 mb-1"><i class="fas fa-screwdriver-wrench me-2"></i>GA Request</h2>
+                                    <div class="small opacity-75">แจ้งซ่อม แจ้งปัญหา ส่งต่อ GA/IT</div>
+                                </div>
+                                {% if ga_pending > 0 %}
+                                <span class="badge bg-warning text-dark badge-counter rounded-pill">{{ ga_pending }} รอดำเนินการ</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="p-4">
+                            <div class="mb-3 d-flex flex-wrap gap-2">
+                                {% if ga_pending > 0 %}
+                                <span class="stat-pill pending"><i class="fas fa-clock"></i> {{ ga_pending }} คำร้องรอดำเนินการ</span>
+                                {% else %}
+                                <span class="stat-pill ok"><i class="fas fa-check-circle"></i> ไม่มีคำร้องค้างอยู่</span>
+                                {% endif %}
+                                {% if ga_done > 0 %}
+                                <span class="stat-pill done"><i class="fas fa-history"></i> {{ ga_done }} รายการดำเนินการแล้ว</span>
+                                {% endif %}
+                            </div>
+                            <a href="{{ url_for('ga_request_portal', emp_id=user['emp_id']) }}" class="btn btn-primary rounded-pill px-4">
+                                เข้าใช้งาน GA Request
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6 col-xl-4">
+                <div class="card service-card border-0 glass h-100">
+                    <div class="card-body p-0">
+                        <div class="service-head warning p-4">
+                            <h2 class="h5 mb-1"><i class="fas fa-boxes-stacked me-2"></i>Stock เบิกของ</h2>
+                            <div class="small opacity-75">ค้นหาและเบิกอุปกรณ์ตามสิทธิ์ Location</div>
+                        </div>
+                        <div class="p-4">
+                            <p class="text-muted mb-4">เข้าหน้ารายการสินค้าเพื่อเบิกอุปกรณ์ พร้อมดูประวัติการเบิกล่าสุด</p>
+                            <a href="{{ url_for('menu', emp_id=user['emp_id']) }}" class="btn btn-warning rounded-pill px-4 text-dark">
+                                เข้าใช้งาน Stock
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6 col-xl-4">
+                <div class="card service-card border-0 glass h-100">
+                    <div class="card-body p-0">
+                        <div class="service-head secondary p-4">
+                            <h2 class="h5 mb-1"><i class="fas fa-car-side me-2"></i>ระบบจองรถ</h2>
+                            <div class="small">ศูนย์กลางงานจองรถภายใน</div>
+                        </div>
+                        <div class="p-4">
+                            <p class="text-muted mb-4">ระบบอยู่ในช่วงพัฒนา</p>
+                            <a href="{{ url_for('vehicle_booking_portal', emp_id=user['emp_id']) }}" class="btn btn-secondary rounded-pill px-4">
+                                เข้าใช้งานระบบจองรถ
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

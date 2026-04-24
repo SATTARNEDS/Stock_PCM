@@ -1,20 +1,26 @@
 import io
 import math
+import mimetypes
 import re
 import secrets
+import smtplib
 import sqlite3
-from datetime import datetime, date, timedelta
+import tempfile
+import time
+from datetime import datetime, date, timedelta, timezone
+from email.message import EmailMessage
 
 import os
 import pandas as pd
 import pytz
 import qrcode
 import requests
-from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify, make_response
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify, make_response, abort
 from flask_apscheduler import APScheduler
 from io import BytesIO
 from unit_conversion import UnitConversionManager  # ✅ Unit Conversion Support
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -55,11 +61,10 @@ scheduler = APScheduler()
 configured_secret = os.environ.get('FLASK_SECRET_KEY') or os.environ.get('SECRET_KEY')
 if not configured_secret:
     configured_secret = secrets.token_hex(32)
-    print('Warning: FLASK_SECRET_KEY not set; using a temporary random secret for this process.')
 
 app.secret_key = configured_secret
 app.config.update(
-    MAX_CONTENT_LENGTH=int(os.environ.get('MAX_UPLOAD_MB', '5')) * 1024 * 1024,
+    MAX_CONTENT_LENGTH=int(os.environ.get('MAX_UPLOAD_MB', '15')) * 1024 * 1024,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', '0') == '1',
@@ -71,13 +76,19 @@ THAILAND_TZ = 'Asia/Bangkok'
 SESSION_TIMEOUT_MINUTES = 15
 USER_LOCK_TIMEOUT_MINUTES = 5
 ALLOWED_IMPORT_EXTENSIONS = {'xlsx', 'xlsm', 'xls'}
+ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+_default_ga_upload_root = os.path.join(os.environ.get('LOCALAPPDATA', BASE_DIR), 'PCM', 'ga_uploads')
+GA_REQUEST_UPLOAD_DIR = os.environ.get('GA_REQUEST_UPLOAD_DIR', _default_ga_upload_root)
+GA_REQUEST_TARGET_TEAMS = ('GA', 'IT')
+GA_REQUEST_STATUS_OPTIONS = ('Pending', 'In Progress', 'Resolved', 'Rejected')
 SENSITIVE_POST_ENDPOINTS = {
     'index', 'admin_login', 'logout_user', 'admin_logout',
     'add_to_cart', 'remove_from_cart', 'update_cart_qty', 'confirm_withdrawal',
     'approve_request', 'reject_request', 'import_excel', 'clear_system_data',
     'toggle_product_status', 'add_product', 'edit_product', 'add_product_ajax',
     'write_off_ajax', 'unlock_user_ajax', 'unlock_user', 'add_user_ajax', 'delete_user',
-    'update_user_ajax', 'save_alert_time', 'daily_alert', 'reset_lock'
+    'update_user_ajax', 'save_alert_time', 'daily_alert', 'reset_lock',
+    'ga_request_portal', 'update_ga_request'
 }
 NO_CACHE_HEADERS = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -88,13 +99,17 @@ MAX_LOGIN_ATTEMPTS = int(os.environ.get('MAX_LOGIN_ATTEMPTS', '5'))
 LOGIN_BLOCK_MINUTES = int(os.environ.get('LOGIN_BLOCK_MINUTES', '5'))
 FAILED_LOGIN_ATTEMPTS = {}
 
+def utc_now_naive():
+    """UTC time แบบ naive เพื่อเข้ากับข้อมูลเดิมในระบบ rate-limit."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 def get_client_ip():
     forwarded_for = (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
     return forwarded_for or (request.remote_addr or 'unknown')
 
 def is_auth_rate_limited(scope):
     key = f"{scope}:{get_client_ip()}"
-    now = datetime.utcnow()
+    now = utc_now_naive()
     entry = FAILED_LOGIN_ATTEMPTS.get(key)
     if not entry:
         return False, 0
@@ -111,7 +126,7 @@ def is_auth_rate_limited(scope):
 
 def register_failed_attempt(scope):
     key = f"{scope}:{get_client_ip()}"
-    now = datetime.utcnow()
+    now = utc_now_naive()
     entry = FAILED_LOGIN_ATTEMPTS.get(key, {'count': 0, 'blocked_until': None})
 
     if entry.get('blocked_until') and now >= entry['blocked_until']:
@@ -130,6 +145,21 @@ def clear_failed_attempts(scope):
 def clean_input_text(value, max_length=100):
     text = re.sub(r'\s+', ' ', str(value or '').strip())
     return text[:max_length]
+
+def clean_multiline_text(value, max_length=2000):
+    text = str(value or '').replace('\x00', '')
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = '\n'.join(line.strip() for line in text.split('\n'))
+    text = re.sub(r'\n{3,}', '\n\n', text).strip()
+    return text[:max_length]
+
+def normalize_email_value(value):
+    return clean_input_text(value, 255).lower()
+
+def is_valid_email_address(value):
+    if not value:
+        return True
+    return bool(re.fullmatch(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', value))
 
 def normalize_location_value(value):
     raw = clean_input_text(value, 30)
@@ -279,7 +309,7 @@ def is_split_tablet_medicine(product_row):
         or ''
     ).strip().lower()
     conversion_rate = int((product_row['conversion_rate'] if 'conversion_rate' in row_keys else 1) or 1)
-    package_keywords = ('pack', 'package', 'box', 'jar', 'bottle', 'strip', 'sheet', 'sachet', 'แพ็ค', 'ห่อ', 'แผง', 'ซอง', 'กล่อง', 'กระปุก', 'ขวด')
+    package_keywords = ('pack', 'package', 'box', 'jar', 'bottle', 'tube', 'strip', 'sheet', 'sachet', 'แพ็ค', 'ห่อ', 'แผง', 'ซอง', 'กล่อง', 'กระปุก', 'ขวด', 'หลอด')
     return conversion_rate > 1 and any(k in package_label for k in package_keywords)
 
 def enrich_products_for_display(conn, products_list):
@@ -350,6 +380,26 @@ def standardize_date(date_value):
 
     return date_str # ถ้าเป็น YYYY-MM-DD อยู่แล้ว หรือแปลงไม่ได้ ก็คืนค่าเดิมไป
 
+def normalize_lot_number(value):
+    """Normalize lot number from manual input / Excel to avoid duplicate logical lots."""
+    lot = clean_input_text(value, 50)
+    if not lot:
+        return ''
+
+    # Remove spaces so variants like "06 04 2026" map to one value.
+    lot = re.sub(r'\s+', '', lot)
+
+    # Excel often turns lot values into floats like "6042026.0".
+    numeric_match = re.fullmatch(r'(\d+)(?:\.0+)?', lot)
+    if numeric_match:
+        digits = numeric_match.group(1)
+        # Date-like lot numbers should keep 8 digits (DDMMYYYY).
+        if len(digits) in (7, 8):
+            return digits.zfill(8)
+        return digits
+
+    return lot.upper()
+
 # ==========================================
 # 📲 ตั้งค่า LINE Messaging API
 # ==========================================
@@ -365,6 +415,54 @@ def get_db_connection():
     conn.execute("PRAGMA busy_timeout = 30000;")
     conn.row_factory = sqlite3.Row
     return conn
+
+def ensure_application_schema():
+    os.makedirs(GA_REQUEST_UPLOAD_DIR, exist_ok=True)
+
+    conn = sqlite3.connect(DB_NAME, timeout=20)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout = 30000;")
+
+        user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if user_columns and 'email' not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''")
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS ga_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                emp_id TEXT NOT NULL,
+                requester_name TEXT NOT NULL,
+                department TEXT,
+                location TEXT,
+                requester_email_snapshot TEXT,
+                target_team TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                image_path TEXT,
+                status TEXT NOT NULL DEFAULT 'Pending',
+                admin_note TEXT,
+                handled_by TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS ga_request_attachments (
+                request_id INTEGER PRIMARY KEY,
+                mime_type TEXT NOT NULL,
+                image_data BLOB NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(request_id) REFERENCES ga_requests(id) ON DELETE CASCADE
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_ga_requests_status_location ON ga_requests(status, location, created_at DESC)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_ga_requests_emp_id ON ga_requests(emp_id, created_at DESC)')
+        conn.commit()
+    finally:
+        conn.close()
+
+ensure_application_schema()
 
 def start_write_transaction(conn):
     """ล็อกฐานข้อมูลสำหรับธุรกรรมเขียน เพื่อลด race condition จากหลาย request พร้อมกัน"""
@@ -437,9 +535,364 @@ def send_line_message(message, target_group=None, location=None, role=None):
         headers = {'Content-Type': 'application/json', 'Authorization': f"Bearer {target['token']}"}
         payload = {'to': target['user_id'], 'messages': [{'type': 'text', 'text': message}]}
         try:
-            requests.post(url, headers=headers, json=payload)
+            response = requests.post(url, headers=headers, json=payload, timeout=15)
+            if response.status_code >= 400:
+                print(
+                    f"LINE push failed ({target['group']}): "
+                    f"HTTP {response.status_code} - {response.text[:300]}"
+                )
         except Exception as e:
             print(f"Error sending LINE message ({target['group']}): {e}")
+
+def parse_email_recipients(value):
+    recipients = []
+    for item in re.split(r'[;,\s]+', str(value or '').strip()):
+        email = normalize_email_value(item)
+        if email and is_valid_email_address(email):
+            recipients.append(email)
+    return list(dict.fromkeys(recipients))
+
+def list_invalid_email_entries(value):
+    invalid_entries = []
+    for item in re.split(r'[;,\s]+', str(value or '').strip()):
+        email = normalize_email_value(item)
+        if email and not is_valid_email_address(email):
+            invalid_entries.append(email)
+    return invalid_entries
+
+def get_settings_values(keys):
+    if not keys:
+        return {}
+
+    conn = get_db_connection()
+    try:
+        placeholders = ','.join(['?'] * len(keys))
+        rows = conn.execute(
+            f"SELECT key, value FROM settings WHERE key IN ({placeholders})",
+            tuple(keys)
+        ).fetchall()
+        return {row['key']: row['value'] for row in rows}
+    except sqlite3.OperationalError:
+        return {}
+    finally:
+        conn.close()
+
+def resolve_ga_request_recipients(target_team, location):
+    team = clean_input_text(target_team, 10).upper()
+    normalized_location = normalize_location_value(location)
+    location_key = 'PC1' if normalized_location == 'PC1' else 'CC' if is_cc_location_value(normalized_location) else 'GENERAL'
+
+    setting_keys = [
+        f'ga_recipients_{team.lower()}_{location_key.lower()}',
+        f'ga_recipients_{team.lower()}',
+        'ga_recipients_default'
+    ]
+    settings_map = get_settings_values(setting_keys)
+
+    env_keys = [
+        f'GA_REQUEST_RECIPIENTS_{team}_{location_key}',
+        f'GA_REQUEST_RECIPIENTS_{team}',
+        'GA_REQUEST_RECIPIENTS_DEFAULT'
+    ]
+
+    recipients = []
+    for key in setting_keys:
+        recipients.extend(parse_email_recipients(settings_map.get(key, '')))
+    for key in env_keys:
+        recipients.extend(parse_email_recipients(os.environ.get(key, '')))
+    return list(dict.fromkeys(recipients))
+
+def send_email_message(subject, body, recipients, attachment_path=None):
+    recipients = [email for email in recipients if is_valid_email_address(email)]
+    if not recipients:
+        return False, 'no-recipients'
+
+    smtp_setting_keys = [
+        'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_from', 'smtp_use_tls'
+    ]
+    smtp_settings = get_settings_values(smtp_setting_keys)
+
+    smtp_host = (smtp_settings.get('smtp_host') or os.environ.get('SMTP_HOST', '')).strip()
+    smtp_username = (smtp_settings.get('smtp_username') or os.environ.get('SMTP_USERNAME', '')).strip()
+    smtp_password = smtp_settings.get('smtp_password') or os.environ.get('SMTP_PASSWORD', '')
+    smtp_from = (smtp_settings.get('smtp_from') or os.environ.get('SMTP_FROM', smtp_username)).strip()
+    smtp_port_raw = (smtp_settings.get('smtp_port') or os.environ.get('SMTP_PORT', '587')).strip()
+    try:
+        smtp_port = int(smtp_port_raw)
+    except ValueError:
+        smtp_port = 587
+    smtp_use_tls_raw = (smtp_settings.get('smtp_use_tls') or os.environ.get('SMTP_USE_TLS', '1')).strip().lower()
+    smtp_use_tls = smtp_use_tls_raw not in ('0', 'false', 'no', 'off')
+
+    if not smtp_host or not smtp_from:
+        return False, 'mail-not-configured'
+
+    message = EmailMessage()
+    message['Subject'] = subject
+    message['From'] = smtp_from
+    message['To'] = ', '.join(recipients)
+    message.set_content(body)
+
+    if attachment_path and os.path.exists(attachment_path):
+        mime_type, _ = mimetypes.guess_type(attachment_path)
+        maintype, subtype = (mime_type or 'application/octet-stream').split('/', 1)
+        with open(attachment_path, 'rb') as attachment_file:
+            message.add_attachment(
+                attachment_file.read(),
+                maintype=maintype,
+                subtype=subtype,
+                filename=os.path.basename(attachment_path)
+            )
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as smtp:
+            if smtp_use_tls:
+                smtp.starttls()
+            if smtp_username:
+                smtp.login(smtp_username, smtp_password)
+            smtp.send_message(message)
+        return True, ''
+    except Exception as exc:
+        print(f'Error sending email: {exc}')
+        return False, str(exc)
+
+def save_uploaded_image(file_storage):
+    if not file_storage or not file_storage.filename:
+        return ''
+
+    filename = secure_filename(file_storage.filename)
+    if '.' not in filename:
+        raise ValueError('ไฟล์แนบต้องเป็นรูปภาพเท่านั้น')
+
+    extension = filename.rsplit('.', 1)[1].lower()
+    if extension not in ALLOWED_IMAGE_EXTENSIONS:
+        raise ValueError('รองรับไฟล์รูปภาพเฉพาะ png, jpg, jpeg, gif, webp')
+
+    month_folder = datetime.now().strftime('%Y%m')
+
+    # อ่านไฟล์เข้าหน่วยความจำก่อน เพื่อสามารถลองเขียนซ้ำหลายปลายทางได้
+    try:
+        file_storage.stream.seek(0)
+    except Exception:
+        pass
+    binary = file_storage.read()
+    if not binary:
+        raise ValueError('ไฟล์รูปภาพว่างหรืออ่านข้อมูลไม่ได้')
+
+    configured_root = GA_REQUEST_UPLOAD_DIR
+    appdata_root = _default_ga_upload_root
+    temp_root = os.path.join(tempfile.gettempdir(), 'PCM', 'ga_uploads')
+
+    candidate_roots = [
+        ('primary', configured_root),
+        ('appdata', appdata_root),
+        ('temp', temp_root),
+    ]
+
+    # ตัด path ซ้ำออก (เช่น primary == appdata)
+    unique_candidates = []
+    seen_roots = set()
+    for key, root in candidate_roots:
+        normalized_root = os.path.normcase(os.path.normpath(root))
+        if normalized_root in seen_roots:
+            continue
+        seen_roots.add(normalized_root)
+        unique_candidates.append((key, root))
+
+    last_error = None
+    for storage_key, root_dir in unique_candidates:
+        target_dir = os.path.join(root_dir, month_folder)
+        for _ in range(5):
+            stored_filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{secrets.token_hex(6)}.{extension}"
+            absolute_path = os.path.join(target_dir, stored_filename)
+            try:
+                os.makedirs(target_dir, exist_ok=True)
+                with open(absolute_path, 'wb') as out_file:
+                    out_file.write(binary)
+                return f"{storage_key}:{month_folder}/{stored_filename}"
+            except (PermissionError, OSError) as exc:
+                last_error = exc
+                print(f"[GA_UPLOAD] write failed ({storage_key}) {absolute_path}: {exc}")
+                time.sleep(0.15)
+
+    if isinstance(last_error, PermissionError):
+        raise ValueError('ไม่สามารถบันทึกไฟล์ได้ กรุณาลองใหม่อีกครั้ง (Permission denied)')
+    if last_error:
+        raise ValueError(f'ไม่สามารถบันทึกไฟล์ได้: {last_error}')
+    raise ValueError('ไม่สามารถบันทึกไฟล์ได้ กรุณาลองใหม่อีกครั้ง')
+
+def _ga_storage_roots():
+    return {
+        'primary': GA_REQUEST_UPLOAD_DIR,
+        'appdata': _default_ga_upload_root,
+        'temp': os.path.join(tempfile.gettempdir(), 'PCM', 'ga_uploads')
+    }
+
+def extract_uploaded_image_blob(file_storage):
+    if not file_storage or not file_storage.filename:
+        return None
+
+    filename = secure_filename(file_storage.filename)
+    if '.' not in filename:
+        raise ValueError('ไฟล์แนบต้องเป็นรูปภาพเท่านั้น')
+
+    extension = filename.rsplit('.', 1)[1].lower()
+    if extension not in ALLOWED_IMAGE_EXTENSIONS:
+        raise ValueError('รองรับไฟล์รูปภาพเฉพาะ png, jpg, jpeg, gif, webp')
+
+    mime_map = {
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'png': 'image/png',
+        'gif': 'image/gif',
+        'webp': 'image/webp'
+    }
+
+    try:
+        file_storage.stream.seek(0)
+    except Exception:
+        pass
+    binary = file_storage.read()
+    if not binary:
+        raise ValueError('ไฟล์รูปภาพว่างหรืออ่านข้อมูลไม่ได้')
+
+    return {
+        'mime_type': mime_map.get(extension, 'application/octet-stream'),
+        'image_data': binary
+    }
+
+def _resolve_ga_storage_and_relative_path(image_path):
+    image_path = (image_path or '').strip().replace('\\', '/')
+    if not image_path:
+        return None, None
+
+    if image_path.startswith('db:'):
+        db_id = image_path[3:].strip()
+        if db_id.isdigit():
+            return 'db', db_id
+        return None, None
+
+    if image_path.startswith('uploads/ga_requests/'):
+        return 'static', image_path
+
+    storage_key = 'primary'
+    relative = image_path
+    if ':' in image_path and not image_path.startswith('C:/') and not image_path.startswith('D:/'):
+        maybe_key, maybe_relative = image_path.split(':', 1)
+        if maybe_key in _ga_storage_roots():
+            storage_key = maybe_key
+            relative = maybe_relative
+
+    relative = os.path.normpath(relative).replace('\\', '/')
+    if not relative or relative.startswith('..'):
+        return None, None
+
+    return storage_key, relative
+
+def resolve_ga_attachment_absolute_path(image_path):
+    storage_key, relative = _resolve_ga_storage_and_relative_path(image_path)
+    if not storage_key:
+        return None
+
+    if storage_key == 'static':
+        legacy_path = os.path.join(BASE_DIR, 'static', relative)
+        return legacy_path if os.path.exists(legacy_path) else None
+
+    roots = _ga_storage_roots()
+    base_root = roots.get(storage_key)
+    if not base_root:
+        return None
+
+    absolute = os.path.join(base_root, relative)
+    return absolute if os.path.exists(absolute) else None
+
+def ga_image_url(image_path):
+    storage_key, relative = _resolve_ga_storage_and_relative_path(image_path)
+    if not storage_key:
+        return ''
+    if storage_key == 'db':
+        return url_for('ga_request_image_db', request_id=int(relative))
+    if storage_key == 'static':
+        return url_for('static', filename=relative)
+    return url_for('ga_request_image', storage=storage_key, image_rel_path=relative)
+
+app.jinja_env.globals['ga_image_url'] = ga_image_url
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_request_entity_too_large(_error):
+    emp_id = (request.args.get('emp_id') or request.form.get('emp_id') or '').strip()
+    max_mb = int(app.config.get('MAX_CONTENT_LENGTH', 0) / (1024 * 1024)) if app.config.get('MAX_CONTENT_LENGTH') else 0
+    if max_mb > 0:
+        flash(f'❌ ไฟล์ใหญ่เกินกำหนด (สูงสุด {max_mb} MB)', 'danger')
+    else:
+        flash('❌ ไฟล์ใหญ่เกินกำหนด', 'danger')
+
+    if request.path.startswith('/ga-request') and emp_id:
+        return redirect(url_for('ga_request_portal', emp_id=emp_id))
+    return redirect(url_for('index'))
+
+@app.route('/ga-request-image/<storage>/<path:image_rel_path>')
+def ga_request_image(storage, image_rel_path):
+    roots = _ga_storage_roots()
+    if storage not in roots:
+        abort(404)
+
+    normalized = os.path.normpath((image_rel_path or '').strip()).replace('\\', '/')
+    if not normalized or normalized.startswith('..'):
+        abort(404)
+
+    absolute = os.path.join(roots[storage], normalized)
+    if not os.path.isfile(absolute):
+        abort(404)
+    return send_file(absolute)
+
+@app.route('/ga-request-image/db/<int:request_id>')
+def ga_request_image_db(request_id):
+    conn = get_db_connection()
+    row = conn.execute(
+        'SELECT mime_type, image_data FROM ga_request_attachments WHERE request_id = ?',
+        (request_id,)
+    ).fetchone()
+    conn.close()
+
+    if not row or not row['image_data']:
+        abort(404)
+
+    return send_file(
+        BytesIO(row['image_data']),
+        mimetype=row['mime_type'] or 'application/octet-stream'
+    )
+
+def build_ga_request_email_body(request_row):
+    description = str(request_row.get('description') or '').strip()
+    lines = [
+        'มี GA Request ใหม่จากระบบ PCM',
+        '',
+        f"เลขที่คำร้อง: GA-{int(request_row['id']):05d}",
+        f"ผู้แจ้ง: {request_row['requester_name']}",
+        f"รหัสพนักงาน: {request_row['emp_id']}",
+        f"แผนก: {request_row['department'] or '-'}",
+        f"Location: {request_row['location'] or '-'}",
+        f"ส่วนงานที่รับผิดชอบ: {request_row['target_team']}",
+        f"หัวข้อ: {request_row['title']}",
+        '',
+        'รายละเอียดปัญหา:',
+        description or '-',
+    ]
+    return '\n'.join(lines)
+
+def build_ga_status_email_body(request_row, new_status, admin_note=''):
+    lines = [
+        'สถานะคำร้องของคุณถูกอัปเดตแล้ว',
+        '',
+        f"เลขที่คำร้อง: GA-{int(request_row['id']):05d}",
+        f"หัวข้อ: {request_row['title']}",
+        f"สถานะใหม่: {new_status}",
+        f"ผู้ดำเนินการ: {request_row.get('handled_by') or '-'}",
+    ]
+    if admin_note:
+        lines.extend(['', 'หมายเหตุจากผู้ดูแล:', admin_note])
+    return '\n'.join(lines)
 
 # ==========================================
 # 👤 ส่วนของพนักงาน (USER & CART SYSTEM)
@@ -465,7 +918,7 @@ def index():
             # เพิ่มการเช็ค: ถ้าเป็นคนเดิมที่ถือ Session อยู่ ให้เข้าได้เลยไม่ติด Lock
             if session.get('user_id') == emp_id:
                 conn.close()
-                return redirect(url_for('menu', emp_id=emp_id))
+                return redirect(url_for('user_services', emp_id=emp_id))
 
             # 4. ป้องกันล็อกอินซ้ำ (ปรับปรุงใหม่: เช็คเวลา last_seen)
             if is_user_currently_locked(user):
@@ -480,7 +933,7 @@ def index():
             conn.execute("UPDATE users SET is_locked = 1, last_seen = datetime('now', '+7 hours') WHERE emp_id = ?", (emp_id,))
             conn.commit()
             conn.close()
-            return redirect(url_for('menu', emp_id=emp_id))
+            return redirect(url_for('user_services', emp_id=emp_id))
         else:
             conn.close()
             register_failed_attempt('user_login')
@@ -630,6 +1083,196 @@ def menu():
                            rejected_notifications=rejected_notifications,
                            helmet_due=helmet_due,
                            helmet_last_date=helmet_last_date)
+
+@app.route('/user-services')
+def user_services():
+    emp_id = (request.args.get('emp_id') or '').strip()
+    if not is_valid_user_session(emp_id):
+        flash('⚠️ กรุณาเข้าสู่ระบบใหม่', 'user_error')
+        return redirect(url_for('index'))
+
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
+    if not user:
+        conn.close()
+        flash('❌ ไม่พบข้อมูลพนักงาน', 'danger')
+        return redirect(url_for('index'))
+
+    # Badge: GA requests ของ user นี้ที่ยัง Pending
+    ga_pending = conn.execute(
+        "SELECT COUNT(*) as cnt FROM ga_requests WHERE emp_id = ? AND status = 'Pending'",
+        (emp_id,)
+    ).fetchone()['cnt']
+
+    # Badge: GA requests ที่ถูกดำเนินการแล้ว (In Progress / Done) ของ user นี้ (แจ้งให้รู้ว่ามีอัปเดต)
+    ga_done = conn.execute(
+        "SELECT COUNT(*) as cnt FROM ga_requests WHERE emp_id = ? AND status IN ('In Progress','Done','Rejected')",
+        (emp_id,)
+    ).fetchone()['cnt']
+
+    conn.close()
+
+    return render_template('user_services.html', user=user,
+                           ga_pending=ga_pending, ga_done=ga_done)
+
+@app.route('/vehicle-booking')
+def vehicle_booking_portal():
+    emp_id = (request.args.get('emp_id') or '').strip()
+    if not is_valid_user_session(emp_id):
+        flash('⚠️ กรุณาเข้าสู่ระบบใหม่', 'user_error')
+        return redirect(url_for('index'))
+
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
+    conn.close()
+    if not user:
+        flash('❌ ไม่พบข้อมูลพนักงาน', 'danger')
+        return redirect(url_for('index'))
+
+    return render_template('vehicle_booking.html', user=user)
+
+@app.route('/ga-request', methods=['GET', 'POST'])
+def ga_request_portal():
+    emp_id = (request.args.get('emp_id') or request.form.get('emp_id') or '').strip()
+    if not is_valid_user_session(emp_id):
+        flash('⚠️ กรุณาเข้าสู่ระบบใหม่', 'user_error')
+        return redirect(url_for('index'))
+
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
+    if not user:
+        conn.close()
+        flash('❌ ไม่พบข้อมูลพนักงาน', 'danger')
+        return redirect(url_for('index'))
+
+    if request.method == 'POST':
+        target_team = clean_input_text(request.form.get('target_team'), 10).upper()
+        title = clean_input_text(request.form.get('title'), 150)
+        description = clean_multiline_text(request.form.get('description'), 2000)
+
+        if target_team not in GA_REQUEST_TARGET_TEAMS:
+            conn.close()
+            flash('❌ กรุณาเลือกส่วนงานผู้รับผิดชอบ', 'danger')
+            return redirect(url_for('ga_request_portal', emp_id=emp_id))
+        if not title:
+            conn.close()
+            flash('❌ กรุณาระบุหัวข้อปัญหา', 'danger')
+            return redirect(url_for('ga_request_portal', emp_id=emp_id))
+        if len(description) < 10:
+            conn.close()
+            flash('❌ กรุณาระบุรายละเอียดปัญหาอย่างน้อย 10 ตัวอักษร', 'danger')
+            return redirect(url_for('ga_request_portal', emp_id=emp_id))
+
+        image_path = ''
+        image_save_warning = ''
+        db_attachment_payload = None
+        uploaded_image = request.files.get('image')
+        try:
+            image_path = save_uploaded_image(uploaded_image)
+        except ValueError as exc:
+            # ถ้าเขียนไฟล์ลงดิสก์ไม่ได้ ให้ fallback ไปเก็บเป็น BLOB ใน DB
+            if uploaded_image and uploaded_image.filename:
+                try:
+                    db_attachment_payload = extract_uploaded_image_blob(uploaded_image)
+                    image_save_warning = 'ไฟล์แนบถูกบันทึกด้วยโหมดสำรอง (DB attachment)'
+                except ValueError as blob_exc:
+                    image_save_warning = str(blob_exc)
+            else:
+                image_save_warning = str(exc)
+            image_path = ''
+            print(f"[GA_UPLOAD] value error while saving attachment: {exc}")
+        except Exception as exc:
+            image_save_warning = 'ไม่สามารถบันทึกไฟล์แนบได้ กรุณาลองใหม่อีกครั้ง'
+            image_path = ''
+            print(f"[GA_UPLOAD] unexpected error while saving attachment: {exc}")
+
+        requester_email = normalize_email_value(user['email']) if 'email' in user.keys() else ''
+        if requester_email and not is_valid_email_address(requester_email):
+            requester_email = ''
+
+        created_at = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
+        cursor = conn.execute('''
+            INSERT INTO ga_requests (
+                emp_id, requester_name, department, location, requester_email_snapshot,
+                target_team, title, description, image_path, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?)
+        ''', (
+            emp_id,
+            user['name'],
+            user['department'],
+            user['location'],
+            requester_email,
+            target_team,
+            title,
+            description,
+            image_path,
+            created_at,
+            created_at
+        ))
+
+        request_id = cursor.lastrowid
+        if db_attachment_payload and request_id:
+            try:
+                conn.execute(
+                    'INSERT OR REPLACE INTO ga_request_attachments (request_id, mime_type, image_data) VALUES (?, ?, ?)',
+                    (request_id, db_attachment_payload['mime_type'], db_attachment_payload['image_data'])
+                )
+                conn.execute('UPDATE ga_requests SET image_path = ? WHERE id = ?', (f'db:{request_id}', request_id))
+            except Exception as exc:
+                print(f"[GA_UPLOAD] failed to persist DB attachment for request {request_id}: {exc}")
+                if not image_save_warning:
+                    image_save_warning = 'บันทึกคำร้องแล้ว แต่ไม่สามารถแนบรูปได้'
+
+        conn.commit()
+
+        request_payload = {
+            'id': request_id,
+            'emp_id': emp_id,
+            'requester_name': user['name'],
+            'department': user['department'],
+            'location': user['location'],
+            'target_team': target_team,
+            'title': title,
+            'description': description,
+        }
+        recipients = resolve_ga_request_recipients(target_team, user['location'])
+        attachment_absolute_path = resolve_ga_attachment_absolute_path(image_path)
+        email_sent, email_error = send_email_message(
+            subject=f"[PCM] GA Request ใหม่ {target_team} - {title}",
+            body=build_ga_request_email_body(request_payload),
+            recipients=recipients,
+            attachment_path=attachment_absolute_path
+        )
+
+        flash_message = '✅ ส่งคำร้องเรียบร้อยแล้ว'
+        if not recipients:
+            flash_message += ' (ยังไม่มีอีเมลผู้รับผิดชอบในระบบ environment)'
+        elif not email_sent and email_error == 'mail-not-configured':
+            flash_message += ' (บันทึกคำร้องแล้ว แต่ยังไม่ได้ตั้งค่า SMTP)'
+        elif not email_sent:
+            flash_message += ' (บันทึกคำร้องแล้ว แต่ส่งอีเมลไม่สำเร็จ)'
+
+        if image_save_warning:
+            flash_message += f' (บันทึกรายการแล้ว แต่แนบรูปไม่สำเร็จ: {image_save_warning})'
+
+        conn.close()
+        flash(flash_message, 'success')
+        return redirect(url_for('ga_request_portal', emp_id=emp_id))
+
+    recent_requests = conn.execute('''
+        SELECT * FROM ga_requests
+        WHERE emp_id = ?
+        ORDER BY datetime(created_at) DESC, id DESC
+        LIMIT 10
+    ''', (emp_id,)).fetchall()
+    conn.close()
+
+    return render_template(
+        'ga_request.html',
+        user=user,
+        recent_requests=recent_requests,
+        target_teams=GA_REQUEST_TARGET_TEAMS
+    )
 
 @app.route('/add_to_cart', methods=['POST'])
 def add_to_cart():
@@ -937,13 +1580,20 @@ def confirm_withdrawal():
                 }
             
             # ✅ Log transaction with unit info
+            # สำหรับยาแบบแยกหน่วย: qty = จำนวนแพ็ก (full_packages_needed), qty_base_unit = จำนวนหน่วยย่อย (เม็ด)
+            # สำหรับรายการอื่น: qty = จำนวนที่ขอเบิก (หน่วยเดียวกับ unit ของสินค้า)
+            if is_medicine:
+                result_qty = withdrawal_result.get('full_packages_needed', item['qty'])
+            else:
+                result_qty = withdrawal_result.get('full_packages_used', item['qty'])
+            result_pkg_qty = withdrawal_result.get('total_packages_used', result_qty)
+
             if "หมวกเซฟตี้" in item_name or "Helmet" in item_name:
                 existing_helmet = conn.execute('''
                     SELECT id FROM transaction_logs 
                     WHERE emp_id = ? AND product_id = ? AND action = 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)'
                 ''', (emp_id, item['product_id'])).fetchone()
 
-                result_qty = withdrawal_result.get('full_packages_used', item['qty'])
                 result_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
                 if existing_helmet:
                     conn.execute('''
@@ -955,16 +1605,15 @@ def confirm_withdrawal():
                     conn.execute('''
                         INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note) 
                         VALUES (?, ?, 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)', ?, ?, ?, 'Pending', ?, ?)
-                    ''', (emp_id, item['product_id'], result_qty, item['qty'], withdrawal_result.get('total_packages_used', result_qty), thai_now, result_note))
+                    ''', (emp_id, item['product_id'], result_qty, item['qty'], result_pkg_qty, thai_now, result_note))
             else:
-                result_qty = withdrawal_result.get('full_packages_used', item['qty'])
                 result_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
                 if has_medicine and is_medicine:
                     result_note = f"อาการ: {symptom}" + (f" | {result_note}" if result_note else "")
                 conn.execute('''
                     INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note) 
                     VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, ?, ?, 'Pending', ?, ?)
-                ''', (emp_id, item['product_id'], result_qty, item['qty'], withdrawal_result.get('total_packages_used', result_qty), thai_now, result_note))
+                ''', (emp_id, item['product_id'], result_qty, item['qty'], result_pkg_qty, thai_now, result_note))
             
             log_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
             display_qty = item['qty']
@@ -1266,7 +1915,7 @@ def admin_login():
             session['admin_username'] = admin['username']
             session['admin_role'] = admin['role']
             session.permanent = True
-            return redirect(url_for('admin_dashboard'))
+            return redirect(url_for('admin_dashboard', module='stock'))
         
         register_failed_attempt('admin_login')
         flash('❌ ชื่อผู้ใช้หรือรหัสผ่านแอดมินไม่ถูกต้อง', 'admin_error')
@@ -1274,11 +1923,15 @@ def admin_login():
     # สำคัญ: ต้อง render_template กลับไปหน้า index.html (หน้าที่มีทั้ง 2 ฟอร์ม)
     return render_template('index.html')
 
-@app.route('/admin')
-def admin_dashboard():
+@app.route('/admin', defaults={'module': 'stock'})
+@app.route('/admin/<module>')
+def admin_dashboard(module):
     if not session.get('admin_logged_in'): return redirect(url_for('index'))
     
     role = session.get('admin_role', 'superadmin')
+    admin_module = (module or 'stock').strip().lower()
+    if admin_module not in ('stock', 'ga', 'vehicle'):
+        admin_module = 'stock'
     
     # --- Filter ตาม Role และการเลือกสถานที่ (คงเดิม) ---
     role_log_filter = ""
@@ -1296,6 +1949,22 @@ def admin_dashboard():
             super_admin_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')"
     
     final_log_filter = role_log_filter + super_admin_filter
+
+    ga_selected_loc = request.args.get('ga_loc', '')
+    ga_role_filter = ""
+    if role == 'admin_pc1':
+        ga_role_filter = " AND (g.location LIKE '%PC1%')"
+    elif role == 'admin_cc':
+        ga_role_filter = " AND (g.location LIKE '%Coil Center%' OR g.location LIKE '%CC%')"
+
+    ga_super_admin_filter = ""
+    if role == 'superadmin':
+        if ga_selected_loc == 'PC1':
+            ga_super_admin_filter = " AND (g.location LIKE '%PC1%')"
+        elif ga_selected_loc == 'CC':
+            ga_super_admin_filter = " AND (g.location LIKE '%Coil Center%' OR g.location LIKE '%CC%')"
+
+    final_ga_filter = ga_role_filter + ga_super_admin_filter
 
     product_loc_filter = ""
     if role == 'admin_pc1':
@@ -1397,10 +2066,33 @@ def admin_dashboard():
     low_stock = conn.execute(low_stock_query).fetchall()
     low_stock = enrich_products_for_display(conn, low_stock)
 
+    ga_requests = conn.execute(f'''
+        SELECT g.*,
+               COALESCE(NULLIF(TRIM(g.requester_email_snapshot), ''), NULLIF(TRIM(u.email), ''), '-') AS requester_email
+        FROM ga_requests g
+        LEFT JOIN users u ON g.emp_id = u.emp_id
+        WHERE 1=1 {final_ga_filter}
+        ORDER BY
+            CASE g.status
+                WHEN 'Pending' THEN 0
+                WHEN 'In Progress' THEN 1
+                ELSE 2
+            END,
+            datetime(g.created_at) DESC,
+            g.id DESC
+        LIMIT 100
+    ''').fetchall()
+    ga_pending_count = conn.execute(
+        f"SELECT COUNT(*) FROM ga_requests g WHERE g.status = 'Pending' {final_ga_filter}"
+    ).fetchone()[0]
+
+    stock_pending_count = len(pending_logs)
+
     conn.close()
     
     return render_template('admin_dashboard.html',
                            pending_logs=pending_logs,
+                           stock_pending_count=stock_pending_count,
                            items=all_stock,
                            categories=categories,
                            low_stock=low_stock,
@@ -1409,7 +2101,76 @@ def admin_dashboard():
                            dept_labels=dept_labels, dept_values=dept_values, dept_summary=dept_summary, # ข้อมูลสำหรับกราฟ
                            top_items=top_items, # ข้อมูลของเบิกสูงสุด
                            role=role,
-                           selected_loc=selected_loc)
+                           admin_module=admin_module,
+                           selected_loc=selected_loc,
+                           ga_requests=ga_requests,
+                           ga_pending_count=ga_pending_count,
+                           ga_selected_loc=ga_selected_loc,
+                           ga_status_options=GA_REQUEST_STATUS_OPTIONS)
+
+@app.route('/admin/update_ga_request/<int:request_id>', methods=['POST'])
+def update_ga_request(request_id):
+    if not session.get('admin_logged_in'):
+        flash('❌ กรุณาเข้าสู่ระบบผู้ดูแลก่อน', 'danger')
+        return redirect(url_for('index'))
+
+    new_status = clean_input_text(request.form.get('status'), 20)
+    admin_note = clean_multiline_text(request.form.get('admin_note'), 1000)
+    ga_loc = clean_input_text(request.form.get('ga_loc'), 10)
+
+    if new_status not in GA_REQUEST_STATUS_OPTIONS:
+        flash('❌ สถานะคำร้องไม่ถูกต้อง', 'danger')
+        return redirect(url_for('admin_dashboard', module='ga', ga_loc=ga_loc))
+
+    role = session.get('admin_role', 'superadmin')
+    conn = get_db_connection()
+    ga_request = conn.execute('SELECT * FROM ga_requests WHERE id = ?', (request_id,)).fetchone()
+    if not ga_request:
+        conn.close()
+        flash('❌ ไม่พบคำร้องที่เลือก', 'danger')
+        return redirect(url_for('admin_dashboard', module='ga', ga_loc=ga_loc))
+
+    if role == 'admin_pc1' and 'PC1' not in str(ga_request['location'] or ''):
+        conn.close()
+        flash('❌ คุณไม่มีสิทธิ์จัดการคำร้องนอก PC1', 'danger')
+        return redirect(url_for('admin_dashboard', module='ga', ga_loc=ga_loc))
+    if role == 'admin_cc' and not is_cc_location_value(ga_request['location']):
+        conn.close()
+        flash('❌ คุณไม่มีสิทธิ์จัดการคำร้องนอก CC', 'danger')
+        return redirect(url_for('admin_dashboard', module='ga', ga_loc=ga_loc))
+
+    handled_by = session.get('admin_name') or session.get('admin_username') or 'Admin'
+    updated_at = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
+    conn.execute('''
+        UPDATE ga_requests
+        SET status = ?, admin_note = ?, handled_by = ?, updated_at = ?
+        WHERE id = ?
+    ''', (new_status, admin_note, handled_by, updated_at, request_id))
+    conn.commit()
+
+    requester_email = normalize_email_value(ga_request['requester_email_snapshot'])
+    if not requester_email:
+        user_row = conn.execute('SELECT email FROM users WHERE emp_id = ?', (ga_request['emp_id'],)).fetchone()
+        requester_email = normalize_email_value(user_row['email']) if user_row and user_row['email'] else ''
+
+    if requester_email and is_valid_email_address(requester_email):
+        send_email_message(
+            subject=f"[PCM] อัปเดตสถานะ GA Request - {ga_request['title']}",
+            body=build_ga_status_email_body(
+                {
+                    'id': ga_request['id'],
+                    'title': ga_request['title'],
+                    'handled_by': handled_by,
+                },
+                new_status,
+                admin_note
+            ),
+            recipients=[requester_email]
+        )
+
+    conn.close()
+    flash('✅ อัปเดตสถานะ GA Request เรียบร้อยแล้ว', 'success')
+    return redirect(url_for('admin_dashboard', module='ga', ga_loc=ga_loc))
 
 @app.route('/cron/daily_alert', methods=['POST'])
 def daily_alert():
@@ -1542,7 +2303,7 @@ def approve_request(log_id):
             ''', (log_id,)).fetchone()
             if not permission_check:
                 flash('❌ คุณไม่มีสิทธิ์อนุมัติรายการนี้', 'danger')
-                return redirect(url_for('admin_dashboard'))
+                return redirect(url_for('admin_dashboard', module='stock'))
         elif role == 'admin_cc':
             permission_check = conn.execute('''
                 SELECT l.id FROM transaction_logs l
@@ -1551,22 +2312,41 @@ def approve_request(log_id):
             ''', (log_id,)).fetchone()
             if not permission_check:
                 flash('❌ คุณไม่มีสิทธิ์อนุมัติรายการนี้', 'danger')
-                return redirect(url_for('admin_dashboard'))
+                return redirect(url_for('admin_dashboard', module='stock'))
 
         log = conn.execute('SELECT * FROM transaction_logs WHERE id=? AND status = "Pending"', (log_id,)).fetchone()
         if not log:
             flash('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่พบข้อมูล', 'warning')
-            return redirect(url_for('admin_dashboard'))
+            return redirect(url_for('admin_dashboard', module='stock'))
 
         product_id = log['product_id']
-        qty_to_withdraw = log['qty']
+        qty_to_withdraw = int(log['qty'] or 0)
+        
+        # ตรวจสอบว่าเป็นยาแบบแยกหน่วยหรือไม่
+        product_info_for_approve = conn.execute(
+            'SELECT base_unit, package_unit, conversion_rate FROM products WHERE id = ?', (product_id,)
+        ).fetchone()
+        is_split_med = (
+            product_info_for_approve and
+            product_info_for_approve['base_unit'] and
+            product_info_for_approve['package_unit'] and
+            (product_info_for_approve['conversion_rate'] or 1) > 1
+        )
+        
+        lot_withdraw_qty = qty_to_withdraw
+        if is_split_med:
+            lot_withdraw_qty = int(log['qty_base_unit'] or 0)
+            if lot_withdraw_qty <= 0:
+                conv = int(product_info_for_approve['conversion_rate'] or 1)
+                lot_withdraw_qty = qty_to_withdraw * max(1, conv)
+
         lots = conn.execute('''
             SELECT * FROM product_lots 
             WHERE product_id = ? AND qty > 0 
             ORDER BY received_date ASC, id ASC
         ''', (product_id,)).fetchall()
 
-        remaining = qty_to_withdraw
+        remaining = lot_withdraw_qty
         last_lot_id = None
 
         for lot in lots:
@@ -1581,7 +2361,7 @@ def approve_request(log_id):
         if remaining > 0:
             conn.rollback()
             flash('❌ จำนวนของใน lot ไม่พอสำหรับการอนุมัติ', 'danger')
-            return redirect(url_for('admin_dashboard'))
+            return redirect(url_for('admin_dashboard', module='stock'))
 
         thai_now = get_thailand_time().strftime('%d/%m/%Y %H:%M:%S')
         update_result = conn.execute('''
@@ -1593,8 +2373,12 @@ def approve_request(log_id):
         if update_result.rowcount == 0:
             conn.rollback()
             flash('⚠️ รายการนี้ถูกดำเนินการไปแล้ว', 'warning')
-            return redirect(url_for('admin_dashboard'))
+            return redirect(url_for('admin_dashboard', module='stock'))
 
+        # สำหรับยาแบบแยกหน่วย: products.stock ถูกลดแล้วตอน confirm (apply_withdrawal)
+        # สำหรับรายการอื่น: ต้องลด products.stock ตอน approve
+        if not is_split_med:
+            conn.execute('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?', (qty_to_withdraw, product_id))
         conn.execute('UPDATE products SET withdraw = withdraw + ? WHERE id = ?', (qty_to_withdraw, product_id))
         conn.commit()
 
@@ -1618,13 +2402,13 @@ def approve_request(log_id):
         send_line_message(approval_message, location=(user_info['location'] if user_info else ''), role=role)
 
         flash('✅ อนุมัติและตัดสต็อกแบบ FIFO เรียบร้อยแล้ว', 'success')
-        return redirect(url_for('admin_dashboard'))
+        return redirect(url_for('admin_dashboard', module='stock'))
 
     except Exception as e:
         conn.rollback()
         print(f'Approve request error: {e}')
         flash('❌ ไม่สามารถอนุมัติรายการได้ กรุณาลองใหม่', 'danger')
-        return redirect(url_for('admin_dashboard'))
+        return redirect(url_for('admin_dashboard', module='stock'))
     finally:
         conn.close()
 
@@ -1662,7 +2446,7 @@ def reject_request(log_id):
             ''', (log_id,)).fetchone()
             if not permission_check:
                 flash('❌ คุณไม่มีสิทธิ์ปฏิเสธรายการนี้', 'danger')
-                return redirect(url_for('admin_dashboard'))
+                return redirect(url_for('admin_dashboard', module='stock'))
         elif role == 'admin_cc':
             permission_check = conn.execute('''
                 SELECT l.id FROM transaction_logs l
@@ -1671,12 +2455,12 @@ def reject_request(log_id):
             ''', (log_id,)).fetchone()
             if not permission_check:
                 flash('❌ คุณไม่มีสิทธิ์ปฏิเสธรายการนี้', 'danger')
-                return redirect(url_for('admin_dashboard'))
+                return redirect(url_for('admin_dashboard', module='stock'))
 
         log = conn.execute('SELECT * FROM transaction_logs WHERE id=? AND status = "Pending"', (log_id,)).fetchone()
         if not log:
             flash('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่พบข้อมูล', 'warning')
-            return redirect(url_for('admin_dashboard'))
+            return redirect(url_for('admin_dashboard', module='stock'))
 
         product = conn.execute('SELECT * FROM products WHERE id = ?', (log['product_id'],)).fetchone()
         is_medicine = is_split_tablet_medicine(product) if product else False
@@ -1693,17 +2477,17 @@ def reject_request(log_id):
         if update_result.rowcount == 0:
             conn.rollback()
             flash('⚠️ รายการนี้ถูกดำเนินการไปแล้ว', 'warning')
-            return redirect(url_for('admin_dashboard'))
+            return redirect(url_for('admin_dashboard', module='stock'))
 
         conn.commit()
         flash('❌ ปฏิเสธรายการเรียบร้อยแล้ว', 'warning')
-        return redirect(url_for('admin_dashboard'))
+        return redirect(url_for('admin_dashboard', module='stock'))
 
     except Exception as e:
         conn.rollback()
         print(f'Reject request error: {e}')
         flash('❌ ไม่สามารถปฏิเสธรายการได้ กรุณาลองใหม่', 'danger')
-        return redirect(url_for('admin_dashboard'))
+        return redirect(url_for('admin_dashboard', module='stock'))
     finally:
         conn.close()
 
@@ -1848,7 +2632,7 @@ def reset_lock():
     conn.commit()
     conn.close()
     flash('✅ ปลดล็อกพนักงานทุกคนเรียบร้อยแล้ว', 'success')
-    return redirect(url_for('admin_dashboard'))
+    return redirect(url_for('admin_dashboard', module='stock'))
 
 @app.route('/admin/export')
 def export_excel():
@@ -1870,7 +2654,7 @@ def export_excel():
         location_filter = "" # ดึงทั้งหมด
         filename = "Inventory_ALL.xlsx"
         
-    # 2. Query ดึงข้อมูลของและ Lot ที่เกี่ยวข้อง
+    # 2. Query ดึงข้อมูลของและ Lot ที่เกี่ยวข้อง (GROUP BY เพื่อไม่ให้แถวซ้ำกรณีมีหลาย Lot)
     query = f'''
         SELECT 
             p.code as 'รหัสของ',
@@ -1880,15 +2664,31 @@ def export_excel():
             p.location as 'สถานที่เก็บ (Location)',
             p.safety_stock as 'จุดสั่งซื้อ (Safety Stock)',
             p.stock as 'จำนวนคงเหลือ',
+            COALESCE(p.package_unit, '') as 'หน่วยหลัก',
+            COALESCE(p.base_unit, '') as 'หน่วยย่อย',
+            COALESCE(p.conversion_rate, 1) as 'อัตราแบ่ง',
+            COALESCE(op.base_unit_qty, 0) as 'หน่วยย่อยที่เปิดแล้ว',
             CASE WHEN p.is_active = 1 THEN 'เปิดใช้งาน' ELSE 'ปิดใช้งาน' END as 'สถานะการใช้งาน',
-            COALESCE(pl.lot_number, p.lot_no, '') as 'Lot No.',
-            COALESCE(pl.received_date, p.received_date, '') as 'วันที่รับเข้า',
-            COALESCE(pl.expiry_date, p.expiry_date, '') as 'วันหมดอายุ',
-            COALESCE(pl.qty, 0) as 'จำนวนใน Lot'
+            CASE
+                WHEN COUNT(pl.id) > 1 THEN 'หลาย Lot'
+                ELSE COALESCE(MAX(pl.lot_number), p.lot_no, '')
+            END as 'Lot No.',
+            COALESCE(MIN(pl.received_date), p.received_date, '') as 'วันที่รับเข้า',
+            CASE
+                WHEN COUNT(pl.id) > 1 THEN MIN(pl.expiry_date)
+                ELSE COALESCE(MAX(pl.expiry_date), p.expiry_date, '')
+            END as 'วันหมดอายุ',
+            COALESCE(SUM(pl.qty), 0) as 'จำนวนใน Lot'
         FROM products p
-        LEFT JOIN product_lots pl ON pl.product_id = p.id
+        LEFT JOIN product_lots pl ON pl.product_id = p.id AND pl.qty > 0
+        LEFT JOIN (
+            SELECT product_id, COALESCE(SUM(base_unit_qty), 0) as base_unit_qty
+            FROM open_packages WHERE status = 'active'
+            GROUP BY product_id
+        ) op ON op.product_id = p.id
         {location_filter}
-        ORDER BY p.location ASC, p.code ASC, pl.received_date ASC
+        GROUP BY p.id
+        ORDER BY p.location ASC, p.code ASC
     '''
     
     # อ่านข้อมูลเข้า Pandas
@@ -1904,14 +2704,9 @@ def export_excel():
             data_len = 0 if pd.isna(data_len) else data_len
             worksheet.set_column(i, i, int(max(header_len, data_len) + 2))
 
-    # 3. สร้างไฟล์ Excel ใน Memory แยก Sheet ตามหมวดหมู่
+    # 3. สร้างไฟล์ Excel ใน Memory แยก Sheet ตามหมวดหมู่ (ไม่มี Sheet "ทั้งหมด")
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # --- Sheet "ทั้งหมด" รวมทุก record ---
-        df.to_excel(writer, index=False, sheet_name='ทั้งหมด')
-        _auto_col_widths(writer, 'ทั้งหมด', df)
-
-        # --- แยก Sheet ตามหมวดหมู่ ---
         categories = df['หมวดหมู่'].dropna().unique()
         for cat in sorted(categories):
             df_cat = df[df['หมวดหมู่'] == cat].copy()
@@ -1935,13 +2730,13 @@ def import_excel():
     file = request.files.get('file')
     if not file:
         flash('❌ กรุณาเลือกไฟล์ก่อนนำเข้า', 'danger')
-        return redirect(url_for('admin_dashboard'))
+        return redirect(url_for('admin_dashboard', module='stock'))
 
     filename = secure_filename(file.filename or '')
     file_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
     if file_ext not in ALLOWED_IMPORT_EXTENSIONS:
         flash('❌ รองรับเฉพาะไฟล์ Excel .xlsx, .xlsm, .xls', 'danger')
-        return redirect(url_for('admin_dashboard'))
+        return redirect(url_for('admin_dashboard', module='stock'))
 
     def safe_int(value):
         if pd.isna(value) or str(value).strip() == '':
@@ -1982,6 +2777,22 @@ def import_excel():
         raw_unit = normalize_medicine_unit(name, unit)
         lower_name = str(name or '').lower()
         lower_unit = raw_unit.lower()
+
+        # Business overrides: configure by real dispensing workflow (withdraw by sachet/pack)
+        explicit_setups = [
+            (('paracetamol', 'ไทลินอล'), ('ซอง', 'กระปุก', 25)),
+            (('tablet antacid', 'แอนตาซิล'), ('ซอง', 'แผง', 3)),
+            (('มะแว้ง',), ('ห่อ', 'ห่อ', 1)),
+            (('มายบาซิน',), ('ซอง', 'ซอง', 1)),
+            (('decolgen', 'ดีคอลเจน'), ('ซอง', 'ซอง', 1)),
+            (('counterpain', 'เคาน์เตอร์เพน', 'คเตอร์เพน'), ('ตลับ', 'หลอด', 10)),
+            (('anti-allergy', 'ยาแก้แพ้'), ('ซอง', 'แผง', 2)),
+            (('ทางเดินปัสสาวะอักเสบ',), ('ซอง', 'แผง', 2)),
+        ]
+        for keywords, setup in explicit_setups:
+            if any(keyword in lower_name for keyword in keywords):
+                return setup
+
         pack_match = re.search(
             r'1\s*(?:กป|กระปุก|ห่อ|แผง|ซอง|ขวด|pack|box|bottle|bott\.?)?\s*/\s*(\d+)',
             lower_name,
@@ -2092,12 +2903,70 @@ def import_excel():
         # อ่านทุก Sheet (รองรับทั้งไฟล์ single-sheet เก่า และไฟล์ multi-sheet ใหม่)
         all_sheets = pd.read_excel(file, sheet_name=None)
 
+        # ประมวลผลทุกชีตเพื่อรองรับทั้งกรณีแก้เฉพาะชีต "ทั้งหมด" และแก้เฉพาะชีตย่อย
+        # โดยเรียงให้ชีต "ทั้งหมด" อยู่ท้ายสุด เผื่อกรณีมีการแก้ทั้งสองฝั่งพร้อมกัน
+        master_sheets = []
+        other_sheets = []
+        for raw_sheet_name in all_sheets.keys():
+            normalized_sheet_name = str(raw_sheet_name or '').strip().lower()
+            if normalized_sheet_name in ('ทั้งหมด', 'all'):
+                master_sheets.append(raw_sheet_name)
+            else:
+                other_sheets.append(raw_sheet_name)
+        selected_sheets = other_sheets + master_sheets
+
         conn = get_db_connection()
         updated_count = 0
         inserted_count = 0
         medicine_done = False
 
-        for sheet_name, df in all_sheets.items():
+        # Snapshot ก่อน import ใช้ตรวจว่าแถวไหนเปลี่ยนจริง เพื่อไม่ให้ชีตที่ไม่ได้แก้ทับข้อมูลที่แก้แล้ว
+        baseline_products = {}
+        for row in conn.execute('''
+            SELECT code, name, category, unit, location, safety_stock, stock, is_active,
+                   COALESCE(lot_no, '') AS lot_no,
+                   COALESCE(received_date, '') AS received_date,
+                   COALESCE(expiry_date, '') AS expiry_date
+            FROM products
+        ''').fetchall():
+            baseline_products[str(row['code']).strip().upper()] = {
+                'name': str(row['name'] or '').strip(),
+                'category': str(row['category'] or '').strip(),
+                'unit': str(row['unit'] or '').strip(),
+                'location': str(row['location'] or '').strip(),
+                'safety_stock': int(row['safety_stock'] or 0),
+                'stock': int(row['stock'] or 0),
+                'is_active': int(row['is_active'] or 0),
+                'lot_no': normalize_lot_number(row['lot_no']),
+                'received_date': standardize_date(row['received_date']),
+                'expiry_date': standardize_date(row['expiry_date']),
+            }
+
+        baseline_lots = {}
+        for row in conn.execute('''
+            SELECT p.code,
+                   COALESCE(pl.lot_number, '') AS lot_number,
+                   COALESCE(pl.received_date, '') AS received_date,
+                   COALESCE(pl.expiry_date, '') AS expiry_date,
+                   COALESCE(pl.qty, 0) AS qty
+            FROM product_lots pl
+            JOIN products p ON p.id = pl.product_id
+        ''').fetchall():
+            key = (
+                str(row['code'] or '').strip().upper(),
+                normalize_lot_number(row['lot_number']),
+                standardize_date(row['received_date'])
+            )
+            baseline_lots[key] = {
+                'qty': int(row['qty'] or 0),
+                'expiry_date': standardize_date(row['expiry_date'])
+            }
+
+        for sheet_name in selected_sheets:
+            df = all_sheets[sheet_name]
+            if sheet_name not in all_sheets:
+                continue
+
             df.columns = df.columns.astype(str).str.strip()
 
             code_col = next((col for col in df.columns if 'รหัสของ' in col or 'code' in col.lower()), None)
@@ -2116,7 +2985,7 @@ def import_excel():
                 continue
 
             if not code_col:
-                # Sheet ที่ไม่มี code column (เช่น Sheet "ทั้งหมด" ที่อาจซ้ำกับ sheet หมวดหมู่) → ข้ามไป
+                # Sheet ที่ไม่มี code column → ข้ามไป
                 continue
 
             name_col = next((col for col in df.columns if 'ชื่อของ' in col), None)
@@ -2125,11 +2994,16 @@ def import_excel():
             loc_col = next((col for col in df.columns if 'สถานที่เก็บ' in col or 'location' in col.lower()), None)
             safe_col = next((col for col in df.columns if 'จุดสั่งซื้อ' in col or 'safety stock' in col.lower()), None)
             stock_col = next((col for col in df.columns if 'จำนวนคงเหลือ' in col), None)
-            lot_col = next((col for col in df.columns if 'lot' in col.lower()), None)
+            lot_col = next((col for col in df.columns if 'lot' in col.lower() and 'จำนวน' not in col), None)
             received_col = next((col for col in df.columns if 'วันที่รับเข้า' in col or 'received_date' in col.lower() or 'received date' in col.lower()), None)
             expiry_col = next((col for col in df.columns if 'วันหมดอายุ' in col or 'expiry_date' in col.lower() or 'expiry date' in col.lower()), None)
             lot_qty_col = next((col for col in df.columns if 'จำนวนใน lot' in col.lower() or 'lot qty' in col.lower() or 'lot quantity' in col.lower()), None)
             active_col = next((col for col in df.columns if 'สถานะ' in col), None)
+            # คอลัมน์สำหรับสินค้าแยกหน่วยย่อย (ยา)
+            pkg_unit_col = next((col for col in df.columns if 'หน่วยหลัก' in col), None)
+            base_unit_col = next((col for col in df.columns if 'หน่วยย่อย' in col and 'เปิด' not in col), None)
+            conv_rate_col = next((col for col in df.columns if 'อัตราแบ่ง' in col), None)
+            open_base_col = next((col for col in df.columns if 'หน่วยย่อยที่เปิดแล้ว' in col or 'เปิดแล้ว' in col), None)
 
             for _, row in df.iterrows():
                 code = str(row[code_col]).strip()
@@ -2143,46 +3017,131 @@ def import_excel():
                 safety_stock = safe_int(row[safe_col]) if safe_col else 0
                 stock = safe_int(row[stock_col]) if stock_col else 0
 
-                lot_no = str(row[lot_col]).strip() if lot_col and pd.notna(row[lot_col]) else ''
+                lot_no = normalize_lot_number(row[lot_col]) if lot_col and pd.notna(row[lot_col]) else ''
                 received_date = standardize_date(row[received_col]) if received_col and pd.notna(row[received_col]) else ''
                 expiry_date = standardize_date(row[expiry_col]) if expiry_col and pd.notna(row[expiry_col]) else ''
                 lot_qty = safe_int(row[lot_qty_col]) if lot_qty_col and pd.notna(row[lot_qty_col]) else None
+                effective_lot_qty = stock if lot_qty is None else lot_qty
+
+                # อ่านข้อมูลหน่วยย่อย (ถ้ามีในไฟล์)
+                import_pkg_unit = str(row[pkg_unit_col]).strip() if pkg_unit_col and pd.notna(row[pkg_unit_col]) else None
+                import_base_unit = str(row[base_unit_col]).strip() if base_unit_col and pd.notna(row[base_unit_col]) else None
+                import_conv_rate = safe_int(row[conv_rate_col]) if conv_rate_col and pd.notna(row[conv_rate_col]) else None
+                import_open_base = safe_int(row[open_base_col]) if open_base_col and pd.notna(row[open_base_col]) else None
+                # ล้าง empty string
+                if import_pkg_unit == '' or import_pkg_unit == 'nan': import_pkg_unit = None
+                if import_base_unit == '' or import_base_unit == 'nan': import_base_unit = None
 
                 is_active = 1
                 if active_col and pd.notna(row[active_col]):
                     status_text = str(row[active_col]).strip()
                     is_active = 1 if status_text == 'เปิดใช้งาน' else 0
 
+                baseline_product = baseline_products.get(code)
+                product_changed = baseline_product is None or any([
+                    baseline_product['name'] != name,
+                    baseline_product['category'] != category,
+                    baseline_product['unit'] != unit,
+                    baseline_product['location'] != location,
+                    baseline_product['safety_stock'] != safety_stock,
+                    baseline_product['stock'] != stock,
+                    baseline_product['is_active'] != is_active,
+                    baseline_product['lot_no'] != lot_no,
+                    baseline_product['received_date'] != received_date,
+                    baseline_product['expiry_date'] != expiry_date,
+                ])
+
+                lot_changed = False
+                if lot_no or received_date:
+                    lot_key = (code, lot_no, received_date)
+                    baseline_lot = baseline_lots.get(lot_key)
+                    if baseline_lot is None:
+                        lot_changed = effective_lot_qty > 0
+                    else:
+                        lot_changed = (
+                            baseline_lot['qty'] != effective_lot_qty or
+                            baseline_lot['expiry_date'] != expiry_date
+                        )
+
+                if not product_changed and not lot_changed:
+                    # ยังต้องตรวจ open_base และ split-unit fields แม้ product ไม่เปลี่ยน
+                    pass
+
                 existing = conn.execute('SELECT id FROM products WHERE code = ?', (code,)).fetchone()
                 if existing:
-                    conn.execute('''
-                        UPDATE products
-                        SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?, lot_no=?, received_date=?, expiry_date=?
-                        WHERE id=?
-                    ''', (name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date, existing['id']))
+                    # อัปเดต split-unit fields ถ้ามีในไฟล์
+                    if import_pkg_unit or import_base_unit or import_conv_rate is not None:
+                        effective_pkg_unit = import_pkg_unit
+                        effective_base_unit = import_base_unit
+                        effective_conv_rate = max(1, import_conv_rate or 1)
+                        conn.execute('''
+                            UPDATE products
+                            SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?, lot_no=?, received_date=?, expiry_date=?,
+                                package_unit=?, base_unit=?, conversion_rate=?
+                            WHERE id=?
+                        ''', (name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date,
+                              effective_pkg_unit, effective_base_unit, effective_conv_rate, existing['id']))
+                    elif product_changed:
+                        conn.execute('''
+                            UPDATE products
+                            SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?, lot_no=?, received_date=?, expiry_date=?
+                            WHERE id=?
+                        ''', (name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date, existing['id']))
                     product_id = existing['id']
                     updated_count += 1
+
+                    # อัปเดต open_packages ถ้ามีคอลัมน์นี้ในไฟล์
+                    if open_base_col and import_open_base is not None:
+                        existing_open = conn.execute(
+                            'SELECT id FROM open_packages WHERE product_id=?', (product_id,)
+                        ).fetchone()
+                        if existing_open:
+                            conn.execute(
+                                'UPDATE open_packages SET base_unit_qty=?, status=? WHERE product_id=?',
+                                (import_open_base, 'active' if import_open_base > 0 else 'closed', product_id)
+                            )
+                        elif import_open_base > 0:
+                            conn.execute(
+                                'INSERT INTO open_packages (product_id, base_unit_qty, status) VALUES (?, ?, ?)',
+                                (product_id, import_open_base, 'active')
+                            )
                 else:
                     cursor = conn.execute('''
-                        INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock, is_active, lot_no, received_date, expiry_date)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
-                    ''', (code, name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date))
+                        INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock, is_active, lot_no, received_date, expiry_date,
+                                             package_unit, base_unit, conversion_rate)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (code, name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date,
+                          import_pkg_unit, import_base_unit, max(1, import_conv_rate or 1)))
                     product_id = cursor.lastrowid
                     inserted_count += 1
 
-                effective_lot_qty = stock if lot_qty is None else lot_qty
+                    if import_open_base and import_open_base > 0:
+                        conn.execute(
+                            'INSERT INTO open_packages (product_id, base_unit_qty, status) VALUES (?, ?, ?)',
+                            (product_id, import_open_base, 'active')
+                        )
+
+                if not (product_changed or lot_changed or
+                        (open_base_col and import_open_base is not None) or
+                        import_pkg_unit or import_base_unit or import_conv_rate is not None):
+                    continue
+
                 if lot_no:
                     # มี Lot No. → upsert ด้วย lot_number
-                    existing_lot = conn.execute(
-                        'SELECT id FROM product_lots WHERE product_id = ? AND lot_number = ?',
-                        (product_id, lot_no)
-                    ).fetchone()
+                    lot_rows = conn.execute(
+                        'SELECT id, lot_number FROM product_lots WHERE product_id = ?',
+                        (product_id,)
+                    ).fetchall()
+                    existing_lot = next((
+                        lot for lot in lot_rows
+                        if normalize_lot_number(lot['lot_number']) == lot_no
+                    ), None)
                     if existing_lot:
                         conn.execute('''
                             UPDATE product_lots
-                            SET qty = ?, received_date = ?, expiry_date = ?
+                            SET lot_number = ?, qty = ?, received_date = ?, expiry_date = ?
                             WHERE id = ?
-                        ''', (effective_lot_qty, received_date, expiry_date, existing_lot['id']))
+                        ''', (lot_no, effective_lot_qty, received_date, expiry_date, existing_lot['id']))
                     else:
                         conn.execute('''
                             INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
@@ -2213,7 +3172,7 @@ def import_excel():
         if conn:
             conn.close()
 
-    return redirect(url_for('admin_dashboard'))
+    return redirect(url_for('admin_dashboard', module='stock'))
 
 # 1. ดึงข้อมูลของเดิมมาแสดงในหน้าต่างแก้ไข
 @app.route('/admin/get_product/<code>')
@@ -2221,9 +3180,35 @@ def get_product(code):
     if not session.get('admin_logged_in'): return jsonify({'error': 'Unauthorized'}), 401
     conn = get_db_connection()
     product = conn.execute('SELECT * FROM products WHERE code = ?', (code,)).fetchone()
+    split_summary = None
+    if product:
+        conversion_rate = int(product['conversion_rate'] or 1)
+        has_split_units = bool(product['base_unit'] and product['package_unit'] and conversion_rate > 1)
+        if has_split_units:
+            open_base_qty = conn.execute('''
+                SELECT COALESCE(SUM(base_unit_qty), 0)
+                FROM open_packages
+                WHERE product_id = ? AND status = 'active'
+            ''', (product['id'],)).fetchone()[0]
+            lot_total_qty = conn.execute('''
+                SELECT COALESCE(SUM(qty), 0)
+                FROM product_lots
+                WHERE product_id = ? AND qty > 0
+            ''', (product['id'],)).fetchone()[0]
+
+            stock_package_qty = int(product['stock'] or 0)
+            total_base_qty = (stock_package_qty * conversion_rate) + int(open_base_qty or 0)
+            split_summary = {
+                'stock_package_qty': stock_package_qty,
+                'open_base_qty': int(open_base_qty or 0),
+                'total_base_qty': int(total_base_qty),
+                'lot_total_qty': int(lot_total_qty or 0)
+            }
     conn.close()
     if product:
-        return jsonify(dict(product))
+        payload = dict(product)
+        payload['split_summary'] = split_summary
+        return jsonify(payload)
     return jsonify({'error': 'Product not found'}), 404
 
 @app.route('/admin/edit_product', methods=['POST'])
@@ -2234,9 +3219,16 @@ def edit_product():
     code = clean_input_text(request.form.get('code'), 40).upper()
     name = clean_input_text(request.form.get('name'), 150)
     unit = clean_input_text(request.form.get('unit'), 30)
-    base_unit = clean_input_text(request.form.get('base_unit'), 30) or 'เม็ด'
-    package_unit = clean_input_text(request.form.get('package_unit'), 30) or unit
-    conversion_rate = max(1, int(request.form.get('conversion_rate', 1) or 1))
+    package_unit = clean_input_text(request.form.get('package_unit', ''), 30) or None
+    base_unit = clean_input_text(request.form.get('base_unit', ''), 30) or None
+    conversion_rate = max(1, request.form.get('conversion_rate', 1, type=int) or 1)
+    open_base_qty = max(0, request.form.get('open_base_qty', 0, type=int) or 0)
+    # เก็บข้อมูลแยกหน่วยย่อยเฉพาะกรณีที่กรอกครบทั้งสองหน่วยเท่านั้น
+    if not package_unit or not base_unit:
+        package_unit = None
+        base_unit = None
+        conversion_rate = 1
+        open_base_qty = 0
     safety_stock = max(0, int(request.form.get('safety_stock', 0) or 0))
     stock = max(0, int(request.form.get('stock', 0) or 0))
     expiry_date = standardize_date(request.form.get('expiry_date', ''))
@@ -2251,6 +3243,26 @@ def edit_product():
             SET name=?, unit=?, base_unit=?, package_unit=?, conversion_rate=?, safety_stock=?, stock=?, expiry_date=?
             WHERE code=?
         ''', (name, unit, base_unit, package_unit, conversion_rate, safety_stock, stock, expiry_date, code))
+
+        # อัปเดต open_packages ถ้าเป็นสินค้าแยกหน่วยย่อย
+        if package_unit and base_unit and conversion_rate > 1:
+            product_row = conn.execute('SELECT id FROM products WHERE code=?', (code,)).fetchone()
+            if product_row:
+                pid = product_row['id']
+                existing_open = conn.execute(
+                    'SELECT id FROM open_packages WHERE product_id=?', (pid,)
+                ).fetchone()
+                if existing_open:
+                    conn.execute(
+                        'UPDATE open_packages SET base_unit_qty=?, status=? WHERE product_id=?',
+                        (open_base_qty, 'active' if open_base_qty > 0 else 'closed', pid)
+                    )
+                elif open_base_qty > 0:
+                    conn.execute(
+                        'INSERT INTO open_packages (product_id, base_unit_qty, status) VALUES (?, ?, ?)',
+                        (pid, open_base_qty, 'active')
+                    )
+
         conn.commit()
         return jsonify({'success': True, 'message': 'แก้ไขข้อมูลของเรียบร้อย'})
     except Exception as e:
@@ -2475,9 +3487,9 @@ def add_product_ajax():
         return jsonify({'success': False, 'message': 'Unauthorized'}), 401
 
     product_id = request.form.get('product_id', type=int)
-    lot_number = clean_input_text(request.form.get('lot_number'), 50)
+    lot_number = normalize_lot_number(request.form.get('lot_number'))
     qty = int(request.form.get('add_qty', 0) or 0)
-    receive_date = request.form.get('receive_date')
+    receive_date = standardize_date(request.form.get('receive_date'))
     expire_date = standardize_date(request.form.get('expire_date', ''))
 
     if not product_id or qty <= 0:
@@ -2485,11 +3497,27 @@ def add_product_ajax():
 
     conn = get_db_connection()
     try:
-        # 1. เพิ่มข้อมูลลงใน Table product_lots
-        conn.execute('''
-            INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (product_id, lot_number, qty, receive_date, expire_date))
+        # 1. Upsert Lot แบบ normalize เพื่อลดความเสี่ยงข้อมูลซ้ำจากรูปแบบเลข Lot ต่างกัน
+        lot_rows = conn.execute(
+            'SELECT id, lot_number, received_date FROM product_lots WHERE product_id = ?',
+            (product_id,)
+        ).fetchall()
+        existing_lot = next((
+            row for row in lot_rows
+            if normalize_lot_number(row['lot_number']) == lot_number and standardize_date(row['received_date']) == receive_date
+        ), None)
+
+        if existing_lot:
+            conn.execute('''
+                UPDATE product_lots
+                SET lot_number = ?, qty = qty + ?, expiry_date = CASE WHEN ? = '' THEN expiry_date ELSE ? END
+                WHERE id = ?
+            ''', (lot_number, qty, expire_date, expire_date, existing_lot['id']))
+        else:
+            conn.execute('''
+                INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (product_id, lot_number, qty, receive_date, expire_date))
 
         # 2. อัปเดตยอดรวม Stock ใน Table products
         conn.execute('UPDATE products SET stock = stock + ? WHERE id = ?', (qty, product_id))
@@ -2518,59 +3546,159 @@ def write_off_ajax():
     admin_name = 'ADMIN:' + session.get('admin_name', 'Unknown')
     product_id = request.form.get('product_id', type=int)
     qty = request.form.get('qty', type=int)
+    qty_unit = (request.form.get('qty_unit', 'package') or 'package').strip().lower()
     reason = clean_input_text(request.form.get('reason', 'หมดอายุ'), 120)
 
     if not qty or qty <= 0:
         return jsonify({'success': False, 'message': 'จำนวนต้องมากกว่า 0'})
 
     conn = get_db_connection()
-    product = conn.execute("SELECT stock FROM products WHERE id = ?", (product_id,)).fetchone()
+    try:
+        start_write_transaction(conn)
+        product = conn.execute('''
+            SELECT id, stock, unit, category, base_unit, package_unit, conversion_rate
+            FROM products WHERE id = ?
+        ''', (product_id,)).fetchone()
 
-    if not product or product['stock'] < qty:
+        if not product:
+            conn.rollback()
+            return jsonify({'success': False, 'message': 'จำนวนสต็อกไม่เพียงพอให้ตัดจำหน่าย'})
+
+        is_split_med = is_split_tablet_medicine(product)
+        if not is_split_med:
+            qty_unit = 'package'
+
+        if is_split_med and qty_unit not in ('package', 'base'):
+            conn.rollback()
+            return jsonify({'success': False, 'message': 'หน่วยตัดจำหน่ายไม่ถูกต้อง'})
+
+        conv = max(1, int(product['conversion_rate'] or 1))
+        stock_pkg_qty = int(product['stock'] or 0)
+        open_base_qty = 0
+
+        if is_split_med:
+            open_base_qty = int(conn.execute('''
+                SELECT COALESCE(SUM(base_unit_qty), 0)
+                FROM open_packages
+                WHERE product_id = ? AND status = 'active'
+            ''', (product_id,)).fetchone()[0] or 0)
+
+        if is_split_med and qty_unit == 'base':
+            total_base_available = (stock_pkg_qty * conv) + open_base_qty
+            if qty > total_base_available:
+                conn.rollback()
+                return jsonify({'success': False, 'message': 'จำนวนสต็อกไม่เพียงพอให้ตัดจำหน่าย'})
+
+            used_from_open = min(open_base_qty, qty)
+            remaining_after_open = qty - used_from_open
+            qty_package_to_cut = (remaining_after_open + conv - 1) // conv if remaining_after_open > 0 else 0
+            lot_qty_to_cut = qty
+            new_open_base_qty = (qty_package_to_cut * conv) - remaining_after_open if qty_package_to_cut > 0 else 0
+        else:
+            if stock_pkg_qty < qty:
+                conn.rollback()
+                return jsonify({'success': False, 'message': 'จำนวนสต็อกไม่เพียงพอให้ตัดจำหน่าย'})
+            qty_package_to_cut = qty
+            lot_qty_to_cut = qty * conv if is_split_med else qty
+            used_from_open = 0
+            new_open_base_qty = 0
+
+        if is_split_med:
+            lot_qty_to_cut = int(lot_qty_to_cut)
+
+        remaining_qty = lot_qty_to_cut
+
+        # --- 1. ไล่ตัดสต็อกจากตาราง Lot แบบ FIFO ---
+        lots = conn.execute('''
+            SELECT id, qty, lot_number
+            FROM product_lots
+            WHERE product_id = ? AND qty > 0
+            ORDER BY
+                CASE
+                    WHEN expiry_date LIKE '%/%/%' THEN substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2)
+                    ELSE expiry_date
+                END ASC,
+                id ASC
+        ''', (product_id,)).fetchall()
+
+        for lot in lots:
+            if remaining_qty <= 0:
+                break
+
+            lot_available = int(lot['qty'] or 0)
+            cut_qty = min(lot_available, remaining_qty)
+
+            # 1.1 อัปเดตจำนวนในตาราง product_lots
+            conn.execute("UPDATE product_lots SET qty = qty - ? WHERE id = ?", (cut_qty, lot['id']))
+
+            # 1.2 บันทึกประวัติลง transaction_logs (แยกตาม Lot ที่ถูกตัด)
+            action_text = f"ตัดจำหน่าย (Scrap) - {reason} [Lot: {lot['lot_number']}]"
+            if is_split_med:
+                qty_package = cut_qty / conv
+                conn.execute('''
+                    INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'Approved', datetime('now', '+7 hours'))
+                ''', (admin_name, product_id, lot['id'], action_text, qty_package, cut_qty, qty_package))
+            else:
+                conn.execute('''
+                    INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, status, timestamp)
+                    VALUES (?, ?, ?, ?, ?, 'Approved', datetime('now', '+7 hours'))
+                ''', (admin_name, product_id, lot['id'], action_text, cut_qty))
+
+            remaining_qty -= cut_qty
+
+        if remaining_qty > 0:
+            conn.rollback()
+            unit_label = product['base_unit'] if is_split_med and product['base_unit'] else product['unit']
+            return jsonify({'success': False, 'message': f'จำนวนใน Lot ({unit_label}) ไม่พอสำหรับการตัดจำหน่าย'})
+
+        if is_split_med and qty_unit == 'base':
+            # ใช้ของคงเหลือใน open_packages ก่อน
+            open_rows = conn.execute('''
+                SELECT id, base_unit_qty
+                FROM open_packages
+                WHERE product_id = ? AND status = 'active' AND base_unit_qty > 0
+                ORDER BY opened_date ASC, id ASC
+            ''', (product_id,)).fetchall()
+
+            open_remaining = used_from_open
+            for row in open_rows:
+                if open_remaining <= 0:
+                    break
+                available = int(row['base_unit_qty'] or 0)
+                take = min(available, open_remaining)
+                conn.execute('''
+                    UPDATE open_packages
+                    SET base_unit_qty = MAX(0, base_unit_qty - ?),
+                        status = CASE WHEN base_unit_qty - ? <= 0 THEN 'used' ELSE 'active' END
+                    WHERE id = ?
+                ''', (take, take, row['id']))
+                open_remaining -= take
+
+            if new_open_base_qty > 0:
+                conn.execute('''
+                    INSERT INTO open_packages (product_id, lot_id, opened_date, base_unit_qty, package_unit_qty_before, status)
+                    VALUES (?, NULL, datetime('now'), ?, 1, 'active')
+                ''', (product_id, int(new_open_base_qty)))
+
+        # --- 2. อัปเดตสต็อกรวมในตารางหลัก (products) ---
+        if qty_package_to_cut > 0:
+            stock_update = conn.execute(
+                "UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?",
+                (qty_package_to_cut, product_id, qty_package_to_cut)
+            )
+            if stock_update.rowcount == 0:
+                conn.rollback()
+                return jsonify({'success': False, 'message': 'ไม่สามารถอัปเดตสต็อกได้ (จำนวนอาจเปลี่ยนระหว่างทำรายการ)'})
+
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        print(f'Write off error: {e}')
+        return jsonify({'success': False, 'message': 'ไม่สามารถตัดจำหน่ายได้'}), 500
+    finally:
         conn.close()
-        return jsonify({'success': False, 'message': 'จำนวนสต็อกไม่เพียงพอให้ตัดจำหน่าย'})
-
-    remaining_qty = qty
-
-    # --- 1. ไล่ตัดสต็อกจากตาราง Lot แบบ FIFO ---
-    # (เพิ่มการดึง lot_number ออกมาด้วยเพื่อเอาไปเขียนใน Log)
-    lots = conn.execute('''
-        SELECT id, qty, lot_number 
-        FROM product_lots 
-        WHERE product_id = ? AND qty > 0
-        ORDER BY 
-            CASE 
-                WHEN expiry_date LIKE '%/%/%' THEN substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2)
-                ELSE expiry_date 
-            END ASC
-    ''', (product_id,)).fetchall()
-
-    for lot in lots:
-        if remaining_qty <= 0:
-            break
-        
-        cut_qty = min(lot['qty'], remaining_qty)
-        
-        # 1.1 อัปเดตจำนวนในตาราง product_lots
-        conn.execute("UPDATE product_lots SET qty = qty - ? WHERE id = ?", (cut_qty, lot['id']))
-        
-        # 1.2 บันทึกประวัติลง transaction_logs (แยกตาม Lot ที่ถูกตัด)
-        # นำเลข Lot มาโชว์ในช่อง action ด้วยเพื่อให้แอดมินอ่านง่าย และเก็บ lot_id ลงฐานข้อมูล
-        action_text = f"ตัดจำหน่าย (Scrap) - {reason} [Lot: {lot['lot_number']}]"
-        conn.execute('''
-            INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, status, timestamp)
-            VALUES (?, ?, ?, ?, ?, 'Approved', datetime('now', '+7 hours'))
-        ''', (admin_name, product_id, lot['id'], action_text, cut_qty))
-
-        remaining_qty -= cut_qty
-
-    # --- 2. อัปเดตสต็อกรวมในตารางหลัก (products) ---
-    conn.execute("UPDATE products SET stock = stock - ? WHERE id = ?", (qty, product_id))
-
-    conn.commit()
-    conn.close()
-    
-    return jsonify({'success': True})
 
 @app.route('/admin/clear_system_data', methods=['POST'])
 def clear_system_data():
@@ -2800,7 +3928,7 @@ def list_users():
     search = clean_input_text(request.args.get('search', ''), 100)
     conn = get_db_connection()
 
-    query = "SELECT emp_id, name, department, location FROM users WHERE 1=1"
+    query = "SELECT emp_id, name, department, location, COALESCE(email, '') AS email FROM users WHERE 1=1"
     params = []
 
     if role == 'admin_pc1':
@@ -2809,9 +3937,9 @@ def list_users():
         query += " AND (location = 'CC' OR location = 'Coil Center' OR location LIKE '%CC%' OR location LIKE '%Coil Center%')"
 
     if search:
-        query += " AND (emp_id LIKE ? OR name LIKE ? OR department LIKE ? OR location LIKE ?)"
+        query += " AND (emp_id LIKE ? OR name LIKE ? OR department LIKE ? OR location LIKE ? OR COALESCE(email, '') LIKE ?)"
         like_term = f"%{search}%"
-        params.extend([like_term, like_term, like_term, like_term])
+        params.extend([like_term, like_term, like_term, like_term, like_term])
 
     query += " ORDER BY emp_id ASC"
 
@@ -2828,6 +3956,7 @@ def add_user_ajax():
     name = clean_input_text(request.form.get('name'), 100)
     dept = clean_input_text(request.form.get('department'), 100)
     loc = normalize_location_value(request.form.get('location'))
+    email = normalize_email_value(request.form.get('email'))
 
     if not is_valid_emp_id(emp_id):
         return jsonify({'success': False, 'message': 'รหัสพนักงานไม่ถูกต้อง'}), 400
@@ -2835,11 +3964,13 @@ def add_user_ajax():
         return jsonify({'success': False, 'message': 'กรุณาระบุชื่อพนักงาน'}), 400
     if loc not in ('PC1', 'Coil Center', 'General'):
         return jsonify({'success': False, 'message': 'สถานที่ไม่ถูกต้อง'}), 400
+    if email and not is_valid_email_address(email):
+        return jsonify({'success': False, 'message': 'รูปแบบอีเมลไม่ถูกต้อง'}), 400
     
     conn = get_db_connection()
     try:
-        conn.execute('INSERT INTO users (emp_id, name, department, location, is_locked) VALUES (?, ?, ?, ?, 0)',
-                     (emp_id, name, dept or '-', loc))
+        conn.execute('INSERT INTO users (emp_id, name, department, location, email, is_locked) VALUES (?, ?, ?, ?, ?, 0)',
+                     (emp_id, name, dept or '-', loc, email))
         conn.commit()
         return jsonify({'success': True})
     except Exception:
@@ -2879,11 +4010,14 @@ def delete_user(emp_id):
 def update_user_ajax():
     if not session.get('admin_logged_in'):
         return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    role = session.get('admin_role')
     
     emp_id = clean_input_text(request.form.get('emp_id'), 20)
     name = clean_input_text(request.form.get('name'), 100)
     dept = clean_input_text(request.form.get('department'), 100)
     loc = normalize_location_value(request.form.get('location'))
+    email = normalize_email_value(request.form.get('email'))
 
     if not is_valid_emp_id(emp_id):
         return jsonify({'success': False, 'message': 'รหัสพนักงานไม่ถูกต้อง'}), 400
@@ -2891,10 +4025,33 @@ def update_user_ajax():
         return jsonify({'success': False, 'message': 'กรุณาระบุชื่อพนักงาน'}), 400
     if loc not in ('PC1', 'Coil Center', 'General'):
         return jsonify({'success': False, 'message': 'สถานที่ไม่ถูกต้อง'}), 400
+    if email and not is_valid_email_address(email):
+        return jsonify({'success': False, 'message': 'รูปแบบอีเมลไม่ถูกต้อง'}), 400
     
     conn = get_db_connection()
-    conn.execute('UPDATE users SET name=?, department=?, location=? WHERE emp_id=?', 
-                 (name, dept or '-', loc, emp_id))
+    existing_user = conn.execute('SELECT location FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
+    if not existing_user:
+        conn.close()
+        return jsonify({'success': False, 'message': 'ไม่พบพนักงาน'}), 404
+
+    # จำกัดสิทธิ์ให้แก้ไขเฉพาะพนักงานในโรงงานของตนเอง
+    if role == 'admin_pc1' and existing_user['location'] != 'PC1':
+        conn.close()
+        return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์แก้ไขพนักงานนอก PC1'}), 403
+    if role == 'admin_cc' and not is_cc_location_value(existing_user['location']):
+        conn.close()
+        return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์แก้ไขพนักงานนอก CC'}), 403
+
+    # จำกัดสิทธิ์ไม่ให้ย้ายพนักงานข้ามโรงงานโดย role ปกติ
+    if role == 'admin_pc1' and loc != 'PC1':
+        conn.close()
+        return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์ย้ายพนักงานออกนอก PC1'}), 403
+    if role == 'admin_cc' and not is_cc_location_value(loc):
+        conn.close()
+        return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์ย้ายพนักงานออกนอก CC'}), 403
+
+    conn.execute('UPDATE users SET name=?, department=?, location=?, email=? WHERE emp_id=?', 
+                 (name, dept or '-', loc, email, emp_id))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -3118,6 +4275,74 @@ def save_alert_time():
     
     return jsonify({'success': True, 'message': f'เปลี่ยนเวลาเป็น {new_time} น. เรียบร้อย'})
 
+@app.route('/admin/get_ga_email_settings')
+def get_ga_email_settings():
+    if session.get('admin_role') != 'superadmin':
+        return jsonify({'success': False, 'message': 'No Permission'}), 403
+
+    init_settings_db()
+    keys = [
+        'ga_recipients_ga_pc1', 'ga_recipients_ga_cc',
+        'ga_recipients_it_pc1', 'ga_recipients_it_cc',
+        'ga_recipients_default',
+        'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_from', 'smtp_use_tls'
+    ]
+    settings = get_settings_values(keys)
+    return jsonify({'success': True, 'settings': settings})
+
+@app.route('/admin/save_ga_email_settings', methods=['POST'])
+def save_ga_email_settings():
+    if session.get('admin_role') != 'superadmin':
+        return jsonify({'success': False, 'message': 'No Permission'}), 403
+
+    payload = {
+        'ga_recipients_ga_pc1': clean_input_text(request.form.get('ga_recipients_ga_pc1'), 500),
+        'ga_recipients_ga_cc': clean_input_text(request.form.get('ga_recipients_ga_cc'), 500),
+        'ga_recipients_it_pc1': clean_input_text(request.form.get('ga_recipients_it_pc1'), 500),
+        'ga_recipients_it_cc': clean_input_text(request.form.get('ga_recipients_it_cc'), 500),
+        'ga_recipients_default': clean_input_text(request.form.get('ga_recipients_default'), 500),
+        'smtp_host': clean_input_text(request.form.get('smtp_host'), 200),
+        'smtp_port': clean_input_text(request.form.get('smtp_port'), 10),
+        'smtp_username': clean_input_text(request.form.get('smtp_username'), 200),
+        'smtp_password': clean_input_text(request.form.get('smtp_password'), 300),
+        'smtp_from': normalize_email_value(request.form.get('smtp_from')),
+        'smtp_use_tls': '1' if request.form.get('smtp_use_tls') in ('1', 'true', 'on', 'yes') else '0',
+    }
+
+    recipient_keys = [
+        'ga_recipients_ga_pc1', 'ga_recipients_ga_cc',
+        'ga_recipients_it_pc1', 'ga_recipients_it_cc', 'ga_recipients_default'
+    ]
+    invalid_tokens = []
+    for key in recipient_keys:
+        invalid_tokens.extend(list_invalid_email_entries(payload[key]))
+
+    if invalid_tokens:
+        invalid_preview = ', '.join(sorted(set(invalid_tokens))[:5])
+        return jsonify({'success': False, 'message': f'พบอีเมลไม่ถูกต้อง: {invalid_preview}'}), 400
+
+    if payload['smtp_from'] and not is_valid_email_address(payload['smtp_from']):
+        return jsonify({'success': False, 'message': 'รูปแบบ SMTP From ไม่ถูกต้อง'}), 400
+
+    if payload['smtp_port']:
+        try:
+            port_value = int(payload['smtp_port'])
+            if port_value <= 0 or port_value > 65535:
+                raise ValueError()
+        except ValueError:
+            return jsonify({'success': False, 'message': 'SMTP Port ไม่ถูกต้อง'}), 400
+
+    init_settings_db()
+    conn = get_db_connection()
+    try:
+        for key, value in payload.items():
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+        conn.commit()
+    finally:
+        conn.close()
+
+    return jsonify({'success': True, 'message': 'บันทึกการตั้งค่าอีเมล GA Request เรียบร้อย'})
+
 def init_settings_db():
     conn = get_db_connection()
     conn.execute('''
@@ -3128,6 +4353,21 @@ def init_settings_db():
     ''')
     # ตั้งค่าเวลาเริ่มต้นเป็น 08:30 น. ถ้ายังไม่มีข้อมูล
     conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_alert_time', '08:30')")
+    setting_defaults = {
+        'ga_recipients_ga_pc1': '',
+        'ga_recipients_ga_cc': '',
+        'ga_recipients_it_pc1': '',
+        'ga_recipients_it_cc': '',
+        'ga_recipients_default': '',
+        'smtp_host': 'smtp.gmail.com',
+        'smtp_port': '587',
+        'smtp_username': '',
+        'smtp_password': '',
+        'smtp_from': '',
+        'smtp_use_tls': '1',
+    }
+    for key, value in setting_defaults.items():
+        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
     conn.commit()
     conn.close()
 

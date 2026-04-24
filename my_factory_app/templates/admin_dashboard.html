@@ -215,6 +215,19 @@
             justify-content: center;
         }
 
+        .ga-request-detail-cell {
+            min-width: 280px;
+            max-width: 360px;
+        }
+
+        .ga-request-action-cell {
+            min-width: 250px;
+        }
+
+        .ga-request-description {
+            white-space: pre-line;
+        }
+
         #backToTopBtn {
             display: none;
             position: fixed;
@@ -278,6 +291,32 @@
             vertical-align: middle;
         }
 
+        #userManagementModal .employee-form-shell {
+            border: 1px solid rgba(13, 110, 253, 0.16);
+            border-radius: 14px;
+            background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+        }
+
+        #userManagementModal .employee-list-shell {
+            border: 1px solid rgba(27, 50, 75, 0.08);
+            border-radius: 14px;
+            overflow: hidden;
+        }
+
+        #userManagementModal .form-title-badge {
+            font-size: 0.78rem;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-weight: 600;
+            background: #e8f1ff;
+            color: #0b57d0;
+        }
+
+        #userManagementModal .user-action-btn {
+            min-width: 34px;
+            border-radius: 10px;
+        }
+
         /* ทำให้ Icon มีความกว้างเท่ากัน เมนูจะได้ตรงกันสวยงาม */
         .nav-link i {
             width: 20px;
@@ -299,6 +338,17 @@
         /* สี Icon เมื่อเมนูนั้นถูกเลือก (Active) */
         .nav-link.active i {
             color: #ffffff !important;
+        }
+
+        .nav-link.with-counter {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .menu-counter-badge {
+            font-size: 0.7rem;
+            min-width: 20px;
         }
 
         /* ใส่ในส่วน <style> */
@@ -434,6 +484,22 @@
         .split-detail-box {
             background: #f0f8ff;
             border: 1px dashed #86b7fe;
+        }
+
+        .unit-field-group .form-control {
+            min-width: 0;
+        }
+
+        .unit-field-group .input-group-text {
+            min-width: 58px;
+            justify-content: center;
+            font-weight: 600;
+            color: #1f4f8f;
+            background: #eef6ff;
+            border-color: #b9d4fb;
+            white-space: nowrap;
+            padding-left: 0.75rem;
+            padding-right: 0.75rem;
         }
 
         .user-table-scroll {
@@ -808,10 +874,25 @@
             </div>
 
             <div class="flex-grow-1 overflow-auto">
-                <div class="nav-category text-white-50">คลัง</div>
-                <a href="#" class="nav-link active">
-                    <i class="fas fa-home me-2"></i> หน้าหลักสต็อก
+                <div class="nav-category text-white-50">เมนูระบบ</div>
+                <a href="{{ url_for('admin_dashboard', module='stock') }}" class="nav-link with-counter {% if admin_module == 'stock' %}active{% endif %}">
+                    <span><i class="fas fa-boxes-stacked me-2"></i> Stock เบิกของ</span>
+                    {% if stock_pending_count > 0 %}
+                    <span class="badge bg-danger rounded-pill menu-counter-badge">{{ stock_pending_count }}</span>
+                    {% endif %}
                 </a>
+                <a href="{{ url_for('admin_dashboard', module='ga') }}" class="nav-link with-counter {% if admin_module == 'ga' %}active{% endif %}">
+                    <span><i class="fas fa-screwdriver-wrench me-2 text-warning"></i> GA Request</span>
+                    {% if ga_pending_count > 0 %}
+                    <span class="badge bg-danger rounded-pill menu-counter-badge">{{ ga_pending_count }}</span>
+                    {% endif %}
+                </a>
+                <a href="{{ url_for('admin_dashboard', module='vehicle') }}" class="nav-link {% if admin_module == 'vehicle' %}active{% endif %}">
+                    <i class="fas fa-car-side me-2"></i> ระบบจองรถ
+                </a>
+
+                {% if admin_module == 'stock' %}
+                <div class="nav-category text-white-50">จัดการ Stock</div>
                 <a href="javascript:void(0)" class="nav-link" data-bs-toggle="modal" data-bs-target="#addProductModal">
                     <i class="fas fa-plus-circle me-2 text-success"></i> เพิ่มของใหม่
                 </a>
@@ -821,14 +902,17 @@
                 <a href="javascript:void(0)" onclick="document.getElementById('importFile').click()" class="nav-link">
                     <i class="fas fa-file-import me-2 text-info"></i> Import ข้อมูล
                 </a>
+                {% endif %}
 
                 <div class="nav-category text-white-50">รายงาน & การทำรายการ</div>
+                {% if admin_module == 'stock' %}
                 <a href="javascript:void(0)" class="nav-link" onclick="toggleReportSection()">
                     <i class="fas fa-chart-line me-2 text-warning"></i> รายงานประจำเดือน
                 </a>
                 <a href="{{ url_for('print_all_qrs') }}" target="_blank" class="nav-link">
                     <i class="fas fa-qrcode me-2 text-warning"></i> พิมพ์ QR ทั้งหมด
                 </a>
+                {% endif %}
 
                 <div class="nav-category text-white-50">ระบบบุคลากร</div>
                 <a href="javascript:void(0)" class="nav-link" onclick="openUserManagementModal()">
@@ -842,6 +926,9 @@
                 <div class="nav-category text-white-50">ระบบจัดการขั้นสูง</div>
                 <a href="javascript:void(0)" class="nav-link" onclick="openAlertSettingModal()">
                     <i class="fas fa-clock me-2 text-warning"></i> ตั้งเวลาแจ้งเตือน LINE
+                </a>
+                <a href="javascript:void(0)" class="nav-link" onclick="openGaEmailSettingModal()">
+                    <i class="fas fa-envelope-open-text me-2 text-warning"></i> ตั้งค่าอีเมล GA Request
                 </a>
 
                 <a href="javascript:void(0)" class="nav-link text-danger" data-bs-toggle="modal"
@@ -870,7 +957,7 @@
     <main class="content-wrapper py-4">
         <div class="container-fluid px-3 px-md-4 px-lg-5">
 
-            <div class="row g-3 mb-4 dashboard-section">
+            <div class="row g-3 mb-4 dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}">
                 <div class="col-6 col-xl-3">
                     <div class="card border-0 shadow-sm bg-white h-100 stat-card">
                         <div class="card-body d-flex align-items-center">
@@ -951,7 +1038,20 @@
             {% endif %}
             {% endwith %}
 
-            <div class="card border-0 shadow-sm mb-4 dashboard-section">
+            {% if admin_module == 'vehicle' %}
+            <div class="card border-0 shadow-sm mb-4 dashboard-section revealed">
+                <div class="card-header bg-secondary text-white py-3 border-0">
+                    <h6 class="mb-0 fw-medium"><i class="fas fa-car-side me-2"></i>ระบบจองรถ (Admin)</h6>
+                </div>
+                <div class="card-body py-4">
+                    <div class="alert alert-info border-0 mb-0">
+                        อยู่ในช่วงพัฒนาระบบ
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="card border-0 shadow-sm mb-4 dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}">
                 <div
                     class="card-header bg-warning text-dark fw-medium py-3 d-flex justify-content-between align-items-center border-0">
                     <span><i class="fas fa-bell me-2"></i>รายการขอเบิกใหม่ (รออนุมัติ)</span>
@@ -976,7 +1076,101 @@
                 </div>
             </div>
 
-            <div class="card border-0 shadow-sm mb-4">
+            <div class="card border-0 shadow-sm mb-4 dashboard-section {% if admin_module != 'ga' %}is-hidden{% endif %}" id="gaRequestSection">
+                <div class="card-header bg-dark text-white py-3 border-0 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <div>
+                        <h6 class="mb-1 fw-medium"><i class="fas fa-screwdriver-wrench me-2 text-warning"></i>GA Request</h6>
+                        <div class="small text-white-50">คำร้องแจ้งซ่อม แจ้งปัญหา และประสานงานไปยัง GA / IT</div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <span class="badge bg-warning text-dark rounded-pill px-3 py-2">Pending {{ ga_pending_count }} รายการ</span>
+                        {% if role == 'superadmin' %}
+                        <div class="btn-group btn-group-sm bg-white rounded-pill p-1 shadow-sm">
+                            <a href="{{ url_for('admin_dashboard', module='ga') }}#gaRequestSection" class="btn btn-sm rounded-pill px-3 {% if not ga_selected_loc %}btn-primary{% else %}btn-light text-muted border-0{% endif %}">รวม</a>
+                            <a href="{{ url_for('admin_dashboard', module='ga', ga_loc='PC1') }}#gaRequestSection" class="btn btn-sm rounded-pill px-3 {% if ga_selected_loc == 'PC1' %}btn-primary{% else %}btn-light text-muted border-0{% endif %}">PC1</a>
+                            <a href="{{ url_for('admin_dashboard', module='ga', ga_loc='CC') }}#gaRequestSection" class="btn btn-sm rounded-pill px-3 {% if ga_selected_loc == 'CC' %}btn-primary{% else %}btn-light text-muted border-0{% endif %}">CC</a>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="card-body p-0 table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-4">เวลา</th>
+                                <th>ผู้แจ้ง</th>
+                                <th>ส่วนงาน</th>
+                                <th>รายละเอียด</th>
+                                <th class="text-center">สถานะ</th>
+                                <th class="text-center">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if ga_requests %}
+                            {% for req in ga_requests %}
+                            <tr>
+                                <td class="ps-4 small text-muted text-nowrap">{{ req['created_at'] | format_ts }}</td>
+                                <td>
+                                    <div class="fw-medium text-dark">{{ req['requester_name'] }}</div>
+                                    <div class="small text-muted">{{ req['emp_id'] }} | {{ req['department'] or '-' }}</div>
+                                    <div class="small text-muted">{{ req['location'] or '-' }}</div>
+                                    <div class="small text-muted">{{ req['requester_email'] or '-' }}</div>
+                                </td>
+                                <td>
+                                    <span class="badge {% if req['target_team'] == 'IT' %}bg-info-subtle text-info{% else %}bg-secondary-subtle text-secondary{% endif %} rounded-pill px-3 py-2">{{ req['target_team'] }}</span>
+                                    <div class="fw-medium mt-2">{{ req['title'] }}</div>
+                                </td>
+                                <td class="ga-request-detail-cell">
+                                    <div class="small text-dark ga-request-description">{{ req['description'] }}</div>
+                                    {% if req['image_path'] %}
+                                    <div class="mt-2">
+                                        <a href="{{ ga_image_url(req['image_path']) }}" target="_blank" class="btn btn-sm btn-outline-primary rounded-pill">
+                                            <i class="fas fa-image me-1"></i> ดูรูปแนบ
+                                        </a>
+                                    </div>
+                                    {% endif %}
+                                    {% if req['admin_note'] %}
+                                    <div class="small text-muted mt-2 border-top pt-2">
+                                        <strong>หมายเหตุ:</strong> {{ req['admin_note'] }}
+                                    </div>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge rounded-pill px-3 py-2 {% if req['status'] == 'Pending' %}bg-warning text-dark{% elif req['status'] == 'In Progress' %}bg-primary{% elif req['status'] == 'Resolved' %}bg-success{% else %}bg-danger{% endif %}">{{ req['status'] }}</span>
+                                    {% if req['handled_by'] %}
+                                    <div class="small text-muted mt-2">{{ req['handled_by'] }}</div>
+                                    {% endif %}
+                                </td>
+                                <td class="ga-request-action-cell">
+                                    <form action="{{ url_for('update_ga_request', request_id=req['id']) }}" method="POST">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <input type="hidden" name="ga_loc" value="{{ ga_selected_loc }}">
+                                        <div class="mb-2">
+                                            <select name="status" class="form-select form-select-sm shadow-none" required>
+                                                {% for status in ga_status_options %}
+                                                <option value="{{ status }}" {% if status == req['status'] %}selected{% endif %}>{{ status }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="mb-2">
+                                            <textarea name="admin_note" rows="3" class="form-control form-control-sm shadow-none" placeholder="หมายเหตุสำหรับผู้แจ้ง...">{{ req['admin_note'] or '' }}</textarea>
+                                        </div>
+                                        <button type="submit" class="btn btn-sm btn-dark rounded-pill w-100">บันทึกสถานะ</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center py-4 text-muted">ยังไม่มี GA Request ในเงื่อนไขที่เลือก</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm mb-4 dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}">
                 <div class="card-header bg-success text-white py-3 border-0">
                     <div class="row align-items-center">
                         <div class="col-md-4 fw-medium"><i class="fas fa-boxes me-2"></i>จัดการสต็อก</div>
@@ -1081,7 +1275,7 @@
                 </div>
             </div>
 
-            <div class="row g-4 mb-4 align-items-stretch dashboard-section">
+            <div class="row g-4 mb-4 align-items-stretch dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}">
                 <div class="col-lg-7">
                     <div class="card border-0 shadow-sm h-100 chart-card">
                         <div class="card-header bg-white py-3 border-0">
@@ -1151,7 +1345,7 @@
                 </div>
             </div>
 
-            <div class="card border-0 shadow-sm mb-4 dashboard-section">
+            <div class="card border-0 shadow-sm mb-4 dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}">
                 <div
                     class="card-header bg-danger text-white py-3 d-flex justify-content-between align-items-center border-0">
                     <h6 class="mb-0 fw-medium"><i class="fas fa-exclamation-triangle me-2"></i>รายการของใกล้หมด (Low
@@ -1179,7 +1373,7 @@
                     </table>
                 </div>
             </div>
-            <div id="monthlyReportSection" class="card border-0 shadow-sm mb-4 is-hidden dashboard-section">
+            <div id="monthlyReportSection" class="card border-0 shadow-sm mb-4 is-hidden dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}">
                 <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
                     <h6 class="mb-0 fw-medium text-primary"><i class="fas fa-file-alt me-2"></i>รายงานสรุปประจำเดือน
                     </h6>
@@ -1218,7 +1412,7 @@
                     </div>
                 </div>
             </div>
-            <div class="card border-0 shadow-sm mb-4 dashboard-section">
+            <div class="card border-0 shadow-sm mb-4 dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}">
                 <div
                     class="card-header bg-primary text-white fw-medium py-3 d-flex flex-wrap justify-content-between align-items-center border-0 gap-2">
                     <span><i class="fas fa-history me-2"></i>ประวัติการทำรายการ (Approved/Completed)</span>
@@ -1335,15 +1529,22 @@
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-medium text-muted small">หน่วยนับ (Unit)</label>
-                                <input type="text" name="unit" class="form-control shadow-none" required>
+                                <input type="text" id="add_unit" name="unit" class="form-control shadow-none" required
+                                    oninput="updateStockUnitHints('add')">
                             </div>
-                            <div class="col-md-3">
-                                <label class="form-label fw-medium text-muted small">จุดสั่งซื้อ (Safety)</label>
-                                <input type="number" name="safety_stock" class="form-control shadow-none" value="0">
+                            <div class="col-lg-3 col-md-6">
+                                <label class="form-label fw-medium text-muted small" id="addSafetyLabel">จุดสั่งซื้อ (Safety)</label>
+                                <div class="input-group unit-field-group">
+                                    <input type="number" name="safety_stock" class="form-control shadow-none" value="0">
+                                    <span class="input-group-text small" id="addSafetyUnitBadge">หน่วย</span>
+                                </div>
                             </div>
-                            <div class="col-md-3">
-                                <label class="form-label fw-medium text-muted small">จำนวนเริ่มต้น</label>
-                                <input type="number" name="stock" class="form-control shadow-none" value="0">
+                            <div class="col-lg-3 col-md-6">
+                                <label class="form-label fw-medium text-muted small" id="addStockLabel">จำนวนเริ่มต้น</label>
+                                <div class="input-group unit-field-group">
+                                    <input type="number" name="stock" class="form-control shadow-none" value="0">
+                                    <span class="input-group-text small" id="addStockUnitBadge">หน่วย</span>
+                                </div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label fw-medium text-muted small">วันที่รับเข้า (ระบบจะสร้าง Lot
@@ -1372,7 +1573,7 @@
                                     <div class="col-md-4">
                                         <label class="form-label fw-medium text-muted small">หน่วยแพ็ค/กล่อง/กระปุก</label>
                                         <input type="text" id="add_package_unit" name="package_unit" class="form-control shadow-none"
-                                            placeholder="เช่น กล่อง, ขวด, กระปุก">
+                                            placeholder="เช่น กล่อง, ขวด, กระปุก" oninput="updateStockUnitHints('add')">
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label fw-medium text-muted small">หน่วยย่อย</label>
@@ -1427,20 +1628,46 @@
                             <label class="form-label fw-medium text-muted small">หน่วยนับ</label>
                             <input type="text" id="edit_unit" name="unit" class="form-control shadow-none" required>
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label fw-medium text-muted small">หน่วยแพ็ค/กล่อง/กระปุก</label>
-                            <input type="text" id="edit_package_unit" name="package_unit" class="form-control shadow-none"
-                                placeholder="เช่น กล่อง, ขวด, กระปุก">
+                        <div class="col-12 is-hidden" id="editSplitUnitToggleRow">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="editEnableSplit"
+                                    onchange="toggleEditSplitDetail()">
+                                <label class="form-check-label fw-medium small" for="editEnableSplit">
+                                    <i class="fas fa-pills me-1 text-info"></i>แยกหน่วยย่อย (เช่น กล่อง -> เม็ด)
+                                </label>
+                            </div>
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label fw-medium text-muted small">หน่วยย่อย</label>
-                            <input type="text" id="edit_base_unit" name="base_unit" class="form-control shadow-none"
-                                placeholder="เช่น เม็ด">
+                        <div class="col-12 is-hidden" id="editSplitDetailRow">
+                            <div class="row g-3 p-3 rounded-3 split-detail-box">
+                                <div class="col-md-3">
+                                    <label class="form-label fw-medium text-muted small">หน่วยแพ็ค/กล่อง/กระปุก</label>
+                                    <input type="text" id="edit_package_unit" name="package_unit" class="form-control shadow-none"
+                                        placeholder="เช่น กล่อง, ขวด, กระปุก">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label fw-medium text-muted small">หน่วยย่อย</label>
+                                    <input type="text" id="edit_base_unit" name="base_unit" class="form-control shadow-none"
+                                        placeholder="เช่น เม็ด">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label fw-medium text-muted small">1 แพ็ค มีจำนวน (หน่วยย่อย)</label>
+                                    <input type="number" id="edit_conversion_rate" name="conversion_rate" class="form-control shadow-none"
+                                        min="1" step="1" value="1" oninput="renderEditSplitSummaryFromForm()">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label fw-medium text-muted small text-warning">
+                                        <i class="fas fa-box-open me-1"></i>หน่วยย่อยที่เปิดแล้ว
+                                    </label>
+                                    <input type="number" id="edit_open_base_qty" name="open_base_qty" class="form-control shadow-none border-warning"
+                                        min="0" step="1" value="0" oninput="renderEditSplitSummaryFromForm()"
+                                        title="จำนวนหน่วยย่อยจากแพ็คที่เปิดใช้งานแล้ว (เช่น ขวดที่แงะออกจากแพ็ค)">
+                                </div>
+                            </div>
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label fw-medium text-muted small">1 แพ็ค มีจำนวน (หน่วยย่อย)</label>
-                            <input type="number" id="edit_conversion_rate" name="conversion_rate" class="form-control shadow-none"
-                                min="1" step="1" value="1">
+                        <div class="col-12 is-hidden" id="editSplitSummaryRow">
+                            <div class="alert alert-info mb-0 py-2 px-3 small" id="editSplitSummaryBox">
+                                -
+                            </div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-medium text-muted small">สถานที่เก็บ</label>
@@ -1448,14 +1675,20 @@
                             <input type="text" id="edit_location_display" class="form-control bg-light text-muted"
                                 disabled>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label fw-medium text-muted small">จุดสั่งซื้อ (Safety)</label>
-                            <input type="number" id="edit_safety_stock" name="safety_stock"
-                                class="form-control shadow-none">
+                        <div class="col-lg-3 col-md-6">
+                            <label class="form-label fw-medium text-muted small" id="editSafetyLabel">จุดสั่งซื้อ (Safety)</label>
+                            <div class="input-group unit-field-group">
+                                <input type="number" id="edit_safety_stock" name="safety_stock"
+                                    class="form-control shadow-none">
+                                <span class="input-group-text small" id="editSafetyUnitBadge">หน่วย</span>
+                            </div>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label fw-medium text-muted small">จำนวนคงเหลือ</label>
-                            <input type="number" id="edit_stock" name="stock" class="form-control shadow-none">
+                        <div class="col-lg-3 col-md-6">
+                            <label class="form-label fw-medium text-muted small" id="editStockLabel">จำนวนคงเหลือ</label>
+                            <div class="input-group unit-field-group">
+                                <input type="number" id="edit_stock" name="stock" class="form-control shadow-none">
+                                <span class="input-group-text small" id="editStockUnitBadge">หน่วย</span>
+                            </div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-medium text-muted small">วันหมดอายุ</label>
@@ -1483,17 +1716,18 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body p-4 bg-light">
-                    <form id="addUserForm" class="row g-3 mb-4 p-4 bg-white rounded-3 shadow-sm align-items-end border">
-                        <div class="col-12 mb-1">
-                            <h6 class="fw-medium text-primary border-bottom pb-2 m-0"><i
-                                    class="fas fa-user-plus me-2"></i>แบบฟอร์มพนักงาน</h6>
+                    <form id="addUserForm" class="row g-3 mb-4 p-4 shadow-sm align-items-end employee-form-shell">
+                        <input type="hidden" id="isEditUserMode" value="0">
+                        <div class="col-12 mb-1 d-flex justify-content-between align-items-center border-bottom pb-2">
+                            <h6 class="fw-medium text-primary m-0"><i class="fas fa-user-plus me-2"></i>แบบฟอร์มพนักงาน</h6>
+                            <span id="userFormModeBadge" class="form-title-badge">โหมดเพิ่มข้อมูล</span>
                         </div>
                         <div class="col-md-2">
                             <label class="form-label fw-semibold small text-muted">รหัสพนักงาน *</label>
                             <div class="input-group input-group-sm">
                                 <span class="input-group-text bg-light text-muted border-end-0"><i
                                         class="fas fa-id-card"></i></span>
-                                <input type="text" name="emp_id" class="form-control border-start-0 shadow-none"
+                                <input type="text" id="userEmpIdInput" name="emp_id" class="form-control border-start-0 shadow-none"
                                     placeholder="ระบุรหัส..." required>
                             </div>
                         </div>
@@ -1502,12 +1736,17 @@
                             <input type="text" name="name" class="form-control form-control-sm shadow-none"
                                 placeholder="กรอกชื่อ..." required>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-2">
                             <label class="form-label fw-semibold small text-muted">แผนก</label>
                             <select name="department" id="userDeptSelect" class="form-select form-select-sm shadow-none"
                                 required>
                                 <option value="">-- เลือกแผนก --</option>
                             </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold small text-muted">อีเมล</label>
+                            <input type="email" name="email" class="form-control form-control-sm shadow-none"
+                                placeholder="name@company.com">
                         </div>
                         <div class="col-md-2">
                             <label class="form-label fw-semibold small text-muted">โรงงาน</label>
@@ -1523,14 +1762,22 @@
                             </select>
                         </div>
                         <div class="col-md-2" id="userSubmitBtnContainer">
-                            <button type="button" class="btn btn-success btn-sm w-100 fw-medium shadow-sm py-2"
+                            <button type="button" id="addUserSubmitBtn" class="btn btn-success btn-sm w-100 fw-medium shadow-sm py-2"
                                 onclick="submitAddUser()">
                                 <i class="fas fa-plus-circle me-1"></i> เพิ่มพนักงาน
+                            </button>
+                            <button type="button" id="editUserSubmitBtn" class="btn btn-primary btn-sm w-100 fw-medium shadow-sm py-2 d-none"
+                                onclick="submitEditUser()">
+                                <i class="fas fa-save me-1"></i> บันทึกการแก้ไข
+                            </button>
+                            <button type="button" id="cancelEditUserBtn" class="btn btn-outline-secondary btn-sm w-100 fw-medium mt-2 d-none"
+                                onclick="cancelEditUser()">
+                                ยกเลิกแก้ไข
                             </button>
                         </div>
                     </form>
 
-                    <div class="card border-0 shadow-sm">
+                    <div class="card border-0 shadow-sm employee-list-shell">
                         <div class="card-header bg-white border-bottom">
                             <div class="row g-2 align-items-center">
                                 <div class="col-md-4">
@@ -1555,6 +1802,7 @@
                                         <th class="ps-4 col-emp">รหัสพนักงาน</th>
                                         <th class="col-name">ชื่อ-นามสกุล</th>
                                         <th class="col-dept">แผนก</th>
+                                        <th>อีเมล</th>
                                         <th class="text-center col-loc">โรงงาน</th>
                                         <th class="text-center col-action">จัดการ</th>
                                     </tr>
@@ -1646,12 +1894,24 @@
                                 <label class="form-label text-danger small fw-medium">จำนวนที่ต้องการตัดทิ้ง *</label>
                                 <input type="number" name="qty" id="writeOff_qty"
                                     class="form-control border-danger shadow-none" min="1" required>
+                                <div class="mt-2 is-hidden" id="writeOff_qty_unit_wrap">
+                                    <label class="form-label text-muted small fw-medium mb-1">ตัดตามหน่วย</label>
+                                    <select name="qty_unit" id="writeOff_qty_unit" class="form-select shadow-none">
+                                        <option value="package">หน่วยแพ็ค</option>
+                                        <option value="base">หน่วยย่อย</option>
+                                    </select>
+                                </div>
+                                <div class="form-text mt-2" id="writeOff_qty_max_hint">-</div>
                             </div>
                             <div class="col-6">
                                 <label class="form-label text-muted small fw-medium">คงเหลือปัจจุบัน</label>
                                 <input type="text" id="writeOff_current_stock" class="form-control text-muted bg-white"
                                     readonly>
                             </div>
+                        </div>
+
+                        <div class="mb-3 is-hidden" id="writeOff_unit_hint_wrap">
+                            <div class="alert alert-info py-2 px-3 small mb-0" id="writeOff_unit_hint">-</div>
                         </div>
 
                         <div class="mb-3">
@@ -1769,6 +2029,83 @@
                     <button type="button" class="btn btn-secondary rounded-pill px-4"
                         data-bs-dismiss="modal">ปิดหน้าต่าง</button>
                 </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal fade" id="gaEmailSettingModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-dark text-white border-0">
+                    <h5 class="modal-title fw-medium"><i class="fas fa-envelope-open-text text-warning me-2"></i>ตั้งค่าอีเมล GA Request</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="gaEmailSettingForm">
+                    <div class="modal-body p-4 bg-light">
+                        <div class="alert alert-info border-0 shadow-sm small">
+                            <i class="fas fa-info-circle me-1"></i> รองรับหลายอีเมลโดยคั่นด้วยเครื่องหมายคอมมา เช่น a@company.com, b@company.com
+                        </div>
+
+                        <h6 class="fw-medium mb-3 text-primary">กลุ่มผู้รับผิดชอบตามส่วนงาน</h6>
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted fw-medium">GA - PC1</label>
+                                <textarea id="ga_recipients_ga_pc1" class="form-control shadow-none" rows="2" placeholder="ga.pc1@company.com"></textarea>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted fw-medium">GA - CC</label>
+                                <textarea id="ga_recipients_ga_cc" class="form-control shadow-none" rows="2" placeholder="ga.cc@company.com"></textarea>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted fw-medium">IT - PC1</label>
+                                <textarea id="ga_recipients_it_pc1" class="form-control shadow-none" rows="2" placeholder="it.pc1@company.com"></textarea>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted fw-medium">IT - CC</label>
+                                <textarea id="ga_recipients_it_cc" class="form-control shadow-none" rows="2" placeholder="it.cc@company.com"></textarea>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small text-muted fw-medium">Default (Fallback)</label>
+                                <textarea id="ga_recipients_default" class="form-control shadow-none" rows="2" placeholder="support@company.com"></textarea>
+                            </div>
+                        </div>
+
+                        <h6 class="fw-medium mb-3 text-primary">SMTP (ใช้ส่งอีเมล)</h6>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted fw-medium">SMTP Host</label>
+                                <input type="text" id="smtp_host" class="form-control shadow-none" placeholder="smtp.gmail.com">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small text-muted fw-medium">Port</label>
+                                <input type="number" id="smtp_port" class="form-control shadow-none" min="1" max="65535" placeholder="587">
+                            </div>
+                            <div class="col-md-3 d-flex align-items-end">
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="smtp_use_tls" checked>
+                                    <label class="form-check-label small text-muted fw-medium" for="smtp_use_tls">ใช้ TLS</label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted fw-medium">SMTP Username</label>
+                                <input type="text" id="smtp_username" class="form-control shadow-none" placeholder="yourname@gmail.com">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small text-muted fw-medium">SMTP Password</label>
+                                <input type="password" id="smtp_password" class="form-control shadow-none" autocomplete="new-password" placeholder="Gmail App Password (16 ตัวอักษร)">
+                            </div>
+                            <div class="col-md-12">
+                                <label class="form-label small text-muted fw-medium">From Email</label>
+                                <input type="email" id="smtp_from" class="form-control shadow-none" placeholder="yourname@gmail.com">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer bg-white border-0">
+                        <button type="button" class="btn btn-secondary rounded-pill px-4" data-bs-dismiss="modal">ยกเลิก</button>
+                        <button type="button" class="btn btn-primary rounded-pill px-4 fw-medium" onclick="saveGaEmailSettings()">
+                            <i class="fas fa-save me-1"></i> บันทึกการตั้งค่า
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
@@ -1890,6 +2227,13 @@
             return response;
         }
 
+        function scrollToSection(sectionId) {
+            const section = document.getElementById(sectionId);
+            if (section) {
+                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
         function submitAdminLogout() {
             const form = document.getElementById('adminLogoutForm');
             if (form) form.submit();
@@ -1979,6 +2323,19 @@
             flatpickr("#date_picker_expiry", dateConfig);
             flatpickr("#add_lot_date_picker_expiry", dateConfig);
             flatpickr("#edit_date_picker_expiry", dateConfig);
+
+            // Sync labels for Safety/Stock with active counting unit.
+            updateStockUnitHints('add');
+            updateStockUnitHints('edit');
+
+            const addUnitEl = document.getElementById('add_unit');
+            const addPackageUnitEl = document.getElementById('add_package_unit');
+            const editUnitEl = document.getElementById('edit_unit');
+            const editPackageUnitEl = document.getElementById('edit_package_unit');
+            if (addUnitEl) addUnitEl.addEventListener('input', () => updateStockUnitHints('add'));
+            if (addPackageUnitEl) addPackageUnitEl.addEventListener('input', () => updateStockUnitHints('add'));
+            if (editUnitEl) editUnitEl.addEventListener('input', () => updateStockUnitHints('edit'));
+            if (editPackageUnitEl) editPackageUnitEl.addEventListener('input', () => updateStockUnitHints('edit'));
 
             // --- 1.2 วาดกราฟสัดส่วนการเบิก (Chart.js) หน้า Dashboard ---
             try {
@@ -2154,6 +2511,32 @@
 
         const adminCsrfToken = '{{ csrf_token() }}';
 
+        function updateStockUnitHints(mode) {
+            const isAddMode = mode === 'add';
+            const categoryEl = document.getElementById(isAddMode ? 'productCategory' : 'edit_category');
+            const unitEl = document.getElementById(isAddMode ? 'add_unit' : 'edit_unit');
+            const packageUnitEl = document.getElementById(isAddMode ? 'add_package_unit' : 'edit_package_unit');
+            const splitToggleEl = document.getElementById(isAddMode ? 'addEnableSplit' : 'editEnableSplit');
+            const safetyLabelEl = document.getElementById(isAddMode ? 'addSafetyLabel' : 'editSafetyLabel');
+            const stockLabelEl = document.getElementById(isAddMode ? 'addStockLabel' : 'editStockLabel');
+            const safetyBadgeEl = document.getElementById(isAddMode ? 'addSafetyUnitBadge' : 'editSafetyUnitBadge');
+            const stockBadgeEl = document.getElementById(isAddMode ? 'addStockUnitBadge' : 'editStockUnitBadge');
+
+            if (!categoryEl || !unitEl || !safetyLabelEl || !stockLabelEl) return;
+
+            const category = (categoryEl.value || '').trim();
+            const unit = (unitEl.value || '').trim();
+            const packageUnit = (packageUnitEl && packageUnitEl.value ? packageUnitEl.value : '').trim();
+            const splitEnabled = !!(splitToggleEl && splitToggleEl.checked);
+            const isMedicine = category === 'ยา';
+
+            const stockUnit = (isMedicine && splitEnabled && packageUnit) ? packageUnit : (unit || 'หน่วย');
+            safetyLabelEl.textContent = 'จุดสั่งซื้อ (Safety)';
+            stockLabelEl.textContent = isAddMode ? 'จำนวนเริ่มต้น' : 'จำนวนคงเหลือ';
+            if (safetyBadgeEl) safetyBadgeEl.textContent = stockUnit;
+            if (stockBadgeEl) stockBadgeEl.textContent = stockUnit;
+        }
+
         function toggleAddSplitFields() {
             const cat = document.getElementById('productCategory').value;
             const toggleRow = document.getElementById('addSplitUnitToggleRow');
@@ -2171,6 +2554,7 @@
                     if (el) { el.value = el.type === 'number' ? '1' : ''; }
                 });
             }
+            updateStockUnitHints('add');
         }
         function toggleAddSplitDetail() {
             const cb = document.getElementById('addEnableSplit');
@@ -2182,6 +2566,102 @@
                     if (el) { el.value = el.type === 'number' ? '1' : ''; }
                 });
             }
+            updateStockUnitHints('add');
+        }
+
+        function toggleEditSplitFields(categoryValue, hasSplitData = false) {
+            const toggleRow = document.getElementById('editSplitUnitToggleRow');
+            const detailRow = document.getElementById('editSplitDetailRow');
+            const summaryRow = document.getElementById('editSplitSummaryRow');
+            const cb = document.getElementById('editEnableSplit');
+            const isMedicine = categoryValue === 'ยา';
+
+            if (!toggleRow || !detailRow || !summaryRow || !cb) return;
+
+            if (isMedicine) {
+                toggleRow.classList.remove('is-hidden');
+                cb.checked = !!hasSplitData;
+                detailRow.classList.toggle('is-hidden', !cb.checked);
+                summaryRow.classList.toggle('is-hidden', !cb.checked);
+            } else {
+                toggleRow.classList.add('is-hidden');
+                detailRow.classList.add('is-hidden');
+                summaryRow.classList.add('is-hidden');
+                cb.checked = false;
+                ['edit_package_unit', 'edit_base_unit', 'edit_conversion_rate'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) { el.value = el.type === 'number' ? '1' : ''; }
+                });
+            }
+            updateStockUnitHints('edit');
+        }
+
+        function toggleEditSplitDetail() {
+            const cb = document.getElementById('editEnableSplit');
+            const detailRow = document.getElementById('editSplitDetailRow');
+            const summaryRow = document.getElementById('editSplitSummaryRow');
+            if (!cb || !detailRow || !summaryRow) return;
+
+            detailRow.classList.toggle('is-hidden', !cb.checked);
+            summaryRow.classList.toggle('is-hidden', !cb.checked);
+            if (!cb.checked) {
+                ['edit_package_unit', 'edit_base_unit', 'edit_conversion_rate'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) { el.value = el.type === 'number' ? '1' : ''; }
+                });
+            }
+            updateStockUnitHints('edit');
+        }
+
+        function renderEditSplitSummary(data) {
+            const summaryRow = document.getElementById('editSplitSummaryRow');
+            const summaryBox = document.getElementById('editSplitSummaryBox');
+            if (!summaryRow || !summaryBox) return;
+
+            const conversionRate = parseInt(data.conversion_rate || 1, 10);
+            const isSplitMedicine = data.category === 'ยา'
+                && !!(data.package_unit && data.base_unit)
+                && conversionRate > 1;
+
+            if (!isSplitMedicine || !data.split_summary) {
+                summaryRow.classList.add('is-hidden');
+                summaryBox.textContent = '-';
+                return;
+            }
+
+            const summary = data.split_summary;
+            const packageQty = parseInt(summary.stock_package_qty || 0, 10);
+            const openBaseQty = parseInt(summary.open_base_qty || 0, 10);
+            const totalBaseQty = parseInt(summary.total_base_qty || 0, 10);
+            const packageUnit = data.package_unit || data.unit || 'แพ็ก';
+            const baseUnit = data.base_unit || 'หน่วยย่อย';
+            const totalPackageEquivalent = (totalBaseQty / conversionRate).toFixed(2);
+
+            summaryBox.innerHTML = `
+                <strong>สรุปคงเหลือปัจจุบัน:</strong>
+                ในคลัง ${packageQty} ${packageUnit}
+                + เปิดใช้แล้ว ${openBaseQty} ${baseUnit}
+                = รวมทั้งหมด ${totalBaseQty} ${baseUnit} (${totalPackageEquivalent} ${packageUnit})
+            `;
+            summaryRow.classList.remove('is-hidden');
+        }
+
+        function renderEditSplitSummaryFromForm() {
+            const summaryRow = document.getElementById('editSplitSummaryRow');
+            const summaryBox = document.getElementById('editSplitSummaryBox');
+            if (!summaryRow || !summaryBox) return;
+            const convRate = parseInt(document.getElementById('edit_conversion_rate')?.value || 1, 10) || 1;
+            const stock = parseInt(document.getElementById('edit_stock')?.value || 0, 10) || 0;
+            const openBase = parseInt(document.getElementById('edit_open_base_qty')?.value || 0, 10) || 0;
+            const pkgUnit = document.getElementById('edit_package_unit')?.value || 'แพ็ค';
+            const baseUnit = document.getElementById('edit_base_unit')?.value || 'หน่วยย่อย';
+            const totalBase = stock * convRate + openBase;
+            summaryBox.innerHTML = `
+                <strong>สรุปหลังแก้ไข:</strong>
+                ในคลัง ${stock} ${pkgUnit} × ${convRate} + เปิด ${openBase} ${baseUnit}
+                = รวมทั้งหมด <strong>${totalBase} ${baseUnit}</strong>
+            `;
+            summaryRow.classList.remove('is-hidden');
         }
 
         function submitAddProduct() {
@@ -2272,6 +2752,12 @@
                 document.getElementById('edit_package_unit').value = data.package_unit || data.unit || '';
                 document.getElementById('edit_base_unit').value = data.base_unit || 'เม็ด';
                 document.getElementById('edit_conversion_rate').value = data.conversion_rate || 1;
+                document.getElementById('edit_open_base_qty').value = (data.split_summary?.open_base_qty || 0);
+                const hasSplitData = (parseInt(data.conversion_rate || 1, 10) > 1)
+                    && !!(data.package_unit && data.base_unit);
+                toggleEditSplitFields(data.category, hasSplitData);
+                renderEditSplitSummary(data);
+                updateStockUnitHints('edit');
                 document.getElementById('edit_location').value = data.location;
                 document.getElementById('edit_location_display').value = data.location;
                 document.getElementById('edit_safety_stock').value = data.safety_stock;
@@ -2285,6 +2771,15 @@
 
         function submitEditProduct() {
             const form = document.getElementById('editProductForm');
+            const splitEnabled = (document.getElementById('editEnableSplit') || {}).checked;
+            if (!splitEnabled) {
+                const packageUnit = document.getElementById('edit_package_unit');
+                const baseUnit = document.getElementById('edit_base_unit');
+                const conversionRate = document.getElementById('edit_conversion_rate');
+                if (packageUnit) packageUnit.value = '';
+                if (baseUnit) baseUnit.value = '';
+                if (conversionRate) conversionRate.value = '1';
+            }
             const formData = new FormData(form);
             formData.append('csrf_token', adminCsrfToken);
             fetch('/admin/edit_product', { method: 'POST', body: formData, headers: { 'X-CSRF-Token': adminCsrfToken } })
@@ -2500,6 +2995,43 @@
             debouncedLoadUserList();
         }
 
+        function startEditUser(index) {
+            if (!window.userRowsCache || !window.userRowsCache[index]) return;
+            const user = window.userRowsCache[index];
+            const form = document.getElementById('addUserForm');
+            if (!form) return;
+
+            form.emp_id.value = user.emp_id || '';
+            form.name.value = user.name || '';
+            form.department.value = user.department || '';
+            form.email.value = user.email || '';
+            form.location.value = user.location || 'PC1';
+
+            const empInput = document.getElementById('userEmpIdInput');
+            if (empInput) empInput.readOnly = true;
+
+            document.getElementById('isEditUserMode').value = '1';
+            document.getElementById('addUserSubmitBtn').classList.add('d-none');
+            document.getElementById('editUserSubmitBtn').classList.remove('d-none');
+            document.getElementById('cancelEditUserBtn').classList.remove('d-none');
+            document.getElementById('userFormModeBadge').textContent = 'โหมดแก้ไขข้อมูล';
+            form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function cancelEditUser() {
+            const form = document.getElementById('addUserForm');
+            if (!form) return;
+            form.reset();
+            const empInput = document.getElementById('userEmpIdInput');
+            if (empInput) empInput.readOnly = false;
+
+            document.getElementById('isEditUserMode').value = '0';
+            document.getElementById('addUserSubmitBtn').classList.remove('d-none');
+            document.getElementById('editUserSubmitBtn').classList.add('d-none');
+            document.getElementById('cancelEditUserBtn').classList.add('d-none');
+            document.getElementById('userFormModeBadge').textContent = 'โหมดเพิ่มข้อมูล';
+        }
+
         function loadUserList() {
             // อัปเดตรายชื่อแผนกใน Dropdown
             fetch('/admin/list_departments').then(checkAuth).then(res => res.json()).then(depts => {
@@ -2510,23 +3042,27 @@
             const search = tableSearchInput ? tableSearchInput.value.trim() : '';
             const tbody = document.getElementById('userTableBody');
             if (tbody) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-3 text-muted">กำลังค้นหา...</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center py-3 text-muted">กำลังค้นหา...</td></tr>';
             }
 
             fetch(`/admin/list_users?search=${encodeURIComponent(search)}`).then(checkAuth).then(res => res.json()).then(users => {
                 if (!Array.isArray(users) || users.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">ไม่พบพนักงานที่ตรงกับคำค้นหา</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">ไม่พบพนักงานที่ตรงกับคำค้นหา</td></tr>';
                     return;
                 }
 
-                tbody.innerHTML = users.map(user => `
+                window.userRowsCache = users;
+
+                tbody.innerHTML = users.map((user, index) => `
                 <tr>
                     <td class="ps-4 fw-medium text-primary"># ${user.emp_id}</td>
                     <td class="fw-medium">${user.name}</td>
                     <td>${user.department || 'ไม่ระบุ'}</td>
+                    <td>${user.email || '-'}</td>
                     <td class="text-center">${user.location}</td>
                     <td class="text-center">
-                        <button class="btn btn-sm btn-light border text-danger" onclick="deleteUser('${user.emp_id}')"><i class="fas fa-trash"></i></button>
+                        <button class="btn btn-sm btn-outline-primary user-action-btn me-1" title="แก้ไข" onclick="startEditUser(${index})"><i class="fas fa-pen"></i></button>
+                        <button class="btn btn-sm btn-light border text-danger user-action-btn" title="ลบ" onclick="deleteUser('${user.emp_id}')"><i class="fas fa-trash"></i></button>
                     </td>
                 </tr>
             `).join('');
@@ -2540,6 +3076,21 @@
                 .then(checkAuth).then(res => res.json()).then(data => {
                     if (data.success) { document.getElementById('addUserForm').reset(); loadUserList(); Swal.fire('สำเร็จ', '', 'success'); }
                     else { Swal.fire('ผิดพลาด', data.message, 'error'); }
+                });
+        }
+
+        function submitEditUser() {
+            const formData = new FormData(document.getElementById('addUserForm'));
+            formData.append('csrf_token', adminCsrfToken);
+            fetch('/admin/update_user_ajax', { method: 'POST', body: formData, headers: { 'X-CSRF-Token': adminCsrfToken } })
+                .then(checkAuth).then(res => res.json()).then(data => {
+                    if (data.success) {
+                        cancelEditUser();
+                        loadUserList();
+                        Swal.fire('บันทึกสำเร็จ', 'แก้ไขข้อมูลพนักงานเรียบร้อยแล้ว', 'success');
+                    } else {
+                        Swal.fire('ผิดพลาด', data.message || 'ไม่สามารถบันทึกข้อมูลได้', 'error');
+                    }
                 });
         }
 
@@ -2610,6 +3161,62 @@
                 }
             });
         }
+
+        function openGaEmailSettingModal() {
+            fetch('/admin/get_ga_email_settings').then(checkAuth).then(res => res.json()).then(data => {
+                const settings = (data && data.settings) ? data.settings : {};
+                const fields = [
+                    'ga_recipients_ga_pc1', 'ga_recipients_ga_cc',
+                    'ga_recipients_it_pc1', 'ga_recipients_it_cc',
+                    'ga_recipients_default',
+                    'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_from'
+                ];
+                fields.forEach((id) => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = settings[id] || '';
+                });
+
+                const tlsValue = String(settings['smtp_use_tls'] ?? '1').toLowerCase();
+                const tlsEnabled = !['0', 'false', 'no', 'off'].includes(tlsValue);
+                const tlsSwitch = document.getElementById('smtp_use_tls');
+                if (tlsSwitch) tlsSwitch.checked = tlsEnabled;
+
+                new bootstrap.Modal(document.getElementById('gaEmailSettingModal')).show();
+            }).catch(() => {
+                new bootstrap.Modal(document.getElementById('gaEmailSettingModal')).show();
+            });
+        }
+
+        function saveGaEmailSettings() {
+            const formData = new FormData();
+            const fields = [
+                'ga_recipients_ga_pc1', 'ga_recipients_ga_cc',
+                'ga_recipients_it_pc1', 'ga_recipients_it_cc',
+                'ga_recipients_default',
+                'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_from'
+            ];
+            fields.forEach((id) => {
+                const el = document.getElementById(id);
+                formData.append(id, el ? el.value.trim() : '');
+            });
+            formData.append('smtp_use_tls', document.getElementById('smtp_use_tls').checked ? '1' : '0');
+            formData.append('csrf_token', adminCsrfToken);
+
+            fetch('/admin/save_ga_email_settings', {
+                method: 'POST',
+                body: formData,
+                headers: { 'X-CSRF-Token': adminCsrfToken }
+            }).then(checkAuth).then(res => res.json()).then(data => {
+                if (data.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('gaEmailSettingModal')).hide();
+                    Swal.fire('บันทึกสำเร็จ', data.message || '', 'success');
+                } else {
+                    Swal.fire('ผิดพลาด', data.message || 'ไม่สามารถบันทึกข้อมูลได้', 'error');
+                }
+            }).catch(() => {
+                Swal.fire('ผิดพลาด', 'ไม่สามารถเชื่อมต่อระบบได้', 'error');
+            });
+        }
         // เปิดหน้าต่างและดึงข้อมูลของมาแสดง
         function openWriteOffModal(code) {
             fetch('/admin/get_product/' + code).then(checkAuth).then(res => res.json()).then(data => {
@@ -2618,14 +3225,122 @@
                     return;
                 }
 
+                window.writeOffContext = data;
                 document.getElementById('writeOff_product_id').value = data.id;
                 document.getElementById('writeOff_product_display').value = `[${data.code}] ${data.name}`;
-                document.getElementById('writeOff_current_stock').value = data.stock + ' ' + data.unit;
-                document.getElementById('writeOff_qty').max = data.stock; // ห้ามตัดเกินสต็อกที่มี
+                setupWriteOffUnitSelector();
+                updateWriteOffQtyControl();
                 document.getElementById('writeOff_qty').value = ''; // เคลียร์ค่าเดิม
+                renderWriteOffUnitHint();
 
                 new bootstrap.Modal(document.getElementById('writeOffModal')).show();
             });
+        }
+
+        function setupWriteOffUnitSelector() {
+            const ctx = window.writeOffContext || {};
+            const wrap = document.getElementById('writeOff_qty_unit_wrap');
+            const select = document.getElementById('writeOff_qty_unit');
+            if (!wrap || !select) return;
+
+            const conversionRate = parseInt(ctx.conversion_rate || 1, 10);
+            const splitEnabled = !!(ctx.base_unit && ctx.package_unit && conversionRate > 1);
+
+            if (!splitEnabled) {
+                wrap.classList.add('is-hidden');
+                select.value = 'package';
+                return;
+            }
+
+            const packageUnit = ctx.package_unit || ctx.unit || 'แพ็ค';
+            const baseUnit = ctx.base_unit || 'หน่วยย่อย';
+            const packageOption = select.querySelector('option[value="package"]');
+            const baseOption = select.querySelector('option[value="base"]');
+            if (packageOption) packageOption.textContent = `ตัดเป็น${packageUnit}`;
+            if (baseOption) baseOption.textContent = `ตัดเป็น${baseUnit}`;
+
+            select.value = 'package';
+            wrap.classList.remove('is-hidden');
+        }
+
+        function updateWriteOffQtyControl() {
+            const qtyEl = document.getElementById('writeOff_qty');
+            const stockEl = document.getElementById('writeOff_current_stock');
+            const unitSelect = document.getElementById('writeOff_qty_unit');
+            const maxHintEl = document.getElementById('writeOff_qty_max_hint');
+            const ctx = window.writeOffContext || {};
+            if (!qtyEl || !stockEl || !unitSelect || !maxHintEl) return;
+
+            const conversionRate = parseInt(ctx.conversion_rate || 1, 10);
+            const splitEnabled = !!(ctx.base_unit && ctx.package_unit && conversionRate > 1);
+            const packageUnit = ctx.package_unit || ctx.unit || 'แพ็ค';
+            const baseUnit = ctx.base_unit || 'หน่วยย่อย';
+            const packageStock = parseInt(ctx.stock || 0, 10);
+            const openBaseQty = parseInt(((ctx.split_summary || {}).open_base_qty) || 0, 10);
+
+            if (!splitEnabled || unitSelect.value === 'package') {
+                qtyEl.max = packageStock;
+                stockEl.value = `${packageStock} ${packageUnit}`;
+                maxHintEl.textContent = `สูงสุด ${packageStock} ${packageUnit}`;
+            } else {
+                const totalBaseQty = (packageStock * conversionRate) + openBaseQty;
+                qtyEl.max = totalBaseQty;
+                stockEl.value = `${totalBaseQty} ${baseUnit}`;
+                maxHintEl.textContent = `สูงสุด ${totalBaseQty} ${baseUnit}`;
+            }
+
+            normalizeWriteOffQtyInput();
+        }
+
+        function normalizeWriteOffQtyInput() {
+            const qtyEl = document.getElementById('writeOff_qty');
+            if (!qtyEl) return;
+            const maxQty = parseInt(qtyEl.max || '0', 10);
+            const rawQty = parseInt(qtyEl.value || '0', 10);
+
+            if (rawQty < 0) {
+                qtyEl.value = '0';
+                return;
+            }
+            if (maxQty > 0 && rawQty > maxQty) {
+                qtyEl.value = String(maxQty);
+            }
+        }
+
+        function renderWriteOffUnitHint() {
+            const hintWrap = document.getElementById('writeOff_unit_hint_wrap');
+            const hintBox = document.getElementById('writeOff_unit_hint');
+            const qtyEl = document.getElementById('writeOff_qty');
+            const unitSelect = document.getElementById('writeOff_qty_unit');
+            const ctx = window.writeOffContext || {};
+
+            if (!hintWrap || !hintBox || !qtyEl || !unitSelect) return;
+
+            const qty = parseInt(qtyEl.value || '0', 10);
+            const conversionRate = parseInt(ctx.conversion_rate || 1, 10);
+            const splitEnabled = !!(ctx.base_unit && ctx.package_unit && conversionRate > 1);
+
+            if (!splitEnabled) {
+                hintWrap.classList.add('is-hidden');
+                hintBox.textContent = '-';
+                return;
+            }
+
+            const packageUnit = ctx.package_unit || ctx.unit || 'แพ็ก';
+            const baseUnit = ctx.base_unit || 'หน่วยย่อย';
+            const currentPkg = parseInt(ctx.stock || 0, 10);
+            const openBase = parseInt(((ctx.split_summary || {}).open_base_qty) || 0, 10);
+            const isBaseMode = unitSelect.value === 'base';
+            const qtyPackage = isBaseMode ? (Math.max(0, qty) / conversionRate) : Math.max(0, qty);
+            const qtyBase = isBaseMode ? Math.max(0, qty) : (Math.max(0, qty) * conversionRate);
+
+            hintBox.innerHTML = `
+                <strong>สรุปการตัดจำหน่าย:</strong>
+                ${isBaseMode ? `${Math.max(0, qty)} ${baseUnit}` : `${Math.max(0, qty)} ${packageUnit}`}
+                = ${qtyPackage.toFixed(2)} ${packageUnit} / ${qtyBase} ${baseUnit}
+                <span class="text-muted">(คงเหลือปัจจุบัน: ${currentPkg} ${packageUnit} + เปิดใช้แล้ว ${openBase} ${baseUnit})</span>
+            `;
+            hintWrap.classList.remove('is-hidden');
         }
 
         // ส่งข้อมูลไปบันทึก
@@ -2636,9 +3351,28 @@
                 return;
             }
 
+            const ctx = window.writeOffContext || {};
+            const conversionRate = parseInt(ctx.conversion_rate || 1, 10);
+            const splitEnabled = !!(ctx.base_unit && ctx.package_unit && conversionRate > 1);
+            const qtyUnit = (document.getElementById('writeOff_qty_unit') || {}).value || 'package';
+            let confirmText = 'สต็อกจะถูกหักออกและบันทึกลงประวัติทันที';
+            if (splitEnabled) {
+                const packageUnit = ctx.package_unit || ctx.unit || 'แพ็ก';
+                const baseUnit = ctx.base_unit || 'หน่วยย่อย';
+                if (qtyUnit === 'base') {
+                    const qtyBase = parseInt(qty || '0', 10);
+                    const qtyPackage = qtyBase / conversionRate;
+                    confirmText = `ระบบจะตัด ${qtyBase} ${baseUnit} (${qtyPackage.toFixed(2)} ${packageUnit}) และบันทึกลงประวัติทันที`;
+                } else {
+                    const qtyPackage = parseInt(qty || '0', 10);
+                    const qtyBase = qtyPackage * conversionRate;
+                    confirmText = `ระบบจะตัด ${qtyPackage} ${packageUnit} (${qtyBase} ${baseUnit}) และบันทึกลงประวัติทันที`;
+                }
+            }
+
             Swal.fire({
                 title: 'ยืนยันการตัดจำหน่าย?',
-                text: "สต็อกจะถูกหักออกและบันทึกลงประวัติทันที",
+                text: confirmText,
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonColor: '#dc3545',
@@ -2662,6 +3396,21 @@
                             }
                         });
                 }
+            });
+        }
+
+        const writeOffQtyInput = document.getElementById('writeOff_qty');
+        if (writeOffQtyInput) {
+            writeOffQtyInput.addEventListener('input', () => {
+                normalizeWriteOffQtyInput();
+                renderWriteOffUnitHint();
+            });
+        }
+        const writeOffQtyUnitInput = document.getElementById('writeOff_qty_unit');
+        if (writeOffQtyUnitInput) {
+            writeOffQtyUnitInput.addEventListener('change', () => {
+                updateWriteOffQtyControl();
+                renderWriteOffUnitHint();
             });
         }
         // ฟังก์ชันล้างข้อมูลระบบ
