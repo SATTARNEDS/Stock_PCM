@@ -6,25 +6,30 @@
 {% endif %}
 
 {% for cat, items in products.items() %}
-<div class="col-12 mt-2">
-    <span class="badge bg-secondary-subtle text-secondary px-3 rounded-pill fw-medium" style="font-size: 0.7rem;">
+<div class="product-masonry-item product-category-label-row">
+    <span class="badge bg-secondary-subtle text-secondary px-3 rounded-pill fw-medium category-badge-small">
         {{ cat }}
     </span>
 </div>
 {% for item in items %}
-<div class="col-12 col-md-6 col-lg-4">
+<div class="product-masonry-item">
     {% set split_medicine = item['is_split_tablet_medicine'] if 'is_split_tablet_medicine' in item.keys() else false %}
     {% set effective_stock = item['effective_stock'] if 'effective_stock' in item.keys() else item['stock'] %}
     <div class="product-card p-3 border shadow-sm {% if effective_stock <= 0 %}out-of-stock{% endif %}">
         <div class="d-flex justify-content-between align-items-center">
-            <div style="max-width: 65%;">
-                <div class="fw-medium text-dark text-truncate">{{ item['name'] }}</div>
-                <div class="text-muted extra-small" style="font-size: 0.75rem;">รหัส: {{ item['code'] }}</div>
+            <div class="product-info-block">
+                <div class="product-name-line">{{ item['name'] }}</div>
+                <div class="product-code-line">รหัส: {{ item['code'] }}</div>
+                {% if item['split_unit_hint_label'] %}
+                <div class="product-hint-line">
+                    <small class="split-unit-badge">{{ item['split_unit_hint_label'] }}</small>
+                </div>
+                {% endif %}
                 
                 {% if effective_stock <= 0 %}
                     <span class="out-of-stock-label" id="stock-display-{{ item['id'] }}">● ของหมด</span>
                 {% else %}
-                    <span class="text-primary fw-medium" style="font-size: 0.85rem;" id="stock-display-{{ item['id'] }}"
+                    <span class="text-primary fw-medium stock-line" id="stock-display-{{ item['id'] }}"
                           data-original-stock="{{ item['stock_base_total'] if split_medicine else item['stock'] }}"
                           data-original-unit="{{ item['base_unit_label']|e if split_medicine else item['unit']|e }}"
                           data-original-subtext="{{ item['backend_stock_text']|e if split_medicine else '' }}">

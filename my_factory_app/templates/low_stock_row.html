@@ -2,7 +2,12 @@
 <tr class="align-middle">
     <td class="ps-4"><code>{{ item['code'] }}</code></td>
     
-    <td>{{ item['name'] }}</td>
+    <td>
+        {{ item['name'] }}
+        {% if item['split_unit_hint_label'] %}
+        <span class="split-unit-badge">{{ item['split_unit_hint_label'] }}</span>
+        {% endif %}
+    </td>
     
     <td class="text-center">
         {% if item['is_split_tablet_medicine'] %}

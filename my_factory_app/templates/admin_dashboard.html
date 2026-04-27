@@ -1215,6 +1215,9 @@
                                 <td class="ps-4"><code>{{ item['code'] }}</code></td>
                                 <td class="fw-medium {% if item['is_active'] == 0 %}text-muted{% endif %}">
                                     {{ item['name'] }}
+                                    {% if item['split_unit_hint_label'] %}
+                                    <span class="split-unit-badge">{{ item['split_unit_hint_label'] }}</span>
+                                    {% endif %}
                                     {% if item['is_active'] == 0 %}
                                     <span class="badge bg-danger ms-1 tiny-status-badge">ปิดใช้งาน</span>
                                     {% endif %}
@@ -1570,20 +1573,25 @@
                             </div>
                             <div class="col-12 is-hidden" id="addSplitDetailRow">
                                 <div class="row g-3 p-3 rounded-3 split-detail-box">
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
                                         <label class="form-label fw-medium text-muted small">หน่วยแพ็ค/กล่อง/กระปุก</label>
                                         <input type="text" id="add_package_unit" name="package_unit" class="form-control shadow-none"
                                             placeholder="เช่น กล่อง, ขวด, กระปุก" oninput="updateStockUnitHints('add')">
                                     </div>
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
                                         <label class="form-label fw-medium text-muted small">หน่วยย่อย</label>
                                         <input type="text" id="add_base_unit" name="base_unit" class="form-control shadow-none"
-                                            placeholder="เช่น เม็ด, แคปซูล">
+                                            placeholder="เช่น ห่อ, ซอง, เม็ด">
                                     </div>
-                                    <div class="col-md-4">
+                                    <div class="col-md-3">
                                         <label class="form-label fw-medium text-muted small">1 แพ็ค มีจำนวน (หน่วยย่อย)</label>
                                         <input type="number" id="add_conversion_rate" name="conversion_rate" class="form-control shadow-none"
                                             min="1" step="1" value="1">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label fw-medium text-muted small text-primary">1 หน่วยย่อย = กี่เม็ด</label>
+                                        <input type="number" id="add_base_unit_to_tablet_rate" name="base_unit_to_tablet_rate" class="form-control shadow-none"
+                                            min="0" step="1" value="0" placeholder="เช่น 10">
                                     </div>
                                 </div>
                             </div>
@@ -1653,6 +1661,11 @@
                                     <label class="form-label fw-medium text-muted small">1 แพ็ค มีจำนวน (หน่วยย่อย)</label>
                                     <input type="number" id="edit_conversion_rate" name="conversion_rate" class="form-control shadow-none"
                                         min="1" step="1" value="1" oninput="renderEditSplitSummaryFromForm()">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label fw-medium text-muted small text-primary">1 หน่วยย่อย = กี่เม็ด</label>
+                                    <input type="number" id="edit_base_unit_to_tablet_rate" name="base_unit_to_tablet_rate" class="form-control shadow-none"
+                                        min="0" step="1" value="0" oninput="renderEditSplitSummaryFromForm()" placeholder="เช่น 10">
                                 </div>
                                 <div class="col-md-3">
                                     <label class="form-label fw-medium text-muted small text-warning">
@@ -2549,9 +2562,9 @@
                 detailRow.classList.add('is-hidden');
                 if (cb) cb.checked = false;
                 // clear values when hidden
-                ['add_package_unit','add_base_unit','add_conversion_rate'].forEach(id => {
+                ['add_package_unit','add_base_unit','add_conversion_rate','add_base_unit_to_tablet_rate'].forEach(id => {
                     const el = document.getElementById(id);
-                    if (el) { el.value = el.type === 'number' ? '1' : ''; }
+                    if (el) { el.value = (id === 'add_base_unit_to_tablet_rate') ? '0' : (el.type === 'number' ? '1' : ''); }
                 });
             }
             updateStockUnitHints('add');
@@ -2561,9 +2574,9 @@
             const detailRow = document.getElementById('addSplitDetailRow');
             detailRow.classList.toggle('is-hidden', !cb.checked);
             if (!cb.checked) {
-                ['add_package_unit','add_base_unit','add_conversion_rate'].forEach(id => {
+                ['add_package_unit','add_base_unit','add_conversion_rate','add_base_unit_to_tablet_rate'].forEach(id => {
                     const el = document.getElementById(id);
-                    if (el) { el.value = el.type === 'number' ? '1' : ''; }
+                    if (el) { el.value = (id === 'add_base_unit_to_tablet_rate') ? '0' : (el.type === 'number' ? '1' : ''); }
                 });
             }
             updateStockUnitHints('add');
@@ -2588,9 +2601,9 @@
                 detailRow.classList.add('is-hidden');
                 summaryRow.classList.add('is-hidden');
                 cb.checked = false;
-                ['edit_package_unit', 'edit_base_unit', 'edit_conversion_rate'].forEach(id => {
+                ['edit_package_unit', 'edit_base_unit', 'edit_conversion_rate', 'edit_base_unit_to_tablet_rate'].forEach(id => {
                     const el = document.getElementById(id);
-                    if (el) { el.value = el.type === 'number' ? '1' : ''; }
+                    if (el) { el.value = (id === 'edit_base_unit_to_tablet_rate') ? '0' : (el.type === 'number' ? '1' : ''); }
                 });
             }
             updateStockUnitHints('edit');
@@ -2605,9 +2618,9 @@
             detailRow.classList.toggle('is-hidden', !cb.checked);
             summaryRow.classList.toggle('is-hidden', !cb.checked);
             if (!cb.checked) {
-                ['edit_package_unit', 'edit_base_unit', 'edit_conversion_rate'].forEach(id => {
+                ['edit_package_unit', 'edit_base_unit', 'edit_conversion_rate', 'edit_base_unit_to_tablet_rate'].forEach(id => {
                     const el = document.getElementById(id);
-                    if (el) { el.value = el.type === 'number' ? '1' : ''; }
+                    if (el) { el.value = (id === 'edit_base_unit_to_tablet_rate') ? '0' : (el.type === 'number' ? '1' : ''); }
                 });
             }
             updateStockUnitHints('edit');
@@ -2635,13 +2648,16 @@
             const totalBaseQty = parseInt(summary.total_base_qty || 0, 10);
             const packageUnit = data.package_unit || data.unit || 'แพ็ก';
             const baseUnit = data.base_unit || 'หน่วยย่อย';
+            const baseToTablet = parseInt(data.base_unit_to_tablet_rate || 0, 10) || 0;
             const totalPackageEquivalent = (totalBaseQty / conversionRate).toFixed(2);
+            const totalTabletText = baseToTablet > 0 ? `<br><span class="text-primary">≈ ${(totalBaseQty * baseToTablet)} เม็ด</span>` : '';
 
             summaryBox.innerHTML = `
                 <strong>สรุปคงเหลือปัจจุบัน:</strong>
                 ในคลัง ${packageQty} ${packageUnit}
                 + เปิดใช้แล้ว ${openBaseQty} ${baseUnit}
                 = รวมทั้งหมด ${totalBaseQty} ${baseUnit} (${totalPackageEquivalent} ${packageUnit})
+                ${totalTabletText}
             `;
             summaryRow.classList.remove('is-hidden');
         }
@@ -2651,21 +2667,34 @@
             const summaryBox = document.getElementById('editSplitSummaryBox');
             if (!summaryRow || !summaryBox) return;
             const convRate = parseInt(document.getElementById('edit_conversion_rate')?.value || 1, 10) || 1;
+            const baseToTablet = parseInt(document.getElementById('edit_base_unit_to_tablet_rate')?.value || 0, 10) || 0;
             const stock = parseInt(document.getElementById('edit_stock')?.value || 0, 10) || 0;
             const openBase = parseInt(document.getElementById('edit_open_base_qty')?.value || 0, 10) || 0;
             const pkgUnit = document.getElementById('edit_package_unit')?.value || 'แพ็ค';
             const baseUnit = document.getElementById('edit_base_unit')?.value || 'หน่วยย่อย';
             const totalBase = stock * convRate + openBase;
+            const totalTablet = baseToTablet > 0 ? totalBase * baseToTablet : null;
             summaryBox.innerHTML = `
                 <strong>สรุปหลังแก้ไข:</strong>
                 ในคลัง ${stock} ${pkgUnit} × ${convRate} + เปิด ${openBase} ${baseUnit}
                 = รวมทั้งหมด <strong>${totalBase} ${baseUnit}</strong>
+                ${totalTablet !== null ? `<br><span class="text-primary">≈ ${totalTablet} เม็ด</span>` : ''}
             `;
             summaryRow.classList.remove('is-hidden');
         }
 
         function submitAddProduct() {
             const form = document.querySelector('#addProductModal form');
+            const category = document.getElementById('productCategory')?.value || '';
+            const splitEnabled = (document.getElementById('addEnableSplit') || {}).checked;
+            if (category === 'ยา' && splitEnabled) {
+                const baseUnit = (document.getElementById('add_base_unit')?.value || '').trim();
+                const baseToTablet = parseInt(document.getElementById('add_base_unit_to_tablet_rate')?.value || 0, 10) || 0;
+                if (baseUnit && baseUnit !== 'เม็ด' && baseToTablet <= 0) {
+                    Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: `กรุณาระบุ 1 ${baseUnit} มีกี่เม็ด` });
+                    return;
+                }
+            }
             const formData = new FormData(form);
             formData.append('csrf_token', adminCsrfToken);
             fetch('/admin/add_product', { method: 'POST', body: formData, headers: { 'X-CSRF-Token': adminCsrfToken } })
@@ -2752,6 +2781,7 @@
                 document.getElementById('edit_package_unit').value = data.package_unit || data.unit || '';
                 document.getElementById('edit_base_unit').value = data.base_unit || 'เม็ด';
                 document.getElementById('edit_conversion_rate').value = data.conversion_rate || 1;
+                document.getElementById('edit_base_unit_to_tablet_rate').value = data.base_unit_to_tablet_rate || 0;
                 document.getElementById('edit_open_base_qty').value = (data.split_summary?.open_base_qty || 0);
                 const hasSplitData = (parseInt(data.conversion_rate || 1, 10) > 1)
                     && !!(data.package_unit && data.base_unit);
@@ -2776,9 +2806,19 @@
                 const packageUnit = document.getElementById('edit_package_unit');
                 const baseUnit = document.getElementById('edit_base_unit');
                 const conversionRate = document.getElementById('edit_conversion_rate');
+                const baseToTablet = document.getElementById('edit_base_unit_to_tablet_rate');
                 if (packageUnit) packageUnit.value = '';
                 if (baseUnit) baseUnit.value = '';
                 if (conversionRate) conversionRate.value = '1';
+                if (baseToTablet) baseToTablet.value = '0';
+            } else {
+                const category = document.getElementById('edit_category')?.value || '';
+                const baseUnitText = (document.getElementById('edit_base_unit')?.value || '').trim();
+                const baseToTabletVal = parseInt(document.getElementById('edit_base_unit_to_tablet_rate')?.value || 0, 10) || 0;
+                if (category === 'ยา' && baseUnitText && baseUnitText !== 'เม็ด' && baseToTabletVal <= 0) {
+                    Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: `กรุณาระบุ 1 ${baseUnitText} มีกี่เม็ด` });
+                    return;
+                }
             }
             const formData = new FormData(form);
             formData.append('csrf_token', adminCsrfToken);

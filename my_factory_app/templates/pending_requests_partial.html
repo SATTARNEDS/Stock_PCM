@@ -7,7 +7,14 @@
         <div class="fw-medium text-dark">{{ log['emp_name'] }}</div>
         <small class="text-muted">{{ log['department'] }}</small>
     </td>
-    <td>{{ log['product_name'] }} <small class="text-muted">({{ log['unit'] }})</small></td>
+    <td>
+        {{ log['product_name'] }}
+        {% if is_medicine_pack and log['conversion_rate'] and log['conversion_rate'] > 1 and log['base_unit'] %}
+            <span class="split-unit-badge">1 {{ log['package_unit'] or log['unit'] }} = {{ log['conversion_rate'] }} {{ log['base_unit'] }}</span>
+        {% else %}
+            <small class="text-muted">({{ log['unit'] }})</small>
+        {% endif %}
+    </td>
     <td class="text-center fw-medium text-primary">
         {% if is_medicine_pack %}
             {{ log['qty_base_unit'] if log['qty_base_unit'] is not none else log['qty'] }} {{ log['base_unit'] or 'เม็ด' }}

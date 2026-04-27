@@ -32,6 +32,21 @@ code {
     color: #0d47a1 !important;
 }
 
+.split-unit-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    line-height: 1.2;
+    font-weight: 500;
+    color: #0b5ed7;
+    background: #eaf3ff;
+    border: 1px solid #bfd8ff;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
 /* --- Card & Item Styles --- */
 .item-card {
     background: white;

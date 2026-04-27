@@ -312,6 +312,62 @@ def is_split_tablet_medicine(product_row):
     package_keywords = ('pack', 'package', 'box', 'jar', 'bottle', 'tube', 'strip', 'sheet', 'sachet', 'แพ็ค', 'ห่อ', 'แผง', 'ซอง', 'กล่อง', 'กระปุก', 'ขวด', 'หลอด')
     return conversion_rate > 1 and any(k in package_label for k in package_keywords)
 
+def get_split_unit_hint_text(product_row):
+    """ข้อความกำกับหน่วยย่อย เช่น 1 ซอง = 10 เม็ด สำหรับรายการที่แยกหน่วยได้"""
+    if not product_row or not is_split_tablet_medicine(product_row):
+        return ''
+
+    row_keys = product_row.keys() if hasattr(product_row, 'keys') else []
+    package_unit = str(
+        (product_row['package_unit'] if 'package_unit' in row_keys else None)
+        or (product_row['unit'] if 'unit' in row_keys else None)
+        or 'ซอง'
+    ).strip()
+    base_unit = str(
+        (product_row['base_unit'] if 'base_unit' in row_keys else None)
+        or 'เม็ด'
+    ).strip()
+    conversion_rate = int((product_row['conversion_rate'] if 'conversion_rate' in row_keys else 1) or 1)
+    base_to_tablet_rate = int((product_row['base_unit_to_tablet_rate'] if 'base_unit_to_tablet_rate' in row_keys else 0) or 0)
+    product_name = str((product_row['name'] if 'name' in row_keys else '') or '').strip()
+    lower_base = base_unit.lower()
+
+    tablet_like_units = {'เม็ด', 'tablet', 'tablets', 'pill', 'pills', 'capsule', 'capsules'}
+    wrapper_units = {'ซอง', 'ห่อ', 'แผง', 'ตลับ', 'strip', 'sachet', 'pack'}
+
+    # กรณีหน่วยย่อยเป็นเม็ดอยู่แล้ว: แสดงตรง ๆ แบบที่ผู้เบิกเข้าใจง่าย
+    if lower_base in tablet_like_units:
+        return f"1 {package_unit} = {conversion_rate} {base_unit}"
+
+    if base_to_tablet_rate > 0:
+        return f"1 {base_unit} = {base_to_tablet_rate} เม็ด | 1 {package_unit} = {conversion_rate} {base_unit}"
+
+    # พยายามดึง "จำนวนเม็ดต่อหน่วยย่อย" จากชื่อสินค้า (ถ้าชื่อระบุไว้)
+    base_to_tablet = None
+    if lower_base in wrapper_units and product_name:
+        escaped_base = re.escape(base_unit)
+        patterns = [
+            rf"(\d+)\s*เม็ด\s*/\s*{escaped_base}",
+            rf"{escaped_base}\s*/\s*(\d+)\s*เม็ด",
+            rf"{escaped_base}\s*(\d+)\s*เม็ด",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, product_name, flags=re.IGNORECASE)
+            if match:
+                try:
+                    base_to_tablet = int(match.group(1))
+                except (TypeError, ValueError):
+                    base_to_tablet = None
+                if base_to_tablet and base_to_tablet > 0:
+                    break
+
+    # ถ้าระบุเม็ดต่อหน่วยย่อยได้: โชว์แบบ user-centric ก่อน แล้วค่อยบอกโครงสร้างแพ็ก
+    if base_to_tablet:
+        return f"1 {base_unit} = {base_to_tablet} เม็ด | 1 {package_unit} = {conversion_rate} {base_unit}"
+
+    # ไม่มีข้อมูลเม็ดต่อหน่วยย่อย: บอกหน่วยเบิกที่ต้องใช้ก่อน เพื่อไม่ให้ผู้เบิกสับสน
+    return f"หน่วยเบิก: {base_unit} | 1 {package_unit} = {conversion_rate} {base_unit}"
+
 def enrich_products_for_display(conn, products_list):
     """เติมข้อมูลสต็อกแสดงผลสำหรับ frontend/backend โดยไม่แก้ค่าจริงใน DB"""
     if not products_list:
@@ -331,6 +387,7 @@ def enrich_products_for_display(conn, products_list):
     for row in products_list:
         item = dict(row)
         split_medicine = is_split_tablet_medicine(row)
+        split_hint_text = get_split_unit_hint_text(row)
         package_unit = str(item.get('package_unit') or item.get('unit') or 'กล่อง')
         base_unit = str(item.get('base_unit') or 'เม็ด')
         conversion_rate = int(item.get('conversion_rate') or 1)
@@ -346,6 +403,10 @@ def enrich_products_for_display(conn, products_list):
             available_base = package_stock  # non-split ลด stock จริงใน DB แล้ว
 
         item['is_split_tablet_medicine'] = split_medicine
+        item['split_unit_hint_label'] = split_hint_text
+        item['split_unit_hint_text'] = f" ({split_hint_text})" if split_hint_text else ''
+        item['name_with_unit_hint'] = item.get('name', '')
+        item['base_unit_to_tablet_rate'] = int(item.get('base_unit_to_tablet_rate') or 0)
         item['package_unit_label'] = package_unit
         item['base_unit_label'] = base_unit
         item['open_base_qty'] = open_base_qty
@@ -427,6 +488,10 @@ def ensure_application_schema():
         user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
         if user_columns and 'email' not in user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''")
+
+        product_columns = {row[1] for row in conn.execute("PRAGMA table_info(products)").fetchall()}
+        if product_columns and 'base_unit_to_tablet_rate' not in product_columns:
+            conn.execute("ALTER TABLE products ADD COLUMN base_unit_to_tablet_rate INTEGER DEFAULT 0")
 
         conn.execute('''
             CREATE TABLE IF NOT EXISTS ga_requests (
@@ -1718,7 +1783,7 @@ def api_get_cart():
     conn = get_db_connection()
     cart_items = conn.execute('''
         SELECT c.id, c.product_id, c.qty,
-               p.name, p.code, p.category, p.unit, p.base_unit, p.package_unit, p.conversion_rate
+               p.name, p.code, p.category, p.unit, p.base_unit, p.package_unit, p.conversion_rate, p.base_unit_to_tablet_rate
         FROM carts c JOIN products p ON c.product_id = p.id
         WHERE c.emp_id = ?
     ''', (emp_id,)).fetchall()
@@ -1728,6 +1793,10 @@ def api_get_cart():
     for item in items:
         item['is_split_medicine'] = is_split_tablet_medicine(item)
         item['is_medicine'] = is_medicine_product(item)  # ยาทั่วไป (split หรือไม่)
+        hint_text = get_split_unit_hint_text(item)
+        item['split_unit_hint_label'] = hint_text
+        item['split_unit_hint_text'] = f" ({hint_text})" if hint_text else ''
+        item['name_with_unit_hint'] = item.get('name', '')
     return jsonify({'success': True, 'count': len(items), 'items': items})
 
 
@@ -2566,11 +2635,16 @@ def add_product():
     package_unit = clean_input_text(request.form.get('package_unit', ''), 30) or None
     base_unit = clean_input_text(request.form.get('base_unit', ''), 30) or None
     conversion_rate = max(1, request.form.get('conversion_rate', 1, type=int) or 1)
+    base_unit_to_tablet_rate = max(0, request.form.get('base_unit_to_tablet_rate', 0, type=int) or 0)
     # Only store split-unit info when both package_unit and base_unit are provided
     if not package_unit or not base_unit:
         package_unit = None
         base_unit = None
         conversion_rate = 1
+        base_unit_to_tablet_rate = 0
+
+    if category == 'ยา' and package_unit and base_unit and base_unit != 'เม็ด' and base_unit_to_tablet_rate <= 0:
+        return jsonify({'success': False, 'message': f'กรุณาระบุ 1 {base_unit} มีกี่เม็ด'}), 400
 
     if not re.fullmatch(r'[A-Z0-9_-]{2,40}', code):
         return jsonify({'success': False, 'message': 'รหัสของไม่ถูกต้อง'}), 400
@@ -2588,14 +2662,14 @@ def add_product():
             lot_number = datetime.now().strftime('%d%m%Y') + "-NEW"
             receive_date = datetime.now().strftime('%Y-%m-%d')
             cursor = conn.execute('''
-                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_no, received_date, package_unit, base_unit, conversion_rate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_number, receive_date, package_unit, base_unit, conversion_rate))
+                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_no, received_date, package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_number, receive_date, package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate))
         else:
             cursor = conn.execute('''
-                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, package_unit, base_unit, conversion_rate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (code, name, category, unit, location, safety_stock, stock, '', package_unit, base_unit, conversion_rate))
+                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (code, name, category, unit, location, safety_stock, stock, '', package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate))
         
         product_id = cursor.lastrowid
 
@@ -2667,6 +2741,7 @@ def export_excel():
             COALESCE(p.package_unit, '') as 'หน่วยหลัก',
             COALESCE(p.base_unit, '') as 'หน่วยย่อย',
             COALESCE(p.conversion_rate, 1) as 'อัตราแบ่ง',
+            COALESCE(p.base_unit_to_tablet_rate, 0) as '1 หน่วยย่อย = กี่เม็ด',
             COALESCE(op.base_unit_qty, 0) as 'หน่วยย่อยที่เปิดแล้ว',
             CASE WHEN p.is_active = 1 THEN 'เปิดใช้งาน' ELSE 'ปิดใช้งาน' END as 'สถานะการใช้งาน',
             CASE
@@ -3003,6 +3078,7 @@ def import_excel():
             pkg_unit_col = next((col for col in df.columns if 'หน่วยหลัก' in col), None)
             base_unit_col = next((col for col in df.columns if 'หน่วยย่อย' in col and 'เปิด' not in col), None)
             conv_rate_col = next((col for col in df.columns if 'อัตราแบ่ง' in col), None)
+            base_to_tablet_col = next((col for col in df.columns if '1 หน่วยย่อย = กี่เม็ด' in col or 'เม็ดต่อหน่วยย่อย' in col), None)
             open_base_col = next((col for col in df.columns if 'หน่วยย่อยที่เปิดแล้ว' in col or 'เปิดแล้ว' in col), None)
 
             for _, row in df.iterrows():
@@ -3027,6 +3103,7 @@ def import_excel():
                 import_pkg_unit = str(row[pkg_unit_col]).strip() if pkg_unit_col and pd.notna(row[pkg_unit_col]) else None
                 import_base_unit = str(row[base_unit_col]).strip() if base_unit_col and pd.notna(row[base_unit_col]) else None
                 import_conv_rate = safe_int(row[conv_rate_col]) if conv_rate_col and pd.notna(row[conv_rate_col]) else None
+                import_base_to_tablet = safe_int(row[base_to_tablet_col]) if base_to_tablet_col and pd.notna(row[base_to_tablet_col]) else None
                 import_open_base = safe_int(row[open_base_col]) if open_base_col and pd.notna(row[open_base_col]) else None
                 # ล้าง empty string
                 if import_pkg_unit == '' or import_pkg_unit == 'nan': import_pkg_unit = None
@@ -3070,17 +3147,18 @@ def import_excel():
                 existing = conn.execute('SELECT id FROM products WHERE code = ?', (code,)).fetchone()
                 if existing:
                     # อัปเดต split-unit fields ถ้ามีในไฟล์
-                    if import_pkg_unit or import_base_unit or import_conv_rate is not None:
+                    if import_pkg_unit or import_base_unit or import_conv_rate is not None or import_base_to_tablet is not None:
                         effective_pkg_unit = import_pkg_unit
                         effective_base_unit = import_base_unit
                         effective_conv_rate = max(1, import_conv_rate or 1)
+                        effective_base_to_tablet = max(0, import_base_to_tablet or 0)
                         conn.execute('''
                             UPDATE products
                             SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?, lot_no=?, received_date=?, expiry_date=?,
-                                package_unit=?, base_unit=?, conversion_rate=?
+                                package_unit=?, base_unit=?, conversion_rate=?, base_unit_to_tablet_rate=?
                             WHERE id=?
                         ''', (name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date,
-                              effective_pkg_unit, effective_base_unit, effective_conv_rate, existing['id']))
+                              effective_pkg_unit, effective_base_unit, effective_conv_rate, effective_base_to_tablet, existing['id']))
                     elif product_changed:
                         conn.execute('''
                             UPDATE products
@@ -3108,10 +3186,10 @@ def import_excel():
                 else:
                     cursor = conn.execute('''
                         INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock, is_active, lot_no, received_date, expiry_date,
-                                             package_unit, base_unit, conversion_rate)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)
+                                                                                         package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate)
+                                                VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (code, name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date,
-                          import_pkg_unit, import_base_unit, max(1, import_conv_rate or 1)))
+                                                    import_pkg_unit, import_base_unit, max(1, import_conv_rate or 1), max(0, import_base_to_tablet or 0)))
                     product_id = cursor.lastrowid
                     inserted_count += 1
 
@@ -3123,7 +3201,7 @@ def import_excel():
 
                 if not (product_changed or lot_changed or
                         (open_base_col and import_open_base is not None) or
-                        import_pkg_unit or import_base_unit or import_conv_rate is not None):
+                    import_pkg_unit or import_base_unit or import_conv_rate is not None or import_base_to_tablet is not None):
                     continue
 
                 if lot_no:
@@ -3222,16 +3300,22 @@ def edit_product():
     package_unit = clean_input_text(request.form.get('package_unit', ''), 30) or None
     base_unit = clean_input_text(request.form.get('base_unit', ''), 30) or None
     conversion_rate = max(1, request.form.get('conversion_rate', 1, type=int) or 1)
+    base_unit_to_tablet_rate = max(0, request.form.get('base_unit_to_tablet_rate', 0, type=int) or 0)
     open_base_qty = max(0, request.form.get('open_base_qty', 0, type=int) or 0)
     # เก็บข้อมูลแยกหน่วยย่อยเฉพาะกรณีที่กรอกครบทั้งสองหน่วยเท่านั้น
     if not package_unit or not base_unit:
         package_unit = None
         base_unit = None
         conversion_rate = 1
+        base_unit_to_tablet_rate = 0
         open_base_qty = 0
     safety_stock = max(0, int(request.form.get('safety_stock', 0) or 0))
     stock = max(0, int(request.form.get('stock', 0) or 0))
     expiry_date = standardize_date(request.form.get('expiry_date', ''))
+    category = clean_input_text(request.form.get('category', ''), 60)
+
+    if category == 'ยา' and package_unit and base_unit and base_unit != 'เม็ด' and base_unit_to_tablet_rate <= 0:
+        return jsonify({'success': False, 'message': f'กรุณาระบุ 1 {base_unit} มีกี่เม็ด'}), 400
 
     if not code or not name or not unit:
         return jsonify({'success': False, 'message': 'ข้อมูลของไม่ครบถ้วน'}), 400
@@ -3240,9 +3324,9 @@ def edit_product():
     try:
         conn.execute('''
             UPDATE products 
-            SET name=?, unit=?, base_unit=?, package_unit=?, conversion_rate=?, safety_stock=?, stock=?, expiry_date=?
+            SET name=?, unit=?, base_unit=?, package_unit=?, conversion_rate=?, base_unit_to_tablet_rate=?, safety_stock=?, stock=?, expiry_date=?
             WHERE code=?
-        ''', (name, unit, base_unit, package_unit, conversion_rate, safety_stock, stock, expiry_date, code))
+        ''', (name, unit, base_unit, package_unit, conversion_rate, base_unit_to_tablet_rate, safety_stock, stock, expiry_date, code))
 
         # อัปเดต open_packages ถ้าเป็นสินค้าแยกหน่วยย่อย
         if package_unit and base_unit and conversion_rate > 1:

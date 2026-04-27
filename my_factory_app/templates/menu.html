@@ -62,6 +62,67 @@
             box-shadow: 0 10px 25px rgba(7, 43, 84, 0.05);
         }
 
+        .product-masonry {
+            column-count: 3;
+            column-gap: 14px;
+        }
+
+        .product-masonry-item {
+            display: inline-block;
+            width: 100%;
+            margin: 0 0 14px;
+            break-inside: avoid;
+        }
+
+        .product-category-label-row {
+            break-inside: auto;
+            margin-bottom: 8px;
+        }
+
+        .category-badge-small {
+            font-size: 0.7rem;
+        }
+
+        .product-info-block {
+            max-width: 70%;
+        }
+
+        .product-name-line {
+            font-weight: 500;
+            color: #1e2b3a;
+            line-height: 1.25;
+            min-height: 2.5em;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .product-code-line {
+            font-size: 0.74rem;
+            color: #8a97ab;
+            margin-top: 3px;
+        }
+
+        .product-hint-line {
+            margin-top: 5px;
+        }
+
+        .product-hint-line .split-unit-badge {
+            margin-left: 0;
+            padding: 3px 10px;
+            font-size: 0.7rem;
+            color: #0f5abf;
+            background: linear-gradient(135deg, #edf5ff 0%, #e2f0ff 100%);
+            border-color: #b6d2ff;
+        }
+
+        .stock-line {
+            font-size: 0.84rem;
+            margin-top: 6px;
+        }
+
         .product-card:hover {
             transform: translateY(-6px) scale(1.01);
             box-shadow: 0 18px 35px rgba(7, 43, 84, 0.12);
@@ -226,6 +287,34 @@
             .product-card {
                 border-radius: 14px;
             }
+
+            .product-masonry {
+                column-count: 1;
+                column-gap: 10px;
+            }
+
+            .product-masonry-item {
+                margin-bottom: 10px;
+            }
+
+            .product-info-block {
+                max-width: 66%;
+            }
+
+            .product-name-line {
+                font-size: 0.95rem;
+            }
+        }
+
+        @media (min-width: 768px) and (max-width: 1100px) {
+            .product-masonry {
+                column-count: 2;
+                column-gap: 12px;
+            }
+
+            .product-masonry-item {
+                margin-bottom: 12px;
+            }
         }
     </style>
 </head>
@@ -323,7 +412,7 @@
             </div>
         </div>
 
-        <div class="row g-3" id="productDisplayArea">
+        <div class="product-masonry" id="productDisplayArea">
             {% include 'product_list_partial.html' %}
         </div>
 
@@ -733,8 +822,12 @@
                         const isMed = !!(item.is_medicine || item.is_split_medicine); // ยาทุกประเภท
                         if (isMed) hasMed = true;
                         const unit = item.is_split_medicine ? (item.base_unit || 'เม็ด') : (item.unit || '');
+                        const displayName = item.name || '';
+                        const unitHintBadge = item.split_unit_hint_label
+                            ? ` <span class="split-unit-badge">${escHtml(item.split_unit_hint_label)}</span>`
+                            : '';
                         return `<tr class="border-bottom">
-                            <td><div class="fw-medium">${escHtml(item.name)}</div><small class="text-muted">${escHtml(item.code)}</small></td>
+                            <td><div class="fw-medium">${escHtml(displayName)}${unitHintBadge}</div><small class="text-muted">${escHtml(item.code)}</small></td>
                             <td class="text-center" style="min-width:120px;">
                                 <div class="d-flex align-items-center justify-content-center gap-2">
                                     <button class="btn btn-sm btn-light border rounded-circle" onclick="updateQty('${item.id}', -1, '${empId}', '${item.product_id}', ${item.is_split_medicine ? 1 : 0})">-</button>

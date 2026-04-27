@@ -3,6 +3,9 @@
     <td class="ps-4"><code>{{ item['code'] }}</code></td>
     <td class="fw-medium {% if item['is_active'] == 0 %}text-muted{% endif %}">
         {{ item['name'] }}
+        {% if item['split_unit_hint_label'] %}
+        <span class="split-unit-badge">{{ item['split_unit_hint_label'] }}</span>
+        {% endif %}
         {% if item['is_active'] == 0 %}
         <span class="badge bg-danger ms-1" style="font-size: 0.6rem;">ปิดใช้งาน</span>
         {% endif %}
