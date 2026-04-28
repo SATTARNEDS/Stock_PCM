@@ -78,6 +78,10 @@ class UnitConversionManager:
         package_tablet_total = int(product.get('package_tablet_total') or 0)
         base_unit_to_tablet_rate = int(product.get('base_unit_to_tablet_rate') or 0)
         stock_package_unit = product.get('stock') or 0
+        # ใช้ยอดจองจาก carts เป็นหลัก เพื่อกันกรณี reserved_stock ใน products คลาดเคลื่อน
+        cursor.execute('SELECT COALESCE(SUM(qty), 0) FROM carts WHERE product_id = ?', (product_id,))
+        reserved_row = cursor.fetchone()
+        reserved_stock_base = int(reserved_row[0] or 0) if reserved_row else int(product.get('reserved_stock') or 0)
         open_box_qty = (open_box['total'] or 0) if open_box['total'] else 0
         open_extra_tablet_qty = (open_box['extra_total'] or 0) if open_box['extra_total'] else 0
 
@@ -99,6 +103,7 @@ class UnitConversionManager:
         
         # Convert to base units
         stock_base_unit = (stock_package_unit * conversion_rate) + open_box_qty + open_extra_base_equivalent
+        available_base_unit = max(0, int(stock_base_unit) - int(reserved_stock_base))
         
         return {
             'product_id': product_id,
@@ -113,6 +118,8 @@ class UnitConversionManager:
             'package_remainder_tablets_total': int(package_remainder_tablets_total),
             'pooled_extra_tablet_qty': int(pooled_extra_tablet_qty),
             'stock_base_unit': int(stock_base_unit),
+            'available_base_unit': int(available_base_unit),
+            'reserved_stock_base': int(reserved_stock_base),
             'stock_package_unit': stock_package_unit,
             'open_box_qty': int(open_box_qty),
             'open_extra_tablet_qty': int(open_extra_tablet_qty),
@@ -175,7 +182,7 @@ class UnitConversionManager:
         }
         """
         info = self.get_product_unit_info(product_id)
-        stock = info['stock_base_unit']
+        stock = info.get('available_base_unit', info['stock_base_unit'])
         
         return {
             'available': stock >= qty_base_unit,

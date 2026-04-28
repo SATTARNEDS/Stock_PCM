@@ -22,17 +22,14 @@
                 <div class="product-code-line">รหัส: {{ item['code'] }}</div>
                 {% if item['split_unit_hint_label'] and not split_medicine %}
                 <div class="product-hint-line">
-                    <small class="split-unit-badge">{{ item['split_unit_hint_label'] }}</small>
+                    <small class="split-unit-badge">{{ item['split_unit_hint_label'].split('|')[0].strip() }}</small>
                 </div>
                 {% endif %}
                 {% if split_medicine %}
                 <div class="product-hint-line">
+                    {% set split_hint_text = item['split_unit_hint_label'] if item['split_unit_hint_label'] else ('หน่วยเบิก: ' ~ item['base_unit_label'] ~ ' | 1 ' ~ item['package_unit_label'] ~ ' = ' ~ item['conversion_rate'] ~ ' ' ~ item['base_unit_label']) %}
                     <small class="text-muted">
-                        {% if item['base_unit_to_tablet_rate'] and item['base_unit_to_tablet_rate'] > 0 %}
-                        1 {{ item['base_unit_label'] }} = {{ item['base_unit_to_tablet_rate'] }} เม็ด
-                        {% else %}
-                        1 {{ item['base_unit_label'] }} = 1 เม็ด
-                        {% endif %}
+                        {{ split_hint_text.split('|')[0].strip() }}
                     </small>
                 </div>
                 {% endif %}
@@ -41,7 +38,7 @@
                     <span class="out-of-stock-label" id="stock-display-{{ item['id'] }}">● ของหมด</span>
                 {% else %}
                     <span class="text-primary fw-medium stock-line" id="stock-display-{{ item['id'] }}"
-                          data-original-stock="{{ item['stock_base_total'] if split_medicine else item['stock'] }}"
+                          data-original-stock="{{ item['stock_base_total'] if split_medicine else item['effective_stock'] }}"
                           data-original-unit="{{ item['base_unit_label']|e if split_medicine else item['unit']|e }}"
                           data-original-subtext="{{ item['backend_stock_text']|e if split_medicine else '' }}">
                         {% if split_medicine %}
@@ -50,7 +47,7 @@
                         <br><small class="text-info">รวม {{ item['stock_tablet_total'] }} เม็ด{% if item.get('extra_bundles_from_remainder', 0) > 0 %} | เศษรวมจัดเพิ่มได้ {{ item['extra_bundles_from_remainder'] }} {{ item['base_unit_label'] }}{% if item['packable_tablet_remainder'] > 0 %} เหลือ {{ item['packable_tablet_remainder'] }} เม็ด{% endif %}{% elif item['open_extra_tablet_qty'] and item['open_extra_tablet_qty'] > 0 %} | เศษ {{ item['open_extra_tablet_qty'] }} เม็ด{% endif %}</small>
                         {% endif %}
                         {% else %}
-                        คงเหลือ: {{ item['stock'] }} {{ item['unit'] }}
+                        คงเหลือ: {{ item['effective_stock'] }} {{ item['unit'] }}
                         {% endif %}
                     </span>
                 {% endif %}
@@ -60,7 +57,7 @@
                 <form action="/add_to_cart" method="POST" class="d-flex gap-1 align-items-start flex-column"
                       data-product-id="{{ item['id'] }}"
                       data-product-unit="{{ item['base_unit_label']|e if split_medicine else item['unit']|e }}"
-                      data-product-stock="{{ item['stock_base_total'] if split_medicine else item['stock'] }}"
+                        data-product-stock="{{ item['stock_base_total'] if split_medicine else item['effective_stock'] }}"
                       data-conversion-rate="{{ item['conversion_rate'] if split_medicine else 1 }}"
                       data-base-to-tablet-rate="{{ item['base_unit_to_tablet_rate'] if split_medicine else 0 }}"
                       data-base-unit="{{ item['base_unit_label']|e if split_medicine else item['unit']|e }}"

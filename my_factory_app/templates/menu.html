@@ -534,7 +534,12 @@
         function fetchProducts(reset = false) {
             const query = encodeURIComponent(searchInput.value.trim());
             const category = encodeURIComponent(currentCategory || '');
-            fetch(`/api/search_products?page=${currentPage}&emp_id=${encodeURIComponent(empId)}&search=${query}&category=${category}`)
+            fetch(`/api/search_products?page=${currentPage}&emp_id=${encodeURIComponent(empId)}&search=${query}&category=${category}`, {
+                cache: 'no-store',
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            })
                 .then(res => res.json())
                 .then(data => {
                     if (reset) {
@@ -881,7 +886,12 @@
         function refreshCart() {
             const currentReceiveMode = document.querySelector('input[name="receive_mode"]:checked')?.value || 'immediate';
             const currentReceiveAt = document.getElementById('receiveAtInput')?.value || '';
-            fetch(`/api/get_cart?emp_id=${encodeURIComponent(empId)}`)
+            fetch(`/api/get_cart?emp_id=${encodeURIComponent(empId)}`, {
+                cache: 'no-store',
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            })
                 .then(res => res.json())
                 .then(data => {
                     if (!data.success) { console.warn('refreshCart: not success', data); return; }

@@ -7,6 +7,7 @@ import secrets
 import smtplib
 import sqlite3
 import tempfile
+import threading
 import time
 from collections import defaultdict
 from datetime import datetime, date, timedelta, timezone
@@ -426,6 +427,14 @@ def enrich_products_for_display(conn, products_list):
 
     product_ids = [item['id'] for item in products_list]
     placeholders = ','.join(['?'] * len(product_ids))
+    cart_rows = conn.execute(f'''
+        SELECT product_id, COALESCE(SUM(qty), 0) AS reserved_qty
+        FROM carts
+        WHERE product_id IN ({placeholders})
+        GROUP BY product_id
+    ''', product_ids).fetchall()
+    reserved_qty_map = {row['product_id']: int(row['reserved_qty'] or 0) for row in cart_rows}
+
     open_rows = conn.execute(f'''
         SELECT product_id,
                COALESCE(SUM(base_unit_qty), 0) as open_base_qty,
@@ -457,7 +466,7 @@ def enrich_products_for_display(conn, products_list):
         pooled_tablet_remainder = 0
 
         # ลบ reserved_stock ออกจาก total เพื่อแสดงยอดที่ยังเบิกได้จริง
-        reserved_stock = int(item.get('reserved_stock') or 0)
+        reserved_stock = reserved_qty_map.get(item['id'], int(item.get('reserved_stock') or 0))
         if split_medicine and base_to_tablet_rate > 0 and package_tablet_total > 0:
             package_remainder_tablets = package_stock * (package_tablet_total % base_to_tablet_rate)
             total_remainder_tablets = package_remainder_tablets + open_extra_tablet_qty
@@ -1979,7 +1988,7 @@ def get_notification_settings(admin_id):
     finally:
         conn.close()
 
-def send_smart_notification(notification_type, message, location=None, role=None, email_body='', html_body='', recipients=None, admin_id=None):
+def _send_smart_notification_sync(notification_type, message, location=None, role=None, email_body='', html_body='', recipients=None, admin_id=None):
     """
     ส่งแจ้งเตือนผ่าน Email ตามการตั้งค่า (LINE ถูกยกเลิกถาวร)
     notification_type: 'approval', 'rejection', 'low_stock', 'withdrawal_confirmed', 'pending_request'
@@ -2059,6 +2068,29 @@ def send_smart_notification(notification_type, message, location=None, role=None
                 location=str(location or ''),
                 role=str(role or '')
             )
+
+def send_smart_notification(notification_type, message, location=None, role=None, email_body='', html_body='', recipients=None, admin_id=None, async_mode=True):
+    """Wrapper ส่งแจ้งเตือนแบบ async เพื่อลดเวลา response ของหน้า submit"""
+    if async_mode:
+        worker = threading.Thread(
+            target=_send_smart_notification_sync,
+            args=(notification_type, message, location, role, email_body, html_body, recipients, admin_id),
+            daemon=True,
+        )
+        worker.start()
+        return True
+
+    _send_smart_notification_sync(
+        notification_type=notification_type,
+        message=message,
+        location=location,
+        role=role,
+        email_body=email_body,
+        html_body=html_body,
+        recipients=recipients,
+        admin_id=admin_id,
+    )
+    return True
 
 def get_stock_audit_data(product_id=None):
     """
@@ -2989,7 +3021,12 @@ def add_to_cart():
         qty_unit = 'package'
         qty_to_reserve = qty
         requested_unit_label = product['unit']
-        available_stock = max(0, int(product['stock'] or 0) - int(product['reserved_stock'] or 0))
+        reserved_row = conn.execute(
+            'SELECT COALESCE(SUM(qty), 0) AS reserved_qty FROM carts WHERE product_id = ?',
+            (product_id,)
+        ).fetchone()
+        reserved_qty = int(reserved_row['reserved_qty'] or 0) if reserved_row else 0
+        available_stock = max(0, int(product['stock'] or 0) - reserved_qty)
         can_add = available_stock >= qty
 
     if can_add:
@@ -3209,25 +3246,29 @@ def confirm_withdrawal():
     
     thai_now = get_thailand_time().strftime('%d/%m/%Y %H:%M:%S')
     
-    # ✅ NEW: Initialize UnitConversionManager
+    # ใช้ manager แค่คำนวณความเป็นไปได้/หมายเหตุสำหรับยา split (ยังไม่ตัดสต็อกจริง)
     manager = UnitConversionManager(conn)
     
     for item in cart_items:
         item_name = item['name']
         
-        # ✅ NEW: Use UnitConversionManager to apply withdrawal (FIFO + open packages)
         try:
             is_medicine = is_split_tablet_medicine(item)
             if is_medicine:
-                withdrawal_result = manager.apply_withdrawal(
+                calc_result = manager.calculate_withdrawal(
                     product_id=item['product_id'],
                     qty_base_unit=item['qty'],  # ยาเก็บในตะกร้าเป็น base unit
-                    emp_id=emp_id,
-                    lot_id=None,
-                    autocommit=False
+                    use_open_box=True
                 )
-                if not withdrawal_result.get('success'):
-                    raise RuntimeError(withdrawal_result.get('message', 'ไม่สามารถตัดสต็อกยาได้'))
+                if not calc_result.get('can_fulfill'):
+                    raise RuntimeError(calc_result.get('message', 'ไม่สามารถจองสต็อกยาได้'))
+
+                # ยังไม่ตัดสต็อกจริงในขั้น confirm (จะตัดจริงตอน admin approve)
+                withdrawal_result = {
+                    'full_packages_used': calc_result.get('full_packages_needed', item['qty']),
+                    'total_packages_used': calc_result.get('total_packages_used', calc_result.get('full_packages_needed', item['qty'])),
+                    'transaction_note': calc_result.get('transaction_note', ''),
+                }
             else:
                 withdrawal_result = {
                     'full_packages_used': item['qty'],
@@ -3291,21 +3332,7 @@ def confirm_withdrawal():
             flash(f'❌ ไม่สามารถยืนยันการเบิกได้: {str(e)}', 'danger')
             return redirect(url_for('menu', emp_id=emp_id, open_cart='true'))
 
-    # ปลด reserved_stock เฉพาะยาที่ตัดสต็อกจริงแล้วตอน confirm
-    conn.execute('''
-        UPDATE products
-        SET reserved_stock = MAX(0, reserved_stock - COALESCE((
-            SELECT SUM(c.qty)
-            FROM carts c
-            JOIN products p2 ON p2.id = c.product_id
-            WHERE c.emp_id = ?
-              AND c.product_id = products.id
-              AND p2.base_unit IS NOT NULL AND TRIM(p2.base_unit) != ''
-              AND p2.package_unit IS NOT NULL AND TRIM(p2.package_unit) != ''
-              AND COALESCE(p2.conversion_rate, 1) > 1
-        ), 0))
-        WHERE id IN (SELECT product_id FROM carts WHERE emp_id = ?)
-    ''', (emp_id, emp_id))
+    # ไม่ปลด reserved ตอน confirm: ต้องค้างจองไว้จนกว่า admin จะ approve/reject
 
     # ล้างตะกร้า
     conn.execute('DELETE FROM carts WHERE emp_id = ?', (emp_id,))
@@ -3366,10 +3393,19 @@ def update_cart_qty():
 
         if is_medicine:
             manager = UnitConversionManager(conn)
-            stock_check = manager.check_stock_available(item['product_id'], new_qty)
-            can_update = stock_check['available']
+            if diff > 0:
+                # เช็คเฉพาะส่วนที่เพิ่มขึ้น เพื่อไม่ชนกับยอดที่ตัวเองจองไว้เดิม
+                stock_check = manager.check_stock_available(item['product_id'], diff)
+                can_update = stock_check['available']
+            else:
+                can_update = True
         else:
-            available_stock = max(0, int(product['stock'] or 0) - int(product['reserved_stock'] or 0)) if product else 0
+            reserved_row = conn.execute(
+                'SELECT COALESCE(SUM(qty), 0) AS reserved_qty FROM carts WHERE product_id = ?',
+                (item['product_id'],)
+            ).fetchone()
+            reserved_qty = int(reserved_row['reserved_qty'] or 0) if reserved_row else 0
+            available_stock = max(0, int(product['stock'] or 0) - reserved_qty) if product else 0
             can_update = (diff <= 0) or available_stock >= diff
 
         if can_update:
@@ -3426,7 +3462,11 @@ def api_get_cart():
         item['name_with_unit_hint'] = item.get('name', '')
         item['base_unit_label'] = str(item.get('base_unit') or 'เม็ด').strip()
         item['package_unit_label'] = str(item.get('package_unit') or item.get('unit') or 'กล่อง').strip()
-    return jsonify({'success': True, 'count': len(items), 'items': items})
+    response = jsonify({'success': True, 'count': len(items), 'items': items})
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route('/api/get_history')
@@ -3570,11 +3610,15 @@ def api_search_products():
 
     conn.close()
     html = render_template('product_list_partial.html', products=products_by_category, user=user)
-    return jsonify({
+    response = jsonify({
         'html': html,
         'has_more': has_more,
         'next_page': page + 1
     })
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 # ==========================================
 # 🔐 ส่วนของแอดมิน (ADMIN)
@@ -4161,8 +4205,8 @@ def approve_request(log_id):
 
         last_lot_id = None
 
-        # ยาแบบ split ถูกตัดสต็อกจริงตั้งแต่ตอน confirm_withdrawal แล้ว
-        # ตอน approve จึงไม่ตัด product_lots ซ้ำเพื่อกันยอด lot ติดลบ/ไม่พอจากการตัดซ้ำ
+        # ยาแบบ split: ตัดสต็อกจริงตอน approve (ตาม flow จอง -> อนุมัติค่อยตัดจริง)
+        # รายการทั่วไป: ตัดจาก lot + products.stock ตอน approve
         if not is_split_med:
             lot_withdraw_qty = qty_to_withdraw
             lots = conn.execute('''
@@ -4209,6 +4253,29 @@ def approve_request(log_id):
                 conn.rollback()
                 flash('❌ สต็อกปัจจุบันไม่พอสำหรับการอนุมัติ', 'danger')
                 return redirect(url_for('admin_dashboard', module='stock'))
+        else:
+            qty_base_to_withdraw = int(log['qty_base_unit'] or 0)
+            if qty_base_to_withdraw <= 0:
+                conv = int(product_info_for_approve['conversion_rate'] or 1)
+                qty_base_to_withdraw = qty_to_withdraw * max(1, conv)
+
+            manager = UnitConversionManager(conn)
+            withdrawal_result = manager.apply_withdrawal(
+                product_id=product_id,
+                qty_base_unit=qty_base_to_withdraw,
+                emp_id=log['emp_id'],
+                lot_id=last_lot_id,
+                autocommit=False,
+            )
+            if not withdrawal_result.get('success'):
+                conn.rollback()
+                flash(withdrawal_result.get('message', '❌ ไม่สามารถตัดสต็อกยาได้'), 'danger')
+                return redirect(url_for('admin_dashboard', module='stock'))
+
+            conn.execute(
+                'UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?',
+                (qty_base_to_withdraw, product_id)
+            )
         conn.execute('UPDATE products SET withdraw = withdraw + ? WHERE id = ?', (qty_to_withdraw, product_id))
         conn.commit()
 
@@ -4342,10 +4409,11 @@ def reject_request(log_id):
         product = conn.execute('SELECT * FROM products WHERE id = ?', (log['product_id'],)).fetchone()
         is_medicine = is_split_tablet_medicine(product) if product else False
 
-        if is_medicine:
-            conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (log['qty'], log['product_id']))
-        else:
-            conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (log['qty'], log['product_id']))
+        reserved_release_qty = int(log['qty_base_unit'] or 0) if is_medicine else int(log['qty'] or 0)
+        conn.execute(
+            'UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?',
+            (reserved_release_qty, log['product_id'])
+        )
 
         update_result = conn.execute('UPDATE transaction_logs SET status = "Rejected" WHERE id = ? AND status = "Pending"', (log_id,))
         if update_result.rowcount == 0:
