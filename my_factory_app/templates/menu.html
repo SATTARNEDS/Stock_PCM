@@ -179,7 +179,8 @@
         }
 
         .input-qty {
-            width: 55px !important;
+            width: 82px !important;
+            min-width: 82px;
             text-align: center;
             font-weight: 600;
             border: 1px solid #dbe8ff;
@@ -445,6 +446,7 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
                         <div id="symptomFieldWrapper"></div>
+                        <div id="requestTimingFieldWrapper"></div>
                         <button type="submit" class="btn btn-success w-100 rounded-pill py-3 fw-medium" id="confirmWithdrawalBtn" disabled>
                             ยืนยันการเบิกพัสดุ
                         </button>
@@ -542,6 +544,7 @@
                     }
 
                     animateProductCards();
+                    initMedicinePreview();
 
                     if (data.has_more) {
                         loadMoreSection.style.display = 'block';
@@ -550,6 +553,13 @@
                         loadMoreSection.style.display = 'none';
                     }
                 });
+        }
+
+        function initMedicinePreview() {
+            document.querySelectorAll('#productDisplayArea form[data-is-split="1"]').forEach(form => {
+                const productId = form.dataset.productId;
+                if (productId) previewWithdrawal(productId);
+            });
         }
 
         function animateProductCards() {
@@ -599,12 +609,70 @@
                 .catch(() => { qtyElem.textContent = originalQty; });
         }
 
+        function renderRequestTimingFields(mode = 'immediate', receiveAt = '') {
+            const wrapper = document.getElementById('requestTimingFieldWrapper');
+            if (!wrapper) return;
+            wrapper.innerHTML = `
+                <div class="mb-3 p-3 rounded-4 border bg-light-subtle">
+                    <label class="form-label small fw-medium mb-2">รูปแบบการรับของ</label>
+                    <div class="d-flex flex-column gap-2">
+                        <label class="form-check rounded-3 border bg-white px-3 py-2 mb-0">
+                            <input class="form-check-input" type="radio" name="receive_mode" value="immediate" ${mode !== 'scheduled' ? 'checked' : ''} onchange="toggleReceiveAtField()">
+                            <span class="form-check-label ms-1">รับของทันที</span>
+                        </label>
+                        <label class="form-check rounded-3 border bg-white px-3 py-2 mb-0">
+                            <input class="form-check-input" type="radio" name="receive_mode" value="scheduled" ${mode === 'scheduled' ? 'checked' : ''} onchange="toggleReceiveAtField()">
+                            <span class="form-check-label ms-1">เบิกล่วงหน้า</span>
+                        </label>
+                    </div>
+                    <div id="receiveAtGroup" class="mt-2 ${mode === 'scheduled' ? '' : 'd-none'}">
+                        <label class="form-label small fw-medium mt-2">วันและเวลาที่ต้องการรับของ</label>
+                        <input type="datetime-local" name="receive_at" id="receiveAtInput" class="form-control form-control-sm" value="${escHtml(receiveAt)}">
+                        <div class="form-text">ระบุวันและเวลาที่ต้องการมารับของ</div>
+                    </div>
+                </div>`;
+            toggleReceiveAtField();
+        }
+
+        function toggleReceiveAtField() {
+            const selectedMode = document.querySelector('input[name="receive_mode"]:checked')?.value || 'immediate';
+            const receiveAtGroup = document.getElementById('receiveAtGroup');
+            const receiveAtInput = document.getElementById('receiveAtInput');
+            if (!receiveAtGroup || !receiveAtInput) return;
+            const isScheduled = selectedMode === 'scheduled';
+            receiveAtGroup.classList.toggle('d-none', !isScheduled);
+            receiveAtInput.required = isScheduled;
+            if (!isScheduled) receiveAtInput.value = '';
+        }
+
+        function buildReceivePlanSummary() {
+            const selectedMode = document.querySelector('input[name="receive_mode"]:checked')?.value || 'immediate';
+            const receiveAtValue = document.getElementById('receiveAtInput')?.value || '';
+            if (selectedMode !== 'scheduled') {
+                return { valid: true, text: 'รับของทันที' };
+            }
+            if (!receiveAtValue) {
+                return { valid: false, message: 'กรุณาระบุวันและเวลารับของสำหรับการเบิกล่วงหน้า' };
+            }
+            const selectedDate = new Date(receiveAtValue);
+            if (Number.isNaN(selectedDate.getTime()) || selectedDate <= new Date()) {
+                return { valid: false, message: 'วันเวลารับของล่วงหน้าต้องมากกว่าเวลาปัจจุบัน' };
+            }
+            const formatted = receiveAtValue.replace('T', ' ').slice(0, 16);
+            return { valid: true, text: `เบิกล่วงหน้า รับวันที่ ${formatted} น.` };
+        }
+
         // Confirmation before submit
         document.querySelector('form[action="/confirm_withdrawal"]').onsubmit = function (e) {
             e.preventDefault();
+            const receivePlan = buildReceivePlanSummary();
+            if (!receivePlan.valid) {
+                Swal.fire('ข้อมูลไม่ครบ', receivePlan.message, 'warning');
+                return;
+            }
             Swal.fire({
                 title: 'ยืนยันการเบิก?',
-                text: "ข้อมูลจะถูกส่งไปยังแผนก GA เพื่อดำเนินการต่อ",
+                text: `ข้อมูลจะถูกส่งไปยังแผนก GA เพื่อดำเนินการต่อ\n${receivePlan.text}`,
                 icon: 'question',
                 showCancelButton: true,
                 confirmButtonText: 'ยืนยัน',
@@ -626,30 +694,35 @@
         // ✅ NEW: Preview withdrawal calculation with unit conversion
         function previewWithdrawal(productId) {
             const qtyInput = document.querySelector(`.qty-input-${productId}`);
-            const unitRadios = document.querySelectorAll(`input[name="qty_unit_${productId}"]`);
+            const form = document.querySelector(`#productDisplayArea form[data-product-id="${productId}"]`);
             const previewDiv = document.getElementById(`preview_${productId}`);
             const previewText = document.getElementById(`preview_text_${productId}`);
             const qtyUnitInput = document.querySelector(`.qty_unit_value_${productId}`);
             
-            if (!qtyInput || !qtyUnitInput) return;
+            if (!qtyInput || !qtyUnitInput || !form) return;
             
             const qty = parseInt(qtyInput.value) || 1;
-            let selectedUnit = 'package';
-            if (unitRadios.length > 0) {
-                unitRadios.forEach(radio => {
-                    if (radio.checked) {
-                        selectedUnit = radio.value;
-                    }
-                });
-            } else {
-                // ไม่ใช่ยา: ซ่อน preview และใช้หน่วยหลักของ
+            const isSplitMedicine = form.dataset.isSplit === '1';
+            const selectedUnit = isSplitMedicine ? 'base' : 'package';
+
+            if (!isSplitMedicine) {
                 qtyUnitInput.value = 'package';
                 if (previewDiv) previewDiv.style.display = 'none';
                 return;
             }
+
+            const conversionRate = parseInt(form.dataset.conversionRate || '1', 10) || 1;
+            const baseToTabletRate = parseInt(form.dataset.baseToTabletRate || '0', 10) || 0;
+            const stockBase = parseInt(form.dataset.productStock || '0', 10) || 0;
+            const baseUnitLabel = form.dataset.baseUnit || 'หน่วยย่อย';
+
+            qtyInput.max = Math.max(1, stockBase);
             
             // Update hidden input
             qtyUnitInput.value = selectedUnit;
+
+            const qtyBase = qty;
+            const totalTablet = baseToTabletRate > 0 ? qtyBase * baseToTabletRate : 0;
             
             // Fetch preview
             const formData = new FormData();
@@ -660,11 +733,16 @@
             fetch('/api/preview_withdrawal', { method: 'POST', body: formData })
                 .then(res => res.json())
                 .then(data => {
+                    const requestedText = `${qtyBase} ${baseUnitLabel}`;
                     if (data.success) {
-                        previewText.textContent = data.message;
+                        if (baseToTabletRate > 0) {
+                            previewText.textContent = `${requestedText} (${totalTablet} เม็ด)`;
+                        } else {
+                            previewText.textContent = `${requestedText}`;
+                        }
                         previewDiv.style.display = 'block';
                     } else {
-                        previewText.textContent = '⚠️ ' + (data.error || 'ไม่สามารถคำนวณได้');
+                        previewText.textContent = `⚠️ ${requestedText} | ` + (data.error || data.message || 'ไม่สามารถคำนวณได้');
                         previewDiv.style.display = 'block';
                     }
                 })
@@ -687,7 +765,7 @@
                 el.value = value;
             };
             setHidden('_ajax', '1');
-            setHidden('current_search', document.getElementById('searchInput') ? document.getElementById('searchInput').value.trim() : '');
+            setHidden('current_search', document.getElementById('realTimeSearch') ? document.getElementById('realTimeSearch').value.trim() : '');
             setHidden('current_cat', typeof currentCategory !== 'undefined' ? currentCategory : '');
 
             const data = new FormData(form);
@@ -703,8 +781,16 @@
                         updateCartBadge(1);
                         // อัปเดต stock เฉพาะ card ที่กด (ไม่ reload หน้า ไม่เสียตำแหน่ง scroll)
                         const productId = form.dataset.productId;
-                        const qtyAdded = parseInt(form.querySelector('[name="qty"]')?.value) || 1;
-                        updateProductStockDisplay(productId, qtyAdded, form);
+                        const qtyAddedRaw = parseInt(form.querySelector('[name="qty"]')?.value) || 1;
+                        const qtyUnit = form.querySelector('[name="qty_unit"]')?.value || 'package';
+                        const conversionRate = parseInt(form.dataset.conversionRate || '1', 10) || 1;
+                        const qtyAddedBase = (form.dataset.isSplit === '1' && qtyUnit === 'package')
+                            ? qtyAddedRaw * conversionRate
+                            : qtyAddedRaw;
+                        updateProductStockDisplay(productId, qtyAddedBase, form);
+                        if (form.dataset.isSplit === '1') {
+                            previewWithdrawal(productId);
+                        }
                     }
                 })
                 .catch(() => showCartToast('❌ เกิดข้อผิดพลาด ลองใหม่อีกครั้ง', false))
@@ -793,6 +879,8 @@
 
         // Refresh cart modal content via AJAX
         function refreshCart() {
+            const currentReceiveMode = document.querySelector('input[name="receive_mode"]:checked')?.value || 'immediate';
+            const currentReceiveAt = document.getElementById('receiveAtInput')?.value || '';
             fetch(`/api/get_cart?emp_id=${encodeURIComponent(empId)}`)
                 .then(res => res.json())
                 .then(data => {
@@ -813,6 +901,7 @@
                     if (data.count === 0) {
                         body.innerHTML = '<div class="text-center py-4 text-muted"><i class="fas fa-shopping-cart fa-3x mb-3 opacity-25"></i><p>ยังไม่มีของในตะกร้า</p></div>';
                         document.getElementById('symptomFieldWrapper').innerHTML = '';
+                        document.getElementById('requestTimingFieldWrapper').innerHTML = '';
                         return;
                     }
 
@@ -858,6 +947,7 @@
                     if (sw) {
                         sw.innerHTML = hasMed ? `<div class="mb-2"><label class="form-label small fw-medium">อาการผู้ป่วย (จำเป็นสำหรับการเบิกยา)</label><textarea name="symptom" class="form-control form-control-sm" rows="2" placeholder="เช่น ปวดหัว มีไข้ เจ็บคอ" required></textarea></div>` : '';
                     }
+                    renderRequestTimingFields(currentReceiveMode, currentReceiveAt);
                 })
                 .catch(err => { console.error('refreshCart error:', err); });
         }
@@ -937,12 +1027,15 @@
                         const [badgeClass, statusLabel] = statusMap[h.status] || ['bg-secondary', h.status];
                         const symptomHtml = h.symptom
                             ? `<div class="text-info small mt-1">🩺 อาการ: ${escHtml(h.symptom)}</div>` : '';
+                        const receivePlanHtml = h.receive_plan_text
+                            ? `<div class="text-muted small mt-1">📥 ${escHtml(h.receive_plan_text)}</div>` : '';
                         return `<div class="list-group-item px-3 py-2">
                             <div class="d-flex justify-content-between align-items-start gap-2">
                                 <div class="flex-grow-1" style="min-width:0">
                                     <div class="fw-medium text-truncate">${escHtml(h.product_name)}</div>
                                     <small class="text-muted">${escHtml(h.timestamp)}</small>
                                     ${symptomHtml}
+                                    ${receivePlanHtml}
                                 </div>
                                 <div class="text-end flex-shrink-0">
                                     <div class="fw-medium">${escHtml(String(h.display_qty))} ${escHtml(h.display_unit)}</div>

@@ -28,6 +28,13 @@
         {% else %}
             {{ log['qty'] }} {{ log['unit'] }}
         {% endif %}
+        <div class="small mt-1 {% if log['request_receive_mode'] == 'scheduled' %}text-warning{% else %}text-success{% endif %}">
+            {% if log['request_receive_mode'] == 'scheduled' and log['requested_receive_at'] %}
+                รับวันที่ {{ log['requested_receive_at']|format_ts }}
+            {% else %}
+                รับของทันที
+            {% endif %}
+        </div>
     </td>
     <td class="text-center">
         <form action="{{ url_for('approve_request', log_id=log['id']) }}" method="POST" class="d-inline">

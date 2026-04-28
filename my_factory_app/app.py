@@ -1,4 +1,5 @@
 import io
+import calendar
 import math
 import mimetypes
 import re
@@ -7,15 +8,18 @@ import smtplib
 import sqlite3
 import tempfile
 import time
+from collections import defaultdict
 from datetime import datetime, date, timedelta, timezone
 from email.message import EmailMessage
+from html import escape
+from urllib.parse import urljoin
 
 import os
 import pandas as pd
 import pytz
 import qrcode
 import requests
-from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify, make_response, abort
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify, make_response, abort, has_request_context
 from flask_apscheduler import APScheduler
 from io import BytesIO
 from unit_conversion import UnitConversionManager  # ✅ Unit Conversion Support
@@ -72,6 +76,7 @@ app.config.update(
 )
 app.jinja_env.auto_reload = True
 DB_NAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'factory_stock.db')
+BACKUP_DIR = os.path.join(BASE_DIR, 'backups')
 THAILAND_TZ = 'Asia/Bangkok'
 SESSION_TIMEOUT_MINUTES = 15
 USER_LOCK_TIMEOUT_MINUTES = 5
@@ -88,6 +93,7 @@ SENSITIVE_POST_ENDPOINTS = {
     'toggle_product_status', 'add_product', 'edit_product', 'add_product_ajax',
     'write_off_ajax', 'unlock_user_ajax', 'unlock_user', 'add_user_ajax', 'delete_user',
     'update_user_ajax', 'save_alert_time', 'daily_alert', 'reset_lock',
+    'email_settings', 'email_settings_test',
     'ga_request_portal', 'update_ga_request'
 }
 NO_CACHE_HEADERS = {
@@ -206,6 +212,27 @@ def format_timestamp(ts):
         return dt.strftime('%d/%m/%Y %H:%M')
     except ValueError:
         return ts[:16]
+
+def normalize_request_receive_mode(value):
+    return 'scheduled' if str(value or '').strip().lower() == 'scheduled' else 'immediate'
+
+def parse_requested_receive_at(value):
+    raw_value = str(value or '').strip()
+    if not raw_value:
+        return ''
+    normalized = raw_value.replace('T', ' ')
+    for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S'):
+        try:
+            dt = datetime.strptime(normalized, fmt)
+            return dt.strftime('%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            continue
+    return ''
+
+def build_receive_plan_text(receive_mode, requested_receive_at=''):
+    if normalize_request_receive_mode(receive_mode) == 'scheduled' and requested_receive_at:
+        return f"เบิกล่วงหน้า รับวันที่ {format_timestamp(requested_receive_at)} น."
+    return 'รับของทันที'
 
 app.jinja_env.filters['format_ts'] = format_timestamp
 
@@ -329,18 +356,42 @@ def get_split_unit_hint_text(product_row):
     ).strip()
     conversion_rate = int((product_row['conversion_rate'] if 'conversion_rate' in row_keys else 1) or 1)
     base_to_tablet_rate = int((product_row['base_unit_to_tablet_rate'] if 'base_unit_to_tablet_rate' in row_keys else 0) or 0)
+    package_tablet_total = int((product_row['package_tablet_total'] if 'package_tablet_total' in row_keys else 0) or 0)
     product_name = str((product_row['name'] if 'name' in row_keys else '') or '').strip()
     lower_base = base_unit.lower()
 
     tablet_like_units = {'เม็ด', 'tablet', 'tablets', 'pill', 'pills', 'capsule', 'capsules'}
     wrapper_units = {'ซอง', 'ห่อ', 'แผง', 'ตลับ', 'strip', 'sachet', 'pack'}
 
+    if base_to_tablet_rate > 0:
+        if package_tablet_total <= 0:
+            package_tablet_total = conversion_rate * base_to_tablet_rate
+
+        # กรณีฐานเป็นเม็ด แต่กำหนด "ห่อละกี่เม็ด" ไว้: แสดงคำนวณจำนวนห่อต่อแพ็กให้ชัดเจน
+        if lower_base in tablet_like_units:
+            bundle_count = package_tablet_total // base_to_tablet_rate
+            bundle_remainder = package_tablet_total % base_to_tablet_rate
+            if bundle_count > 0:
+                if bundle_remainder > 0:
+                    return (
+                        f"1 {package_unit} = {package_tablet_total} เม็ด | "
+                        f"จัดได้ {bundle_count} ห่อ (ห่อละ {base_to_tablet_rate} เม็ด) + เหลือ {bundle_remainder} เม็ด"
+                    )
+                return (
+                    f"1 {package_unit} = {package_tablet_total} เม็ด | "
+                    f"จัดได้ {bundle_count} ห่อ (ห่อละ {base_to_tablet_rate} เม็ด)"
+                )
+            return f"1 {package_unit} = {package_tablet_total} เม็ด"
+
+        bundle_count = package_tablet_total // base_to_tablet_rate
+        bundle_remainder = package_tablet_total % base_to_tablet_rate
+        if bundle_remainder > 0:
+            return f"1 {base_unit} = {base_to_tablet_rate} เม็ด | 1 {package_unit} = {bundle_count} {base_unit} + เหลือ {bundle_remainder} เม็ด"
+        return f"1 {base_unit} = {base_to_tablet_rate} เม็ด | 1 {package_unit} = {bundle_count} {base_unit}"
+
     # กรณีหน่วยย่อยเป็นเม็ดอยู่แล้ว: แสดงตรง ๆ แบบที่ผู้เบิกเข้าใจง่าย
     if lower_base in tablet_like_units:
         return f"1 {package_unit} = {conversion_rate} {base_unit}"
-
-    if base_to_tablet_rate > 0:
-        return f"1 {base_unit} = {base_to_tablet_rate} เม็ด | 1 {package_unit} = {conversion_rate} {base_unit}"
 
     # พยายามดึง "จำนวนเม็ดต่อหน่วยย่อย" จากชื่อสินค้า (ถ้าชื่อระบุไว้)
     base_to_tablet = None
@@ -376,12 +427,15 @@ def enrich_products_for_display(conn, products_list):
     product_ids = [item['id'] for item in products_list]
     placeholders = ','.join(['?'] * len(product_ids))
     open_rows = conn.execute(f'''
-        SELECT product_id, COALESCE(SUM(base_unit_qty), 0) as open_base_qty
+        SELECT product_id,
+               COALESCE(SUM(base_unit_qty), 0) as open_base_qty,
+               COALESCE(SUM(extra_tablet_qty), 0) as open_extra_tablet_qty
         FROM open_packages
         WHERE status = 'active' AND product_id IN ({placeholders})
         GROUP BY product_id
     ''', product_ids).fetchall()
     open_qty_map = {row['product_id']: int(row['open_base_qty'] or 0) for row in open_rows}
+    open_extra_tablet_map = {row['product_id']: int(row['open_extra_tablet_qty'] or 0) for row in open_rows}
 
     enriched = []
     for row in products_list:
@@ -391,30 +445,104 @@ def enrich_products_for_display(conn, products_list):
         package_unit = str(item.get('package_unit') or item.get('unit') or 'กล่อง')
         base_unit = str(item.get('base_unit') or 'เม็ด')
         conversion_rate = int(item.get('conversion_rate') or 1)
+        package_tablet_total = int(item.get('package_tablet_total') or 0)
         open_base_qty = open_qty_map.get(item['id'], 0)
+        open_extra_tablet_qty = open_extra_tablet_map.get(item['id'], 0)
         package_stock = int(item.get('stock') or 0)
         total_base_qty = (package_stock * conversion_rate) + open_base_qty
+        base_to_tablet_rate = int(item.get('base_unit_to_tablet_rate') or 0)
+        package_remainder_tablets = 0
+        total_remainder_tablets = open_extra_tablet_qty
+        stock_tablet_total = 0
+        pooled_tablet_remainder = 0
 
         # ลบ reserved_stock ออกจาก total เพื่อแสดงยอดที่ยังเบิกได้จริง
         reserved_stock = int(item.get('reserved_stock') or 0)
+        if split_medicine and base_to_tablet_rate > 0 and package_tablet_total > 0:
+            package_remainder_tablets = package_stock * (package_tablet_total % base_to_tablet_rate)
+            total_remainder_tablets = package_remainder_tablets + open_extra_tablet_qty
+            stock_tablet_total = (package_stock * package_tablet_total) + (open_base_qty * base_to_tablet_rate) + open_extra_tablet_qty
+            total_base_qty = stock_tablet_total // base_to_tablet_rate
+            pooled_tablet_remainder = stock_tablet_total % base_to_tablet_rate
+
         if split_medicine:
             available_base = max(0, total_base_qty - reserved_stock)
         else:
-            available_base = package_stock  # non-split ลด stock จริงใน DB แล้ว
+            available_base = max(0, package_stock - reserved_stock)
 
         item['is_split_tablet_medicine'] = split_medicine
         item['split_unit_hint_label'] = split_hint_text
         item['split_unit_hint_text'] = f" ({split_hint_text})" if split_hint_text else ''
         item['name_with_unit_hint'] = item.get('name', '')
-        item['base_unit_to_tablet_rate'] = int(item.get('base_unit_to_tablet_rate') or 0)
+        item['base_unit_to_tablet_rate'] = base_to_tablet_rate
+        if package_tablet_total <= 0:
+            if base_to_tablet_rate > 0:
+                package_tablet_total = conversion_rate * base_to_tablet_rate
+            elif base_unit.lower() in {'เม็ด', 'tablet', 'tablets', 'pill', 'pills', 'capsule', 'capsules'}:
+                package_tablet_total = conversion_rate
+        item['package_tablet_total'] = package_tablet_total
         item['package_unit_label'] = package_unit
         item['base_unit_label'] = base_unit
         item['open_base_qty'] = open_base_qty
-        item['stock_base_total'] = available_base if split_medicine else total_base_qty
-        item['effective_stock'] = available_base  # ใช้เช็ค out-of-stock ใน template
-        item['frontend_stock_text'] = f"{available_base} {base_unit}" if split_medicine else f"{package_stock} {item.get('unit', '')}".strip()
-        item['backend_stock_text'] = f"{package_stock} {package_unit} + {open_base_qty} {base_unit}" if split_medicine else f"{package_stock} {item.get('unit', '')}".strip()
-        item['max_withdraw_qty'] = available_base if split_medicine else package_stock
+        item['open_extra_tablet_qty'] = open_extra_tablet_qty
+        item['package_remainder_tablets'] = package_remainder_tablets
+
+        extra_bundles_from_open_remainder = 0
+        true_tablet_remainder = 0
+        effective_base_for_withdraw = available_base
+        if split_medicine and base_to_tablet_rate > 0:
+            # รวมเศษทันทีจากทุกแพ็ค + เศษที่เปิดแล้ว
+            if package_tablet_total > 0:
+                true_tablet_remainder = pooled_tablet_remainder
+                extra_bundles_from_open_remainder = total_remainder_tablets // base_to_tablet_rate
+                effective_base_for_withdraw = available_base
+            else:
+                extra_bundles_from_open_remainder = open_extra_tablet_qty // base_to_tablet_rate
+                true_tablet_remainder = open_extra_tablet_qty % base_to_tablet_rate
+                effective_base_for_withdraw = available_base + extra_bundles_from_open_remainder
+
+        item['stock_base_total'] = effective_base_for_withdraw if split_medicine else total_base_qty
+        item['effective_stock'] = effective_base_for_withdraw if split_medicine else available_base
+
+        if split_medicine:
+            frontend_stock_text = f"{effective_base_for_withdraw} {base_unit}"
+            if base_to_tablet_rate > 0 and true_tablet_remainder > 0:
+                frontend_stock_text = f"{frontend_stock_text} + เศษ {true_tablet_remainder} เม็ด"
+
+            backend_stock_text = f"{package_stock} {package_unit} + {open_base_qty} {base_unit}"
+
+            item['frontend_stock_text'] = frontend_stock_text
+            item['backend_stock_text'] = backend_stock_text
+        else:
+            item['frontend_stock_text'] = f"{available_base} {item.get('unit', '')}".strip()
+            item['backend_stock_text'] = f"{package_stock} {item.get('unit', '')}".strip()
+
+        item['max_withdraw_qty'] = effective_base_for_withdraw if split_medicine else available_base
+        if split_medicine and base_to_tablet_rate > 0:
+            per_package_bundle_count = package_tablet_total // base_to_tablet_rate
+            per_package_tablet_remainder = package_tablet_total % base_to_tablet_rate
+            if stock_tablet_total <= 0:
+                stock_tablet_total = (package_stock * package_tablet_total) + (open_base_qty * base_to_tablet_rate) + open_extra_tablet_qty
+            item['stock_tablet_total'] = stock_tablet_total
+            # รวมเศษจากแพ็ค + เศษเปิดแล้ว เพื่อแปลงเป็นหน่วยย่อยได้ทันที
+            # จำนวนหน่วยย่อยเพิ่มเติมที่จัดได้จากเศษรวม
+            extra_bundles_from_remainder = total_remainder_tablets // base_to_tablet_rate
+            # เศษสุดท้ายที่ไม่สามารถจัดเพิ่มได้อีก
+            true_tablet_remainder = pooled_tablet_remainder if package_tablet_total > 0 else (total_remainder_tablets % base_to_tablet_rate)
+            item['packable_bundle_count'] = effective_base_for_withdraw
+            item['packable_tablet_remainder'] = true_tablet_remainder
+            item['extra_bundles_from_remainder'] = extra_bundles_from_remainder
+            item['total_remainder_tablets'] = total_remainder_tablets
+            item['per_package_bundle_count'] = per_package_bundle_count
+            item['per_package_tablet_remainder'] = per_package_tablet_remainder
+        else:
+            item['stock_tablet_total'] = 0
+            item['packable_bundle_count'] = 0
+            item['packable_tablet_remainder'] = 0
+            item['extra_bundles_from_remainder'] = 0
+            item['total_remainder_tablets'] = 0
+            item['per_package_bundle_count'] = 0
+            item['per_package_tablet_remainder'] = 0
         enriched.append(item)
 
     return enriched
@@ -477,6 +605,26 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+def ensure_notification_settings_columns(conn):
+    """Ensure recipient split columns exist for older databases."""
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(notification_settings)").fetchall()}
+    except sqlite3.OperationalError:
+        columns = set()
+
+    if columns and 'email_recipients_pc1' not in columns:
+        conn.execute("ALTER TABLE notification_settings ADD COLUMN email_recipients_pc1 TEXT")
+        columns.add('email_recipients_pc1')
+    if columns and 'email_recipients_cc' not in columns:
+        conn.execute("ALTER TABLE notification_settings ADD COLUMN email_recipients_cc TEXT")
+        columns.add('email_recipients_cc')
+
+    # Normalize legacy NULL values to empty string so textarea retains predictable content.
+    if columns and 'email_recipients_pc1' in columns:
+        conn.execute("UPDATE notification_settings SET email_recipients_pc1 = '' WHERE email_recipients_pc1 IS NULL")
+    if columns and 'email_recipients_cc' in columns:
+        conn.execute("UPDATE notification_settings SET email_recipients_cc = '' WHERE email_recipients_cc IS NULL")
+
 def ensure_application_schema():
     os.makedirs(GA_REQUEST_UPLOAD_DIR, exist_ok=True)
 
@@ -492,6 +640,39 @@ def ensure_application_schema():
         product_columns = {row[1] for row in conn.execute("PRAGMA table_info(products)").fetchall()}
         if product_columns and 'base_unit_to_tablet_rate' not in product_columns:
             conn.execute("ALTER TABLE products ADD COLUMN base_unit_to_tablet_rate INTEGER DEFAULT 0")
+        if product_columns and 'package_tablet_total' not in product_columns:
+            conn.execute("ALTER TABLE products ADD COLUMN package_tablet_total INTEGER DEFAULT 0")
+        if product_columns and 'status' not in product_columns:
+            conn.execute("ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'Active'")
+            product_columns.add('status')
+
+        # Normalize active status for cross-machine schema compatibility.
+        if product_columns and 'status' in product_columns:
+            if 'is_active' in product_columns:
+                conn.execute("""
+                    UPDATE products
+                    SET status = CASE
+                        WHEN COALESCE(is_active, 1) = 1 THEN 'Active'
+                        ELSE 'Inactive'
+                    END
+                """)
+            else:
+                conn.execute("""
+                    UPDATE products
+                    SET status = 'Active'
+                    WHERE status IS NULL OR TRIM(status) = ''
+                """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_products_status ON products(status)")
+
+        open_pkg_columns = {row[1] for row in conn.execute("PRAGMA table_info(open_packages)").fetchall()}
+        if open_pkg_columns and 'extra_tablet_qty' not in open_pkg_columns:
+            conn.execute("ALTER TABLE open_packages ADD COLUMN extra_tablet_qty INTEGER DEFAULT 0")
+
+        transaction_log_columns = {row[1] for row in conn.execute("PRAGMA table_info(transaction_logs)").fetchall()}
+        if transaction_log_columns and 'request_receive_mode' not in transaction_log_columns:
+            conn.execute("ALTER TABLE transaction_logs ADD COLUMN request_receive_mode TEXT DEFAULT 'immediate'")
+        if transaction_log_columns and 'requested_receive_at' not in transaction_log_columns:
+            conn.execute("ALTER TABLE transaction_logs ADD COLUMN requested_receive_at TEXT")
 
         conn.execute('''
             CREATE TABLE IF NOT EXISTS ga_requests (
@@ -523,6 +704,57 @@ def ensure_application_schema():
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_ga_requests_status_location ON ga_requests(status, location, created_at DESC)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_ga_requests_emp_id ON ga_requests(emp_id, created_at DESC)')
+        
+        # 📬 Notification Settings Table
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS notification_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_id TEXT NOT NULL UNIQUE,
+                approval_email BOOLEAN DEFAULT 1,
+                approval_line BOOLEAN DEFAULT 1,
+                rejection_email BOOLEAN DEFAULT 1,
+                rejection_line BOOLEAN DEFAULT 1,
+                low_stock_email BOOLEAN DEFAULT 1,
+                low_stock_line BOOLEAN DEFAULT 1,
+                email_recipients TEXT,
+                email_recipients_pc1 TEXT,
+                email_recipients_cc TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        ensure_notification_settings_columns(conn)
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_notification_settings_admin_id ON notification_settings(admin_id)')
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS email_test_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_id TEXT NOT NULL,
+                recipients TEXT,
+                subject TEXT,
+                status TEXT NOT NULL,
+                error_message TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_email_test_logs_created_at ON email_test_logs(created_at DESC)')
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS notification_delivery_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_id TEXT,
+                notification_type TEXT,
+                scope TEXT,
+                channel TEXT,
+                recipients TEXT,
+                status TEXT,
+                error_message TEXT,
+                location TEXT,
+                role TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_notification_delivery_logs_created_at ON notification_delivery_logs(created_at DESC)')
         conn.commit()
     finally:
         conn.close()
@@ -611,7 +843,7 @@ def send_line_message(message, target_group=None, location=None, role=None):
 
 def parse_email_recipients(value):
     recipients = []
-    for item in re.split(r'[;,\s]+', str(value or '').strip()):
+    for item in re.split(r'[;,，、\s]+', str(value or '').strip()):
         email = normalize_email_value(item)
         if email and is_valid_email_address(email):
             recipients.append(email)
@@ -619,11 +851,42 @@ def parse_email_recipients(value):
 
 def list_invalid_email_entries(value):
     invalid_entries = []
-    for item in re.split(r'[;,\s]+', str(value or '').strip()):
+    for item in re.split(r'[;,，、\s]+', str(value or '').strip()):
         email = normalize_email_value(item)
         if email and not is_valid_email_address(email):
             invalid_entries.append(email)
     return invalid_entries
+
+def resolve_notification_scope(location=None, role=None):
+    role_text = str(role or '').strip().lower()
+    normalized_location = normalize_location_value(location)
+
+    if role_text == 'admin_pc1' or normalized_location == 'PC1':
+        return 'pc1'
+    if role_text == 'admin_cc' or is_cc_location_value(normalized_location):
+        return 'cc'
+    return 'general'
+
+def resolve_notification_email_recipients(settings, location=None, role=None, recipients=None):
+    recipient_list = []
+
+    if recipients:
+        if isinstance(recipients, (list, tuple, set)):
+            for entry in recipients:
+                recipient_list.extend(parse_email_recipients(entry))
+        else:
+            recipient_list.extend(parse_email_recipients(recipients))
+
+    scope = resolve_notification_scope(location=location, role=role)
+    scoped_field = 'email_recipients_pc1' if scope == 'pc1' else 'email_recipients_cc' if scope == 'cc' else ''
+    scoped_recipients = parse_email_recipients(settings.get(scoped_field, '')) if scoped_field else []
+
+    # Always include default recipients, then append scope-specific recipients.
+    # This keeps runtime notifications consistent with test behavior expectations.
+    recipient_list.extend(parse_email_recipients(settings.get('email_recipients', '')))
+    recipient_list.extend(scoped_recipients)
+
+    return list(dict.fromkeys([email for email in recipient_list if is_valid_email_address(email)]))
 
 def get_settings_values(keys):
     if not keys:
@@ -667,7 +930,7 @@ def resolve_ga_request_recipients(target_team, location):
         recipients.extend(parse_email_recipients(os.environ.get(key, '')))
     return list(dict.fromkeys(recipients))
 
-def send_email_message(subject, body, recipients, attachment_path=None):
+def send_email_message(subject, body, recipients, attachment_path=None, html_body=''):
     recipients = [email for email in recipients if is_valid_email_address(email)]
     if not recipients:
         return False, 'no-recipients'
@@ -697,6 +960,8 @@ def send_email_message(subject, body, recipients, attachment_path=None):
     message['From'] = smtp_from
     message['To'] = ', '.join(recipients)
     message.set_content(body)
+    if html_body:
+        message.add_alternative(html_body, subtype='html')
 
     if attachment_path and os.path.exists(attachment_path):
         mime_type, _ = mimetypes.guess_type(attachment_path)
@@ -720,6 +985,82 @@ def send_email_message(subject, body, recipients, attachment_path=None):
     except Exception as exc:
         print(f'Error sending email: {exc}')
         return False, str(exc)
+
+def log_email_test_result(admin_id, recipients, subject, status, error_message=''):
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            '''
+            INSERT INTO email_test_logs (admin_id, recipients, subject, status, error_message)
+            VALUES (?, ?, ?, ?, ?)
+            ''',
+            (
+                clean_input_text(admin_id, 100) or 'unknown',
+                clean_input_text(', '.join(recipients), 500),
+                clean_input_text(subject, 300),
+                clean_input_text(status, 30),
+                clean_input_text(error_message, 1000),
+            )
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def log_notification_delivery(admin_id, notification_type, scope, channel, recipients, status, error_message='', location='', role=''):
+    conn = get_db_connection()
+    try:
+        recipient_text = ', '.join([str(r).strip() for r in (recipients or []) if str(r).strip()])
+        conn.execute(
+            '''
+            INSERT INTO notification_delivery_logs
+            (admin_id, notification_type, scope, channel, recipients, status, error_message, location, role)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                clean_input_text(admin_id, 100),
+                clean_input_text(notification_type, 50),
+                clean_input_text(scope, 20),
+                clean_input_text(channel, 20),
+                clean_input_text(recipient_text, 800),
+                clean_input_text(status, 30),
+                clean_input_text(error_message, 1000),
+                clean_input_text(location, 50),
+                clean_input_text(role, 30),
+            )
+        )
+        conn.commit()
+    except Exception as e:
+        print(f'Error logging notification delivery: {e}')
+    finally:
+        conn.close()
+
+def get_email_base_url():
+    settings_map = get_settings_values(['app_base_url'])
+    base_url = (
+        settings_map.get('app_base_url')
+        or os.environ.get('APP_BASE_URL', '')
+        or os.environ.get('BASE_URL', '')
+    )
+    base_url = str(base_url or '').strip()
+
+    if not base_url and has_request_context():
+        base_url = str(request.host_url or '').strip()
+
+    if base_url and not base_url.endswith('/'):
+        base_url += '/'
+    return base_url
+
+def build_email_link(endpoint_name, **values):
+    try:
+        relative_url = url_for(endpoint_name, **values)
+    except Exception:
+        return ''
+
+    base_url = get_email_base_url()
+    if not base_url:
+        return ''
+
+    return urljoin(base_url, relative_url.lstrip('/'))
 
 def save_uploaded_image(file_storage):
     if not file_storage or not file_storage.filename:
@@ -946,6 +1287,99 @@ def build_ga_request_email_body(request_row):
     ]
     return '\n'.join(lines)
 
+def build_ga_request_email_html(request_row):
+    request_no = f"GA-{int(request_row['id']):05d}"
+    requester_name = escape(str(request_row.get('requester_name') or '-'))
+    emp_id = escape(str(request_row.get('emp_id') or '-'))
+    department = escape(str(request_row.get('department') or '-'))
+    location = escape(str(request_row.get('location') or '-'))
+    target_team = escape(str(request_row.get('target_team') or '-'))
+    title = escape(str(request_row.get('title') or '-'))
+    description = escape(str(request_row.get('description') or '').strip() or '-')
+    description_html = description.replace('\n', '<br>')
+
+    admin_link = build_email_link('admin_dashboard', module='ga', ga_loc=str(request_row.get('location') or ''))
+    action_section = ''
+    if admin_link:
+        action_section = (
+            '<tr>'
+            '<td style="padding:4px 22px 18px 22px;">'
+            f'<a href="{escape(admin_link)}" style="display:inline-block;background:#0b6cc7;color:#ffffff;text-decoration:none;padding:11px 16px;border-radius:9px;font-size:13px;font-weight:700;">เปิดหน้าจัดการ GA Request</a>'
+            '</td>'
+            '</tr>'
+        )
+
+    return f"""<!doctype html>
+<html lang=\"th\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+    <title>GA Request ใหม่</title>
+</head>
+<body style=\"margin:0;padding:0;background:#f4f6fb;font-family:'Segoe UI',Tahoma,sans-serif;color:#243040;\">
+    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#f4f6fb;padding:20px 10px;\">
+        <tr>
+            <td align=\"center\">
+                <table role=\"presentation\" width=\"640\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:640px;width:100%;background:#ffffff;border:1px solid #dde3ef;border-radius:14px;overflow:hidden;\">
+                    <tr>
+                        <td style=\"padding:18px 22px;background:linear-gradient(135deg,#0b6cc7,#0e91d8);color:#ffffff;\">
+                            <div style=\"font-size:13px;opacity:.92;\">PCM Notification</div>
+                            <div style=\"margin-top:4px;font-size:22px;font-weight:700;\">มี GA Request ใหม่</div>
+                            <div style=\"margin-top:8px;display:inline-block;background:#ffffff;color:#0b6cc7;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700;\">{escape(request_no)}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style=\"padding:20px 22px 12px 22px;\">
+                            <div style=\"font-size:16px;font-weight:700;color:#0f1f3a;\">{title}</div>
+                            <div style=\"margin-top:6px;color:#52607a;font-size:13px;\">กรุณาตรวจสอบและดำเนินการตามส่วนงานที่รับผิดชอบ</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style=\"padding:0 22px 6px 22px;\">
+                            <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;\">
+                                <tr>
+                                    <td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;width:34%;\">ผู้แจ้ง</td>
+                                    <td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{requester_name}</td>
+                                </tr>
+                                <tr>
+                                    <td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">รหัสพนักงาน</td>
+                                    <td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{emp_id}</td>
+                                </tr>
+                                <tr>
+                                    <td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">แผนก</td>
+                                    <td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{department}</td>
+                                </tr>
+                                <tr>
+                                    <td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">Location</td>
+                                    <td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{location}</td>
+                                </tr>
+                                <tr>
+                                    <td style=\"padding:9px 0;color:#6a768f;font-size:13px;\">ส่วนงานที่รับผิดชอบ</td>
+                                    <td style=\"padding:9px 0;color:#1d2a44;font-size:13px;\">{target_team}</td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style=\"padding:12px 22px 18px 22px;\">
+                            <div style=\"font-size:13px;color:#6a768f;margin-bottom:7px;\">รายละเอียดปัญหา</div>
+                            <div style=\"padding:12px 13px;background:#f7f9fd;border:1px solid #e5ebf5;border-radius:10px;color:#1d2a44;font-size:13px;line-height:1.6;\">{description_html}</div>
+                        </td>
+                    </tr>
+                    {action_section}
+                    <tr>
+                        <td style=\"padding:12px 22px 22px 22px;background:#fafcff;color:#7a879e;font-size:12px;border-top:1px solid #edf1f7;\">
+                            อีเมลนี้ถูกส่งอัตโนมัติจากระบบ PCM
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
 def build_ga_status_email_body(request_row, new_status, admin_note=''):
     lines = [
         'สถานะคำร้องของคุณถูกอัปเดตแล้ว',
@@ -958,6 +1392,1102 @@ def build_ga_status_email_body(request_row, new_status, admin_note=''):
     if admin_note:
         lines.extend(['', 'หมายเหตุจากผู้ดูแล:', admin_note])
     return '\n'.join(lines)
+
+def build_ga_status_email_html(request_row, new_status, admin_note=''):
+    request_no = f"GA-{int(request_row['id']):05d}"
+    title = escape(str(request_row.get('title') or '-'))
+    handled_by = escape(str(request_row.get('handled_by') or '-'))
+    safe_status = escape(str(new_status or '-'))
+    safe_note = escape(str(admin_note or '').strip())
+    note_html = safe_note.replace('\n', '<br>')
+
+    requester_link = ''
+    if request_row.get('emp_id'):
+        requester_link = build_email_link('ga_request_portal', emp_id=str(request_row.get('emp_id')))
+
+    status_style = {
+        'Pending': 'background:#fff6da;color:#8a6400;border:1px solid #f1dd98;',
+        'In Progress': 'background:#e9f3ff;color:#0b5cab;border:1px solid #b7d4fa;',
+        'Resolved': 'background:#e8f9f0;color:#197a45;border:1px solid #b4e6c8;',
+        'Done': 'background:#e8f9f0;color:#197a45;border:1px solid #b4e6c8;',
+        'Rejected': 'background:#ffecef;color:#a22c37;border:1px solid #f3b6c0;',
+    }.get(new_status, 'background:#eef2fb;color:#405375;border:1px solid #d4deef;')
+
+    note_section = ''
+    if safe_note:
+        note_section = (
+            '<tr>'
+            '<td style="padding:0 22px 20px 22px;">'
+            '<div style="font-size:13px;color:#6a768f;margin-bottom:7px;">หมายเหตุจากผู้ดูแล</div>'
+            f'<div style="padding:12px 13px;background:#f7f9fd;border:1px solid #e5ebf5;border-radius:10px;color:#1d2a44;font-size:13px;line-height:1.6;">{note_html}</div>'
+            '</td>'
+            '</tr>'
+        )
+
+    action_section = ''
+    if requester_link:
+        action_section = (
+            '<tr>'
+            '<td style="padding:4px 22px 18px 22px;">'
+            f'<a href="{escape(requester_link)}" style="display:inline-block;background:#124f96;color:#ffffff;text-decoration:none;padding:11px 16px;border-radius:9px;font-size:13px;font-weight:700;">เปิดหน้าคำร้องของฉัน</a>'
+            '</td>'
+            '</tr>'
+        )
+
+    return f"""<!doctype html>
+<html lang=\"th\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+    <title>อัปเดตสถานะ GA Request</title>
+</head>
+<body style=\"margin:0;padding:0;background:#f4f6fb;font-family:'Segoe UI',Tahoma,sans-serif;color:#243040;\">
+    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#f4f6fb;padding:20px 10px;\">
+        <tr>
+            <td align=\"center\">
+                <table role=\"presentation\" width=\"640\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:640px;width:100%;background:#ffffff;border:1px solid #dde3ef;border-radius:14px;overflow:hidden;\">
+                    <tr>
+                        <td style=\"padding:18px 22px;background:linear-gradient(135deg,#124f96,#1669bf);color:#ffffff;\">
+                            <div style=\"font-size:13px;opacity:.92;\">PCM Notification</div>
+                            <div style=\"margin-top:4px;font-size:22px;font-weight:700;\">อัปเดตสถานะ GA Request</div>
+                            <div style=\"margin-top:8px;display:inline-block;background:#ffffff;color:#124f96;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700;\">{escape(request_no)}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style=\"padding:20px 22px 10px 22px;\">
+                            <div style=\"font-size:16px;font-weight:700;color:#0f1f3a;\">{title}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style=\"padding:0 22px 6px 22px;\">
+                            <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;\">
+                                <tr>
+                                    <td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;width:34%;\">สถานะใหม่</td>
+                                    <td style=\"padding:9px 0;border-bottom:1px solid #edf1f7;\"><span style=\"display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;{status_style}\">{safe_status}</span></td>
+                                </tr>
+                                <tr>
+                                    <td style=\"padding:9px 0;color:#6a768f;font-size:13px;\">ผู้ดำเนินการ</td>
+                                    <td style=\"padding:9px 0;color:#1d2a44;font-size:13px;\">{handled_by}</td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    {note_section}
+                    {action_section}
+                    <tr>
+                        <td style=\"padding:12px 22px 22px 22px;background:#fafcff;color:#7a879e;font-size:12px;border-top:1px solid #edf1f7;\">
+                            อีเมลนี้ถูกส่งอัตโนมัติจากระบบ PCM
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+def build_withdrawal_email_body(payload):
+    requester_name = str(payload.get('requester_name') or '-')
+    emp_id = str(payload.get('emp_id') or '-')
+    department = str(payload.get('department') or '-')
+    location = str(payload.get('location') or '-')
+    symptom = str(payload.get('symptom') or '').strip()
+    receive_plan = str(payload.get('receive_plan') or '-')
+    created_at = str(payload.get('created_at') or '-')
+    items = payload.get('items') or []
+
+    lines = [
+        'มีคำขอเบิกใหม่จากระบบ PCM',
+        '',
+        f"ผู้เบิก: {requester_name}",
+        f"รหัสพนักงาน: {emp_id}",
+        f"แผนก: {department}",
+        f"Location: {location}",
+        f"เวลารายการ: {created_at}",
+        f"แผนการรับของ: {receive_plan}",
+    ]
+
+    if symptom:
+        lines.append(f"อาการ: {symptom}")
+
+    lines.extend(['', 'รายการที่ขอเบิก:'])
+    for idx, item in enumerate(items, start=1):
+        item_name = str(item.get('name') or '-')
+        qty = item.get('qty')
+        unit = str(item.get('unit') or '')
+        note = str(item.get('note') or '').strip()
+        lines.append(f"{idx}. {item_name} - {qty} {unit}".strip())
+        if note:
+            lines.append(f"   หมายเหตุ: {note}")
+
+    return '\n'.join(lines)
+
+def build_withdrawal_email_html(payload):
+    requester_name = escape(str(payload.get('requester_name') or '-'))
+    emp_id = escape(str(payload.get('emp_id') or '-'))
+    department = escape(str(payload.get('department') or '-'))
+    location = escape(str(payload.get('location') or '-'))
+    symptom = escape(str(payload.get('symptom') or '').strip())
+    receive_plan = escape(str(payload.get('receive_plan') or '-'))
+    created_at = escape(str(payload.get('created_at') or '-'))
+    items = payload.get('items') or []
+
+    items_rows = ''
+    for idx, item in enumerate(items, start=1):
+        item_name = escape(str(item.get('name') or '-'))
+        qty = escape(str(item.get('qty') or '0'))
+        unit = escape(str(item.get('unit') or ''))
+        note = escape(str(item.get('note') or '').strip())
+        note_html = f"<div style=\"font-size:12px;color:#6a768f;margin-top:4px;\">{note}</div>" if note else ''
+        items_rows += (
+            '<tr>'
+            f'<td style="padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;width:8%;">{idx}</td>'
+            f'<td style="padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;">{item_name}{note_html}</td>'
+            f'<td style="padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;text-align:right;white-space:nowrap;">{qty} {unit}</td>'
+            '</tr>'
+        )
+
+    symptom_section = ''
+    if symptom:
+        symptom_section = (
+            '<tr>'
+            '<td style="padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;">อาการ</td>'
+            f'<td style="padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;" colspan="2">{symptom}</td>'
+            '</tr>'
+        )
+
+    action_link = build_email_link('admin_dashboard', module='stock')
+    action_section = ''
+    if action_link:
+        action_section = (
+            '<tr>'
+            '<td style="padding:4px 22px 18px 22px;">'
+            f'<a href="{escape(action_link)}" style="display:inline-block;background:#0b6cc7;color:#ffffff;text-decoration:none;padding:11px 16px;border-radius:9px;font-size:13px;font-weight:700;">เปิดหน้าจัดการคำขอเบิก</a>'
+            '</td>'
+            '</tr>'
+        )
+
+    return f"""<!doctype html>
+<html lang=\"th\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+    <title>คำขอเบิกใหม่</title>
+</head>
+<body style=\"margin:0;padding:0;background:#f4f6fb;font-family:'Segoe UI',Tahoma,sans-serif;color:#243040;\">
+    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#f4f6fb;padding:20px 10px;\">
+        <tr>
+            <td align=\"center\">
+                <table role=\"presentation\" width=\"640\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:640px;width:100%;background:#ffffff;border:1px solid #dde3ef;border-radius:14px;overflow:hidden;\">
+                    <tr>
+                        <td style=\"padding:18px 22px;background:linear-gradient(135deg,#0b6cc7,#0e91d8);color:#ffffff;\">
+                            <div style=\"font-size:13px;opacity:.92;\">PCM Notification</div>
+                            <div style=\"margin-top:4px;font-size:22px;font-weight:700;\">มีคำขอเบิกใหม่</div>
+                            <div style=\"margin-top:8px;font-size:13px;opacity:.95;\">เวลารายการ: {created_at}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style=\"padding:20px 22px 10px 22px;\">
+                            <div style=\"font-size:16px;font-weight:700;color:#0f1f3a;\">ผู้เบิก: {requester_name}</div>
+                            <div style=\"margin-top:6px;color:#52607a;font-size:13px;\">กรุณาตรวจสอบคำขอและอนุมัติในระบบ</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style=\"padding:0 22px 6px 22px;\">
+                            <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;\">
+                                <tr>
+                                    <td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;width:34%;\">รหัสพนักงาน</td>
+                                    <td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\" colspan=\"2\">{emp_id}</td>
+                                </tr>
+                                <tr>
+                                    <td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">แผนก</td>
+                                    <td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\" colspan=\"2\">{department}</td>
+                                </tr>
+                                <tr>
+                                    <td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">Location</td>
+                                    <td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\" colspan=\"2\">{location}</td>
+                                </tr>
+                                <tr>
+                                    <td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">การรับของ</td>
+                                    <td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\" colspan=\"2\">{receive_plan}</td>
+                                </tr>
+                                {symptom_section}
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style=\"padding:12px 22px 4px 22px;\">
+                            <div style=\"font-size:13px;color:#6a768f;margin-bottom:8px;\">รายการที่ขอเบิก</div>
+                            <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;\">
+                                <tr>
+                                    <td style=\"padding:8px 0;color:#6a768f;font-size:12px;font-weight:700;border-bottom:1px solid #dfe7f3;width:8%;\">#</td>
+                                    <td style=\"padding:8px 0;color:#6a768f;font-size:12px;font-weight:700;border-bottom:1px solid #dfe7f3;\">รายการ</td>
+                                    <td style=\"padding:8px 0;color:#6a768f;font-size:12px;font-weight:700;border-bottom:1px solid #dfe7f3;text-align:right;\">จำนวน</td>
+                                </tr>
+                                {items_rows or '<tr><td colspan="3" style="padding:10px 0;color:#6a768f;font-size:13px;">-</td></tr>'}
+                            </table>
+                        </td>
+                    </tr>
+                    {action_section}
+                    <tr>
+                        <td style=\"padding:12px 22px 22px 22px;background:#fafcff;color:#7a879e;font-size:12px;border-top:1px solid #edf1f7;\">
+                            อีเมลนี้ถูกส่งอัตโนมัติจากระบบ PCM
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+def build_approval_email_body(payload):
+    return "\n".join([
+        'มีการอนุมัติรายการเบิกจากระบบ PCM',
+        '',
+        f"ผู้เบิก: {payload.get('requester_name', '-')}",
+        f"แผนก/พื้นที่: {payload.get('department', '-')} ({payload.get('location', '-')})",
+        f"รายการ: {payload.get('product_name', '-')}",
+        f"จำนวน: {payload.get('qty', '-')} {payload.get('unit', '')}".strip(),
+        f"ผู้อนุมัติ: {payload.get('approver', '-')}",
+        f"เวลาอนุมัติ: {payload.get('approved_at', '-')}",
+    ])
+
+def build_approval_email_html(payload):
+    requester_name = escape(str(payload.get('requester_name') or '-'))
+    department = escape(str(payload.get('department') or '-'))
+    location = escape(str(payload.get('location') or '-'))
+    product_name = escape(str(payload.get('product_name') or '-'))
+    qty = escape(str(payload.get('qty') or '-'))
+    unit = escape(str(payload.get('unit') or ''))
+    approver = escape(str(payload.get('approver') or '-'))
+    approved_at = escape(str(payload.get('approved_at') or '-'))
+    action_link = build_email_link('admin_dashboard', module='stock')
+    action_section = ''
+    if action_link:
+        action_section = (
+            '<tr>'
+            '<td style="padding:4px 22px 18px 22px;">'
+            f'<a href="{escape(action_link)}" style="display:inline-block;background:#0b6cc7;color:#ffffff;text-decoration:none;padding:11px 16px;border-radius:9px;font-size:13px;font-weight:700;">เปิดหน้ารายการอนุมัติ</a>'
+            '</td>'
+            '</tr>'
+        )
+
+    return f"""<!doctype html>
+<html lang=\"th\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+    <title>แจ้งเตือนอนุมัติรายการ</title>
+</head>
+<body style=\"margin:0;padding:0;background:#f4f6fb;font-family:'Segoe UI',Tahoma,sans-serif;color:#243040;\">
+    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#f4f6fb;padding:20px 10px;\">
+        <tr><td align=\"center\">
+            <table role=\"presentation\" width=\"640\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:640px;width:100%;background:#ffffff;border:1px solid #dde3ef;border-radius:14px;overflow:hidden;\">
+                <tr>
+                    <td style=\"padding:18px 22px;background:linear-gradient(135deg,#0b6cc7,#0e91d8);color:#ffffff;\">
+                        <div style=\"font-size:13px;opacity:.92;\">PCM Notification</div>
+                        <div style=\"margin-top:4px;font-size:22px;font-weight:700;\">อนุมัติรายการสำเร็จ</div>
+                        <div style=\"margin-top:8px;font-size:13px;opacity:.95;\">เวลาอนุมัติ: {approved_at}</div>
+                    </td>
+                </tr>
+                <tr><td style=\"padding:20px 22px 10px 22px;\"><div style=\"font-size:16px;font-weight:700;color:#0f1f3a;\">ผู้เบิก: {requester_name}</div></td></tr>
+                <tr>
+                    <td style=\"padding:0 22px 12px 22px;\">
+                        <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;\">
+                            <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;width:36%;\">แผนก/พื้นที่</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{department} ({location})</td></tr>
+                            <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">รายการ</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{product_name}</td></tr>
+                            <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">จำนวน</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{qty} {unit}</td></tr>
+                            <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">ผู้อนุมัติ</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{approver}</td></tr>
+                        </table>
+                    </td>
+                </tr>
+                {action_section}
+                <tr><td style=\"padding:12px 22px 22px 22px;background:#fafcff;color:#7a879e;font-size:12px;border-top:1px solid #edf1f7;\">อีเมลนี้ถูกส่งอัตโนมัติจากระบบ PCM</td></tr>
+            </table>
+        </td></tr>
+    </table>
+</body>
+</html>
+"""
+
+def build_low_stock_email_body(payload):
+    return "\n".join([
+        'แจ้งเตือนสต็อกต่ำกว่าเกณฑ์',
+        '',
+        f"รายการ: {payload.get('product_name', '-')}",
+        f"คงเหลือปัจจุบัน: {payload.get('stock', '-')} {payload.get('unit', '')}".strip(),
+        f"จุดสั่งซื้อ (Safety): {payload.get('safety_stock', '-')} {payload.get('unit', '')}".strip(),
+        f"พื้นที่: {payload.get('location', '-')}",
+        'กรุณาพิจารณาสั่งซื้อเพิ่ม',
+    ])
+
+def build_low_stock_email_html(payload):
+    product_name = escape(str(payload.get('product_name') or '-'))
+    stock = escape(str(payload.get('stock') or '-'))
+    safety_stock = escape(str(payload.get('safety_stock') or '-'))
+    unit = escape(str(payload.get('unit') or ''))
+    location = escape(str(payload.get('location') or '-'))
+    action_link = build_email_link('admin_dashboard', module='stock')
+    action_section = ''
+    if action_link:
+        action_section = (
+            '<tr>'
+            '<td style="padding:4px 22px 18px 22px;">'
+            f'<a href="{escape(action_link)}" style="display:inline-block;background:#0b6cc7;color:#ffffff;text-decoration:none;padding:11px 16px;border-radius:9px;font-size:13px;font-weight:700;">เปิดหน้าสต็อกต่ำกว่าเกณฑ์</a>'
+            '</td>'
+            '</tr>'
+        )
+
+    return f"""<!doctype html>
+<html lang=\"th\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+    <title>แจ้งเตือนสต็อกต่ำกว่าเกณฑ์</title>
+</head>
+<body style=\"margin:0;padding:0;background:#f4f6fb;font-family:'Segoe UI',Tahoma,sans-serif;color:#243040;\">
+    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#f4f6fb;padding:20px 10px;\">
+        <tr><td align=\"center\">
+            <table role=\"presentation\" width=\"640\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:640px;width:100%;background:#ffffff;border:1px solid #dde3ef;border-radius:14px;overflow:hidden;\">
+                <tr>
+                    <td style=\"padding:18px 22px;background:linear-gradient(135deg,#bc6b07,#e79717);color:#ffffff;\">
+                        <div style=\"font-size:13px;opacity:.92;\">PCM Notification</div>
+                        <div style=\"margin-top:4px;font-size:22px;font-weight:700;\">แจ้งเตือนสต็อกต่ำกว่าเกณฑ์</div>
+                    </td>
+                </tr>
+                <tr><td style=\"padding:20px 22px 10px 22px;\"><div style=\"font-size:16px;font-weight:700;color:#0f1f3a;\">{product_name}</div></td></tr>
+                <tr>
+                    <td style=\"padding:0 22px 12px 22px;\">
+                        <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;\">
+                            <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;width:42%;\">คงเหลือปัจจุบัน</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{stock} {unit}</td></tr>
+                            <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">จุดสั่งซื้อ (Safety)</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{safety_stock} {unit}</td></tr>
+                            <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">พื้นที่</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{location}</td></tr>
+                        </table>
+                    </td>
+                </tr>
+                {action_section}
+                <tr><td style=\"padding:12px 22px 22px 22px;background:#fafcff;color:#7a879e;font-size:12px;border-top:1px solid #edf1f7;\">อีเมลนี้ถูกส่งอัตโนมัติจากระบบ PCM</td></tr>
+            </table>
+        </td></tr>
+    </table>
+</body>
+</html>
+"""
+
+def build_periodic_alert_email_body(payload):
+    location_label = str(payload.get('location_label') or '-')
+    expiring_items = payload.get('expiring_items') or []
+    helmet_alerts = payload.get('helmet_alerts') or []
+
+    lines = [f"แจ้งเตือนประจำวัน [{location_label}]", '']
+    if expiring_items:
+        lines.append('รายการใกล้หมดอายุ:')
+        for item in expiring_items:
+            lines.append(f"- {item.get('name', '-')} ({item.get('category', '-')}) หมดอายุ {item.get('show_date', '-')}")
+    if helmet_alerts:
+        if expiring_items:
+            lines.append('')
+        lines.append('ครบกำหนดเปลี่ยนหมวกเซฟตี้:')
+        for alert in helmet_alerts:
+            lines.append(
+                f"- {alert.get('emp_name', '-')} ({alert.get('department', '-')}) | "
+                f"{alert.get('product_name', '-')} | เบิกล่าสุด {alert.get('show_date', '-')}"
+            )
+    if not expiring_items and not helmet_alerts:
+        lines.append('ไม่มีรายการแจ้งเตือนในวันนี้')
+    return '\n'.join(lines)
+
+def build_periodic_alert_email_html(payload):
+    location_label = escape(str(payload.get('location_label') or '-'))
+    expiring_items = payload.get('expiring_items') or []
+    helmet_alerts = payload.get('helmet_alerts') or []
+    generated_at = escape(str(payload.get('generated_at') or '-'))
+
+    expiry_rows = ''
+    for item in expiring_items:
+        expiry_rows += (
+            '<tr>'
+            f"<td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{escape(str(item.get('name') or '-'))}</td>"
+            f"<td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{escape(str(item.get('category') or '-'))}</td>"
+            f"<td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;white-space:nowrap;\">{escape(str(item.get('show_date') or '-'))}</td>"
+            '</tr>'
+        )
+
+    helmet_rows = ''
+    for alert in helmet_alerts:
+        helmet_rows += (
+            '<tr>'
+            f"<td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{escape(str(alert.get('emp_name') or '-'))}</td>"
+            f"<td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{escape(str(alert.get('department') or '-'))}</td>"
+            f"<td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{escape(str(alert.get('product_name') or '-'))}</td>"
+            f"<td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;white-space:nowrap;\">{escape(str(alert.get('show_date') or '-'))}</td>"
+            '</tr>'
+        )
+
+    expiry_section = ''
+    if expiry_rows:
+        expiry_section = (
+            '<tr><td style="padding:6px 22px 0 22px;font-size:14px;font-weight:700;color:#0f1f3a;">รายการใกล้หมดอายุ</td></tr>'
+            '<tr><td style="padding:4px 22px 8px 22px;">'
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">'
+            '<tr>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">สินค้า</th>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">หมวด</th>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">วันหมดอายุ</th>'
+            '</tr>'
+            f'{expiry_rows}'
+            '</table>'
+            '</td></tr>'
+        )
+
+    helmet_section = ''
+    if helmet_rows:
+        helmet_section = (
+            '<tr><td style="padding:6px 22px 0 22px;font-size:14px;font-weight:700;color:#0f1f3a;">ครบกำหนดเปลี่ยนหมวกเซฟตี้</td></tr>'
+            '<tr><td style="padding:4px 22px 8px 22px;">'
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">'
+            '<tr>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">พนักงาน</th>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">แผนก</th>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">รายการ</th>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">เบิกล่าสุด</th>'
+            '</tr>'
+            f'{helmet_rows}'
+            '</table>'
+            '</td></tr>'
+        )
+
+    no_alert_section = ''
+    if not expiry_rows and not helmet_rows:
+        no_alert_section = (
+            '<tr><td style="padding:14px 22px 10px 22px;">'
+            '<div style="background:#f8fbff;border:1px dashed #c6d7ee;border-radius:10px;padding:12px 14px;color:#304a68;font-size:13px;">'
+            'วันนี้ไม่มีรายการแจ้งเตือนของใกล้หมดอายุหรือหมวกเซฟตี้'
+            '</div>'
+            '</td></tr>'
+        )
+
+    action_link = build_email_link('admin_dashboard', module='stock')
+    action_section = ''
+    if action_link:
+        action_section = (
+            '<tr>'
+            '<td style="padding:4px 22px 18px 22px;">'
+            f'<a href="{escape(action_link)}" style="display:inline-block;background:#0b6cc7;color:#ffffff;text-decoration:none;padding:11px 16px;border-radius:9px;font-size:13px;font-weight:700;">เปิดหน้าแจ้งเตือนสต็อก</a>'
+            '</td>'
+            '</tr>'
+        )
+
+    return f"""<!doctype html>
+<html lang=\"th\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+    <title>แจ้งเตือนประจำวัน</title>
+</head>
+<body style=\"margin:0;padding:0;background:#f4f6fb;font-family:'Segoe UI',Tahoma,sans-serif;color:#243040;\">
+    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#f4f6fb;padding:20px 10px;\">
+        <tr><td align=\"center\">
+            <table role=\"presentation\" width=\"720\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:720px;width:100%;background:#ffffff;border:1px solid #dde3ef;border-radius:14px;overflow:hidden;\">
+                <tr>
+                    <td style=\"padding:18px 22px;background:linear-gradient(135deg,#0b6cc7,#0e91d8);color:#ffffff;\">
+                        <div style=\"font-size:13px;opacity:.92;\">PCM Notification</div>
+                        <div style=\"margin-top:4px;font-size:22px;font-weight:700;\">แจ้งเตือนประจำวัน [{location_label}]</div>
+                        <div style=\"margin-top:8px;font-size:13px;opacity:.95;\">เวลาสร้าง: {generated_at}</div>
+                    </td>
+                </tr>
+                {expiry_section}
+                {helmet_section}
+                {no_alert_section}
+                {action_section}
+                <tr><td style=\"padding:12px 22px 22px 22px;background:#fafcff;color:#7a879e;font-size:12px;border-top:1px solid #edf1f7;\">อีเมลนี้ถูกส่งอัตโนมัติจากระบบ PCM</td></tr>
+            </table>
+        </td></tr>
+    </table>
+</body>
+</html>
+"""
+
+# ==================== 📊 Stock Audit & Notification Functions ====================
+
+def get_notification_settings(admin_id):
+    """ดึงการตั้งค่าแจ้งเตือนจากบัญชี superadmin เพียงชุดเดียว"""
+    conn = get_db_connection()
+    try:
+        ensure_notification_settings_columns(conn)
+        settings = conn.execute(
+            'SELECT * FROM notification_settings WHERE admin_id = ?',
+            ('superadmin',)
+        ).fetchone()
+        if not settings:
+            # Return defaults if not configured
+            return {
+                'approval_email': True,
+                'approval_line': False,
+                'rejection_email': True,
+                'rejection_line': False,
+                'low_stock_email': True,
+                'low_stock_line': False,
+                'email_recipients': '',
+                'email_recipients_pc1': '',
+                'email_recipients_cc': ''
+            }
+        return dict(settings)
+    finally:
+        conn.close()
+
+def send_smart_notification(notification_type, message, location=None, role=None, email_body='', html_body='', recipients=None, admin_id=None):
+    """
+    ส่งแจ้งเตือนผ่าน Email ตามการตั้งค่า (LINE ถูกยกเลิกถาวร)
+    notification_type: 'approval', 'rejection', 'low_stock', 'withdrawal_confirmed', 'pending_request'
+    admin_id: ถ้าไม่ระบุ ให้ใช้ session.get('admin_id') หรือ 'superadmin'
+    """
+    # ใช้ค่ากลางของ superadmin เพียงชุดเดียวทั้งระบบ
+    admin_id = 'superadmin'
+    
+    settings = get_notification_settings(admin_id)
+    scope = resolve_notification_scope(location=location, role=role)
+    
+    # ตรวจสอบการตั้งค่าตามประเภท
+    setting_key_email = f'{notification_type}_email'
+    # ถ้าไม่มีคีย์เฉพาะประเภท ให้ยึดตามสวิตช์รวมที่มีอยู่ในหน้า settings
+    email_master_enabled = any(bool(settings.get(k, True)) for k in ('approval_email', 'rejection_email', 'low_stock_email'))
+
+    send_email = settings.get(setting_key_email, email_master_enabled)
+    
+    # ส่ง Email
+    if send_email:
+        try:
+            email_recipients = resolve_notification_email_recipients(
+                settings=settings,
+                location=location,
+                role=role,
+                recipients=recipients
+            )
+
+            # fallback: เพิ่มผู้รับจาก GA settings และ SMTP From เสมอ เพื่อป้องกันตั้งค่าผู้รับผิดปลายทาง
+            fallback_settings = get_settings_values(['ga_recipients_default', 'smtp_from'])
+            email_recipients.extend(parse_email_recipients(fallback_settings.get('ga_recipients_default', '')))
+            email_recipients.extend(parse_email_recipients(fallback_settings.get('smtp_from', '')))
+
+            email_recipients = list(dict.fromkeys([e for e in email_recipients if is_valid_email_address(e)]))
+            
+            if email_recipients:
+                subject = f'[PCM] แจ้งเตือน - {notification_type}'
+                sent, error = send_email_message(
+                    subject=subject,
+                    body=email_body or message,
+                    recipients=email_recipients,
+                    html_body=html_body
+                )
+                log_notification_delivery(
+                    admin_id=admin_id,
+                    notification_type=notification_type,
+                    scope=scope,
+                    channel='email',
+                    recipients=email_recipients,
+                    status='sent' if sent else 'failed',
+                    error_message=error,
+                    location=str(location or ''),
+                    role=str(role or '')
+                )
+            else:
+                log_notification_delivery(
+                    admin_id=admin_id,
+                    notification_type=notification_type,
+                    scope=scope,
+                    channel='email',
+                    recipients=[],
+                    status='failed',
+                    error_message='no-recipients',
+                    location=str(location or ''),
+                    role=str(role or '')
+                )
+        except Exception as e:
+            print(f'Error sending email notification: {e}')
+            log_notification_delivery(
+                admin_id=admin_id,
+                notification_type=notification_type,
+                scope=scope,
+                channel='email',
+                recipients=[],
+                status='failed',
+                error_message=str(e),
+                location=str(location or ''),
+                role=str(role or '')
+            )
+
+def get_stock_audit_data(product_id=None):
+    """
+    ดึงข้อมูล Stock Audit: ยอดเดิม + ยอดเบิก + คงเหลือ
+    """
+    conn = get_db_connection()
+    try:
+        product_columns = {row[1] for row in conn.execute("PRAGMA table_info(products)").fetchall()}
+        if 'is_active' in product_columns:
+            status_filter = " AND COALESCE(p.is_active, 1) = 1"
+        elif 'status' in product_columns:
+            status_filter = " AND p.status = 'Active'"
+        else:
+            status_filter = ""
+
+        # รองรับ action เบิกทั้งแบบเก่า/ใหม่ และหมวกเซฟตี้
+        withdrawal_filter = """
+            AND status = 'Approved'
+            AND (
+                action = 'Withdrawn'
+                OR action = 'ขอเบิกอุปกรณ์'
+                OR action LIKE 'เบิกหมวกเซฟตี้%'
+            )
+        """
+
+        if product_id:
+            # สำหรับ product เดียว
+            query = f'''
+                SELECT 
+                    p.id,
+                    p.code,
+                    p.name,
+                    '' AS name_eng,
+                    p.stock AS current_balance,
+                    p.unit,
+                    p.location,
+                    COALESCE((
+                        SELECT SUM(COALESCE(qty, 0))
+                        FROM transaction_logs
+                        WHERE product_id = p.id AND action = 'Received'
+                    ), 0) AS total_received,
+                    COALESCE((
+                        SELECT SUM(COALESCE(qty, 0))
+                        FROM transaction_logs
+                        WHERE product_id = p.id {withdrawal_filter}
+                    ), 0) AS total_withdrawn,
+                    COALESCE((
+                        SELECT COUNT(*)
+                        FROM transaction_logs
+                        WHERE product_id = p.id {withdrawal_filter}
+                    ), 0) AS withdraw_count,
+                    (
+                        SELECT MAX(timestamp)
+                        FROM transaction_logs
+                        WHERE product_id = p.id {withdrawal_filter}
+                    ) AS last_withdraw_at,
+                    COALESCE((
+                        SELECT SUM(COALESCE(qty, 0))
+                        FROM transaction_logs
+                        WHERE product_id = p.id AND action = 'Adjusted'
+                    ), 0) AS total_adjusted
+                FROM products p
+                WHERE p.id = ?
+                ORDER BY p.code ASC
+            '''
+            rows = conn.execute(query, (product_id,)).fetchall()
+        else:
+            # สำหรับทั้งหมด
+            query = f'''
+                SELECT 
+                    p.id,
+                    p.code,
+                    p.name,
+                    '' AS name_eng,
+                    p.stock AS current_balance,
+                    p.unit,
+                    p.location,
+                    COALESCE((
+                        SELECT SUM(COALESCE(qty, 0))
+                        FROM transaction_logs
+                        WHERE product_id = p.id AND action = 'Received'
+                    ), 0) AS total_received,
+                    COALESCE((
+                        SELECT SUM(COALESCE(qty, 0))
+                        FROM transaction_logs
+                        WHERE product_id = p.id {withdrawal_filter}
+                    ), 0) AS total_withdrawn,
+                    COALESCE((
+                        SELECT COUNT(*)
+                        FROM transaction_logs
+                        WHERE product_id = p.id {withdrawal_filter}
+                    ), 0) AS withdraw_count,
+                    (
+                        SELECT MAX(timestamp)
+                        FROM transaction_logs
+                        WHERE product_id = p.id {withdrawal_filter}
+                    ) AS last_withdraw_at,
+                    COALESCE((
+                        SELECT SUM(COALESCE(qty, 0))
+                        FROM transaction_logs
+                        WHERE product_id = p.id AND action = 'Adjusted'
+                    ), 0) AS total_adjusted
+                FROM products p
+                WHERE 1=1{status_filter}
+                ORDER BY p.code ASC
+            '''
+            rows = conn.execute(query).fetchall()
+        
+        # Process rows to calculate discrepancies
+        data = []
+        for row in rows:
+            current = dict(row)
+            current.setdefault('withdraw_count', 0)
+            current.setdefault('last_withdraw_at', None)
+            expected_balance = current['total_received'] - current['total_withdrawn'] + current['total_adjusted']
+            discrepancy = current['current_balance'] - expected_balance
+            current['expected_balance'] = expected_balance
+            current['discrepancy'] = discrepancy
+            current['status'] = '✅ OK' if discrepancy == 0 else f'⚠️ Mismatch ({discrepancy:+d})'
+            data.append(current)
+        
+        return data
+    finally:
+        conn.close()
+
+
+def get_stock_audit_available_years():
+    conn = get_db_connection()
+    try:
+        ts_expr = transaction_timestamp_expr('l')
+        rows = conn.execute(f'''
+            SELECT DISTINCT substr({ts_expr}, 1, 4) AS audit_year
+            FROM transaction_logs l
+            WHERE l.product_id IS NOT NULL
+              AND length(substr({ts_expr}, 1, 4)) = 4
+            ORDER BY audit_year DESC
+        ''').fetchall()
+    finally:
+        conn.close()
+
+    years = [int(row['audit_year']) for row in rows if str(row['audit_year']).isdigit()]
+    current_year = get_thailand_time().year
+    if current_year not in years:
+        years.insert(0, current_year)
+    return sorted(set(years), reverse=True)
+
+
+def iter_month_keys(start_year, start_month, end_year, end_month):
+    cursor = date(start_year, start_month, 1)
+    end_cursor = date(end_year, end_month, 1)
+    while cursor <= end_cursor:
+        yield cursor.strftime('%Y-%m')
+        if cursor.month == 12:
+            cursor = date(cursor.year + 1, 1, 1)
+        else:
+            cursor = date(cursor.year, cursor.month + 1, 1)
+
+
+def get_stock_audit_monthly_snapshot(selected_year, selected_month=None):
+    selected_year = int(selected_year)
+    today = get_thailand_time().date()
+    current_year = today.year
+    current_month = today.month
+    export_end_month = 12 if selected_year < current_year else current_month
+    if export_end_month < 1:
+        export_end_month = 1
+
+    if selected_month is None:
+        selected_month = export_end_month
+    selected_month = max(1, min(int(selected_month), export_end_month))
+
+    analysis_months = list(iter_month_keys(selected_year, 1, current_year, current_month))
+    if not analysis_months:
+        analysis_months = [f'{selected_year}-01']
+    analysis_months_desc = list(reversed(analysis_months))
+    month_key = f'{selected_year}-{selected_month:02d}'
+
+    conn = get_db_connection()
+    try:
+        product_columns = {row[1] for row in conn.execute("PRAGMA table_info(products)").fetchall()}
+        if 'is_active' in product_columns:
+            status_filter = " AND COALESCE(p.is_active, 1) = 1"
+        elif 'status' in product_columns:
+            status_filter = " AND p.status = 'Active'"
+        else:
+            status_filter = ""
+
+        products = conn.execute(f'''
+            SELECT
+                p.id,
+                p.code,
+                p.name,
+                COALESCE(p.category, '') AS category,
+                COALESCE(p.location, '') AS location,
+                COALESCE(p.unit, '') AS unit,
+                COALESCE(p.safety_stock, 0) AS safety_stock,
+                COALESCE(p.stock, 0) AS current_balance
+            FROM products p
+            WHERE 1=1{status_filter}
+            ORDER BY p.location ASC, p.code ASC
+        ''').fetchall()
+
+        ts_expr = transaction_timestamp_expr('l')
+        log_rows = conn.execute(f'''
+            SELECT
+                l.product_id,
+                l.action,
+                l.status,
+                COALESCE(l.qty, 0) AS qty,
+                {ts_expr} AS normalized_ts
+            FROM transaction_logs l
+            WHERE l.product_id IS NOT NULL
+              AND substr({ts_expr}, 1, 10) >= ?
+              AND (
+                    l.action = 'Received'
+                    OR l.action = 'Adjusted'
+                    OR (
+                        l.status = 'Approved'
+                        AND (
+                            l.action = 'Withdrawn'
+                            OR l.action = 'ขอเบิกอุปกรณ์'
+                            OR l.action LIKE 'เบิกหมวกเซฟตี้%'
+                        )
+                    )
+              )
+            ORDER BY normalized_ts DESC
+        ''', (f'{selected_year}-01-01',)).fetchall()
+    finally:
+        conn.close()
+
+    monthly_metrics = defaultdict(lambda: {
+        'received': 0,
+        'adjusted': 0,
+        'withdrawn': 0,
+        'daily_withdrawals': defaultdict(int),
+        'last_received_at': ''
+    })
+
+    for row in log_rows:
+        normalized_ts = str(row['normalized_ts'] or '').strip()
+        if len(normalized_ts) < 10:
+            continue
+
+        row_month_key = normalized_ts[:7]
+        try:
+            day_number = int(normalized_ts[8:10])
+        except ValueError:
+            day_number = 0
+
+        metrics = monthly_metrics[(row['product_id'], row_month_key)]
+        qty = int(row['qty'] or 0)
+        action = str(row['action'] or '').strip()
+
+        if action == 'Received':
+            metrics['received'] += qty
+            if normalized_ts > metrics['last_received_at']:
+                metrics['last_received_at'] = normalized_ts[:10]
+        elif action == 'Adjusted':
+            metrics['adjusted'] += qty
+        else:
+            metrics['withdrawn'] += qty
+            if 1 <= day_number <= 31:
+                metrics['daily_withdrawals'][day_number] += qty
+
+    rows = []
+    for index, product in enumerate(products, start=1):
+        running_balance = int(product['current_balance'] or 0)
+        month_snapshot = None
+
+        for reverse_month_key in analysis_months_desc:
+            metrics = monthly_metrics[(product['id'], reverse_month_key)]
+            closing_balance = running_balance
+            opening_balance = closing_balance - metrics['received'] - metrics['adjusted'] + metrics['withdrawn']
+
+            if reverse_month_key == month_key:
+                month_snapshot = {
+                    'opening_balance': opening_balance,
+                    'received': metrics['received'],
+                    'adjusted': metrics['adjusted'],
+                    'total': opening_balance + metrics['received'] + metrics['adjusted'],
+                    'withdrawn': metrics['withdrawn'],
+                    'closing_balance': closing_balance,
+                    'last_received_at': metrics['last_received_at'],
+                    'order_qty': max(int(product['safety_stock'] or 0) - closing_balance, 0),
+                    'daily_withdrawals': dict(metrics['daily_withdrawals'])
+                }
+                break
+
+            running_balance = opening_balance
+
+        if month_snapshot is None:
+            current_balance = int(product['current_balance'] or 0)
+            month_snapshot = {
+                'opening_balance': current_balance,
+                'received': 0,
+                'adjusted': 0,
+                'total': current_balance,
+                'withdrawn': 0,
+                'closing_balance': current_balance,
+                'last_received_at': '',
+                'order_qty': max(int(product['safety_stock'] or 0) - current_balance, 0),
+                'daily_withdrawals': {}
+            }
+
+        rows.append({
+            'no': index,
+            'id': product['id'],
+            'code': product['code'],
+            'name': product['name'],
+            'category': product['category'],
+            'location': product['location'],
+            'unit': product['unit'],
+            'safety_stock': int(product['safety_stock'] or 0),
+            **month_snapshot,
+        })
+
+    summary = {
+        'total_products': len(rows),
+        'total_opening': sum(item['opening_balance'] for item in rows),
+        'total_received': sum(item['received'] for item in rows),
+        'total_withdrawn': sum(item['withdrawn'] for item in rows),
+        'total_closing': sum(item['closing_balance'] for item in rows),
+        'items_to_order': sum(1 for item in rows if item['order_qty'] > 0),
+        'total_order_qty': sum(item['order_qty'] for item in rows),
+    }
+
+    month_options = [
+        {
+            'value': month,
+            'label': datetime(selected_year, month, 1).strftime('%B'),
+            'short_label': datetime(selected_year, month, 1).strftime('%b')
+        }
+        for month in range(1, export_end_month + 1)
+    ]
+
+    return {
+        'selected_year': selected_year,
+        'selected_month': selected_month,
+        'month_key': month_key,
+        'month_name': datetime(selected_year, selected_month, 1).strftime('%B'),
+        'month_short_name': datetime(selected_year, selected_month, 1).strftime('%b'),
+        'rows': rows,
+        'summary': summary,
+        'month_options': month_options,
+    }
+
+
+def export_stock_audit_monthly_excel(selected_year):
+    selected_year = int(selected_year)
+    today = get_thailand_time().date()
+    current_year = today.year
+    current_month = today.month
+    export_end_month = 12 if selected_year < current_year else current_month
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        workbook = writer.book
+        title_format = workbook.add_format({
+            'bold': True,
+            'font_size': 16,
+            'align': 'center',
+            'valign': 'vcenter',
+            'bg_color': '#D9EAF7',
+            'border': 1
+        })
+        header_format = workbook.add_format({
+            'bold': True,
+            'align': 'center',
+            'valign': 'vcenter',
+            'bg_color': '#F4CCCC',
+            'border': 1,
+            'text_wrap': True
+        })
+        month_header_format = workbook.add_format({
+            'bold': True,
+            'align': 'center',
+            'valign': 'vcenter',
+            'bg_color': '#FFF2CC',
+            'border': 1
+        })
+        cell_format = workbook.add_format({'border': 1})
+        number_format = workbook.add_format({'border': 1, 'align': 'center'})
+        text_center_format = workbook.add_format({'border': 1, 'align': 'center'})
+        low_stock_format = workbook.add_format({'border': 1, 'align': 'center', 'bg_color': '#FCE5CD'})
+
+        column_widths = {
+            0: 6,
+            1: 14,
+            2: 38,
+            3: 12,
+            4: 12,
+            5: 12,
+            6: 12,
+            7: 12,
+            8: 12,
+            9: 16,
+            10: 12,
+            11: 12,
+            12: 10,
+        }
+
+        for month_number in range(1, export_end_month + 1):
+            month_payload = get_stock_audit_monthly_snapshot(selected_year, month_number)
+            month_name = month_payload['month_name']
+            sheet_name = month_payload['month_short_name']
+            worksheet = workbook.add_worksheet(sheet_name)
+            writer.sheets[sheet_name] = worksheet
+
+            total_columns = 44
+            worksheet.merge_range(0, 0, 0, total_columns - 1, f'Stock Audit Month {month_name} {selected_year}', title_format)
+            worksheet.set_row(0, 26)
+            worksheet.set_row(3, 26)
+            worksheet.set_row(4, 22)
+
+            top_headers = [
+                'No.', 'รหัสสินค้า', 'รายการ / List', 'ยอดยกมา', 'รับเข้า', 'ปรับยอด',
+                'รวม', 'ยอดเบิก', 'คงเหลือ', 'วันที่รับเข้า', 'Safety stock', 'สั่งซื้อ', 'หน่วย'
+            ]
+            for col_idx, label in enumerate(top_headers):
+                worksheet.write(3, col_idx, label, header_format)
+            worksheet.merge_range(3, 13, 3, 43, f'Month {month_name} {selected_year}', month_header_format)
+            for day in range(1, 32):
+                worksheet.write(4, 12 + day, day, month_header_format)
+
+            for col_idx, width in column_widths.items():
+                worksheet.set_column(col_idx, col_idx, width)
+            worksheet.set_column(13, 43, 5)
+
+            row_cursor = 5
+            for item in month_payload['rows']:
+                worksheet.write_number(row_cursor, 0, item['no'], number_format)
+                worksheet.write(row_cursor, 1, item['code'], cell_format)
+                worksheet.write(row_cursor, 2, item['name'], cell_format)
+                worksheet.write_number(row_cursor, 3, item['opening_balance'], number_format)
+                worksheet.write_number(row_cursor, 4, item['received'], number_format)
+                worksheet.write_number(row_cursor, 5, item['adjusted'], number_format)
+                worksheet.write_number(row_cursor, 6, item['total'], number_format)
+                worksheet.write_number(row_cursor, 7, item['withdrawn'], number_format)
+                worksheet.write_number(row_cursor, 8, item['closing_balance'], number_format)
+                worksheet.write(row_cursor, 9, item['last_received_at'], text_center_format)
+                worksheet.write_number(row_cursor, 10, item['safety_stock'], number_format)
+                worksheet.write_number(
+                    row_cursor,
+                    11,
+                    item['order_qty'],
+                    low_stock_format if item['order_qty'] > 0 else number_format
+                )
+                worksheet.write(row_cursor, 12, item['unit'], text_center_format)
+
+                for day in range(1, 32):
+                    day_value = item['daily_withdrawals'].get(day, '')
+                    if day_value == '':
+                        worksheet.write_blank(row_cursor, 12 + day, None, cell_format)
+                    else:
+                        worksheet.write_number(row_cursor, 12 + day, day_value, number_format)
+
+                row_cursor += 1
+
+            if row_cursor > 5:
+                worksheet.autofilter(4, 0, row_cursor - 1, total_columns - 1)
+            worksheet.freeze_panes(5, 0)
+
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f'Stock_Audit_{selected_year}.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
 
 # ==========================================
 # 👤 ส่วนของพนักงาน (USER & CART SYSTEM)
@@ -985,7 +2515,6 @@ def index():
                 conn.close()
                 return redirect(url_for('user_services', emp_id=emp_id))
 
-            # 4. ป้องกันล็อกอินซ้ำ (ปรับปรุงใหม่: เช็คเวลา last_seen)
             if is_user_currently_locked(user):
                 flash(f'❌ รหัส {emp_id} กำลังใช้งานอยู่ (ต้อง Logout หรือรอ 5 นาที)', 'user_error')
                 conn.close()
@@ -1305,6 +2834,7 @@ def ga_request_portal():
         email_sent, email_error = send_email_message(
             subject=f"[PCM] GA Request ใหม่ {target_team} - {title}",
             body=build_ga_request_email_body(request_payload),
+            html_body=build_ga_request_email_html(request_payload),
             recipients=recipients,
             attachment_path=attachment_absolute_path
         )
@@ -1398,12 +2928,10 @@ def add_to_cart():
             return redirect(url_for('menu', emp_id=emp_id, search=current_search, category=current_cat))
 
         product_info = manager.get_product_unit_info(product_id)
-        if qty_unit == 'package':
-            qty_to_reserve = int(qty * product_info['conversion_rate'])
-            requested_unit_label = product_info.get('package_unit') or product['unit'] or 'แพ็ก'
-        else:
-            qty_to_reserve = qty
-            requested_unit_label = product_info.get('base_unit') or 'เม็ด'
+        # บังคับเบิกยาแบบหน่วยย่อยเท่านั้น
+        qty_unit = 'base'
+        qty_to_reserve = qty
+        requested_unit_label = product_info.get('base_unit') or 'เม็ด'
 
         stock_check = manager.check_stock_available(product_id, qty_to_reserve)
         can_add = stock_check['available']
@@ -1411,7 +2939,8 @@ def add_to_cart():
         qty_unit = 'package'
         qty_to_reserve = qty
         requested_unit_label = product['unit']
-        can_add = product['stock'] >= qty
+        available_stock = max(0, int(product['stock'] or 0) - int(product['reserved_stock'] or 0))
+        can_add = available_stock >= qty
 
     if can_add:
         if split_medicine:
@@ -1424,15 +2953,15 @@ def add_to_cart():
 
             conn.execute('UPDATE products SET reserved_stock = reserved_stock + ? WHERE id = ?', (qty_to_reserve, product_id))
             conn.commit()
-            success_msg = f'🛒 เพิ่ม {product["name"]} ({qty} {requested_unit_label}) เรียบร้อย'
+            success_msg = f'🛒 เพิ่ม {product["name"]} ({qty_to_reserve} {requested_unit_label} - หน่วยย่อย) เรียบร้อย'
             if is_ajax:
                 conn.close()
                 return jsonify({'success': True, 'message': success_msg})
             flash(success_msg, 'success')
         else:
             stock_update = conn.execute(
-                'UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ? AND stock >= ?',
-                (qty, qty_to_reserve, product_id, qty)
+                'UPDATE products SET reserved_stock = reserved_stock + ? WHERE id = ? AND (stock - reserved_stock) >= ?',
+                (qty_to_reserve, product_id, qty)
             )
             if stock_update.rowcount == 0:
                 conn.rollback()
@@ -1514,11 +3043,8 @@ def api_preview_withdrawal():
         manager = UnitConversionManager(conn)
         info = manager.get_product_unit_info(product_id)
         
-        # Convert to base units if user specified package units
-        if qty_unit == 'package':
-            qty_base_unit = int(qty_requested * info['conversion_rate'])
-        else:
-            qty_base_unit = qty_requested
+        # บังคับ preview สำหรับยาแบบหน่วยย่อยเท่านั้น
+        qty_base_unit = qty_requested
         
         # Calculate withdrawal
         result = manager.calculate_withdrawal(product_id, qty_base_unit)
@@ -1567,7 +3093,7 @@ def remove_from_cart():
     if is_medicine:
         conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (qty, cart_item['product_id']))
     else:
-        conn.execute('UPDATE products SET stock = stock + ?, reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (qty, qty, cart_item['product_id']))
+        conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (qty, cart_item['product_id']))
     conn.commit()
 
     if is_ajax:
@@ -1582,10 +3108,24 @@ def remove_from_cart():
 def confirm_withdrawal():
     emp_id = (request.form.get('emp_id') or '').strip()
     symptom = (request.form.get('symptom') or '').strip()
+    receive_mode = normalize_request_receive_mode(request.form.get('receive_mode'))
+    requested_receive_at = parse_requested_receive_at(request.form.get('receive_at'))
 
     if not is_valid_user_session(emp_id):
         flash('⚠️ session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่', 'danger')
         return redirect(url_for('index'))
+
+    if receive_mode == 'scheduled':
+        if not requested_receive_at:
+            flash('❌ กรุณาระบุวันและเวลารับของสำหรับการเบิกล่วงหน้า', 'danger')
+            return redirect(url_for('menu', emp_id=emp_id, open_cart='true'))
+        if datetime.strptime(requested_receive_at, '%Y-%m-%d %H:%M:%S') <= get_thailand_time():
+            flash('❌ วันเวลารับของล่วงหน้าต้องมากกว่าเวลาปัจจุบัน', 'danger')
+            return redirect(url_for('menu', emp_id=emp_id, open_cart='true'))
+    else:
+        requested_receive_at = ''
+
+    receive_plan_text = build_receive_plan_text(receive_mode, requested_receive_at)
 
     conn = get_db_connection()
     start_write_transaction(conn)
@@ -1613,6 +3153,7 @@ def confirm_withdrawal():
         return redirect(url_for('menu', emp_id=emp_id, open_cart='true'))
 
     msg_list = [f"🚀 *มีคำขอเบิกใหม่* 🚀\n👤 ผู้เบิก: {user['name']}\n📍 แผนก: {user['department']} ({user['location']})"]
+    notification_items = []
     if has_medicine:
         msg_list.append(f"🩺 อาการ: {symptom}")
     
@@ -1663,22 +3204,23 @@ def confirm_withdrawal():
                 if existing_helmet:
                     conn.execute('''
                         UPDATE transaction_logs 
-                        SET qty = ?, qty_base_unit = ?, timestamp = ?, status = 'Pending', note = ?
+                        SET qty = ?, qty_base_unit = ?, timestamp = ?, status = 'Pending', note = ?,
+                            request_receive_mode = ?, requested_receive_at = ?
                         WHERE id = ?
-                    ''', (result_qty, item['qty'], thai_now, result_note, existing_helmet['id']))
+                    ''', (result_qty, item['qty'], thai_now, result_note, receive_mode, requested_receive_at or None, existing_helmet['id']))
                 else:
                     conn.execute('''
-                        INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note) 
-                        VALUES (?, ?, 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)', ?, ?, ?, 'Pending', ?, ?)
-                    ''', (emp_id, item['product_id'], result_qty, item['qty'], result_pkg_qty, thai_now, result_note))
+                        INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note, request_receive_mode, requested_receive_at) 
+                        VALUES (?, ?, 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)', ?, ?, ?, 'Pending', ?, ?, ?, ?)
+                    ''', (emp_id, item['product_id'], result_qty, item['qty'], result_pkg_qty, thai_now, result_note, receive_mode, requested_receive_at or None))
             else:
                 result_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
                 if has_medicine and is_medicine:
                     result_note = f"อาการ: {symptom}" + (f" | {result_note}" if result_note else "")
                 conn.execute('''
-                    INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note) 
-                    VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, ?, ?, 'Pending', ?, ?)
-                ''', (emp_id, item['product_id'], result_qty, item['qty'], result_pkg_qty, thai_now, result_note))
+                    INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note, request_receive_mode, requested_receive_at) 
+                    VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, ?, ?, 'Pending', ?, ?, ?, ?)
+                ''', (emp_id, item['product_id'], result_qty, item['qty'], result_pkg_qty, thai_now, result_note, receive_mode, requested_receive_at or None))
             
             log_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
             display_qty = item['qty']
@@ -1686,6 +3228,12 @@ def confirm_withdrawal():
             if is_medicine:
                 display_unit = item['base_unit'] if 'base_unit' in item.keys() and item['base_unit'] else 'เม็ด'
             msg_list.append(f"📦 {item_name}\n   🔹 จำนวน: {display_qty} {display_unit}\n   ℹ️ {log_note}")
+            notification_items.append({
+                'name': item_name,
+                'qty': display_qty,
+                'unit': display_unit,
+                'note': log_note
+            })
             
         except Exception as e:
             conn.rollback()
@@ -1693,11 +3241,18 @@ def confirm_withdrawal():
             flash(f'❌ ไม่สามารถยืนยันการเบิกได้: {str(e)}', 'danger')
             return redirect(url_for('menu', emp_id=emp_id, open_cart='true'))
 
-    # ปลด reserved_stock ออกจากรายการที่ยืนยันแล้ว ก่อนล้างตะกร้า
+    # ปลด reserved_stock เฉพาะยาที่ตัดสต็อกจริงแล้วตอน confirm
     conn.execute('''
         UPDATE products
         SET reserved_stock = MAX(0, reserved_stock - COALESCE((
-            SELECT SUM(c.qty) FROM carts c WHERE c.emp_id = ? AND c.product_id = products.id
+            SELECT SUM(c.qty)
+            FROM carts c
+            JOIN products p2 ON p2.id = c.product_id
+            WHERE c.emp_id = ?
+              AND c.product_id = products.id
+              AND p2.base_unit IS NOT NULL AND TRIM(p2.base_unit) != ''
+              AND p2.package_unit IS NOT NULL AND TRIM(p2.package_unit) != ''
+              AND COALESCE(p2.conversion_rate, 1) > 1
         ), 0))
         WHERE id IN (SELECT product_id FROM carts WHERE emp_id = ?)
     ''', (emp_id, emp_id))
@@ -1707,8 +3262,29 @@ def confirm_withdrawal():
     conn.commit()
     conn.close()
 
-    # ส่งข้อความเข้า Line ตามกลุ่มของผู้เบิก
-    send_line_message("\n".join(msg_list), location=(user['location'] if user and 'location' in user.keys() else ''))
+    msg_list.append(f"📥 การรับของ: {receive_plan_text}")
+
+    withdrawal_email_payload = {
+        'requester_name': user['name'] if user and 'name' in user.keys() else '-',
+        'emp_id': emp_id,
+        'department': user['department'] if user and 'department' in user.keys() else '-',
+        'location': user['location'] if user and 'location' in user.keys() else '-',
+        'symptom': symptom,
+        'receive_plan': receive_plan_text,
+        'created_at': thai_now,
+        'items': notification_items,
+    }
+
+    # 📧 ส่งแจ้งเตือนผ่าน EMAIL & LINE ตามการตั้งค่า (superadmin เป็นค่าเริ่มต้น)
+    withdrawal_msg = "\n".join(msg_list)
+    send_smart_notification(
+        notification_type='withdrawal_confirmed',
+        message=withdrawal_msg,
+        location=(user['location'] if user and 'location' in user.keys() else ''),
+        email_body=build_withdrawal_email_body(withdrawal_email_payload),
+        html_body=build_withdrawal_email_html(withdrawal_email_payload),
+        admin_id='superadmin'
+    )
     
     flash('✅ ส่งคำขอเรียบร้อย! ระบบบันทึกรอบการเบิกหมวกเซฟตี้ให้คุณแล้ว', 'success')
     return redirect(url_for('menu', emp_id=emp_id))
@@ -1743,7 +3319,8 @@ def update_cart_qty():
             stock_check = manager.check_stock_available(item['product_id'], new_qty)
             can_update = stock_check['available']
         else:
-            can_update = (diff <= 0) or (product and product['stock'] >= diff)
+            available_stock = max(0, int(product['stock'] or 0) - int(product['reserved_stock'] or 0)) if product else 0
+            can_update = (diff <= 0) or available_stock >= diff
 
         if can_update:
             if is_medicine:
@@ -1753,16 +3330,16 @@ def update_cart_qty():
             else:
                 if diff > 0:
                     stock_update = conn.execute(
-                        'UPDATE products SET stock = stock - ?, reserved_stock = reserved_stock + ? WHERE id = ? AND stock >= ?',
-                        (diff, diff, item['product_id'], diff)
+                        'UPDATE products SET reserved_stock = reserved_stock + ? WHERE id = ? AND (stock - reserved_stock) >= ?',
+                        (diff, item['product_id'], diff)
                     )
                     if stock_update.rowcount == 0:
                         conn.rollback()
                         conn.close()
                         return jsonify({'success': False, 'message': 'ของในคลังไม่พอ'}), 409
                 else:
-                    conn.execute('UPDATE products SET stock = stock - ?, reserved_stock = MAX(0, reserved_stock + ?) WHERE id = ?', 
-                                 (diff, diff, item['product_id']))
+                    conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock + ?) WHERE id = ?', 
+                                 (diff, item['product_id']))
                 conn.execute('UPDATE carts SET qty = ? WHERE id = ? AND emp_id = ?', (new_qty, cart_id, emp_id))
             conn.commit()
             res = {'success': True}
@@ -1816,7 +3393,8 @@ def api_get_history():
     ).fetchone()[0]
 
     rows = conn.execute('''
-        SELECT l.id, l.action, l.qty, l.qty_base_unit, l.status, l.note, l.timestamp,
+         SELECT l.id, l.action, l.qty, l.qty_base_unit, l.status, l.note, l.timestamp,
+             l.request_receive_mode, l.requested_receive_at,
                p.name as product_name, p.unit, p.category, p.base_unit,
                p.package_unit, p.conversion_rate
         FROM transaction_logs l
@@ -1840,6 +3418,7 @@ def api_get_history():
             symptom = parts[0].replace('อาการ: ', '', 1)
         r['is_split_medicine'] = is_med
         r['symptom'] = symptom
+        r['receive_plan_text'] = build_receive_plan_text(r.get('request_receive_mode'), r.get('requested_receive_at'))
         r['display_qty'] = r['qty_base_unit'] if is_med and r.get('qty_base_unit') else r['qty']
         r['display_unit'] = (r['base_unit'] or 'เม็ด') if is_med and r.get('qty_base_unit') else (r['unit'] or '')
         r['timestamp'] = format_timestamp(r.get('timestamp', ''))
@@ -2010,6 +3589,9 @@ def admin_dashboard(module):
         role_log_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')"
 
     selected_loc = request.args.get('log_loc', '') 
+    selected_pending_receive = request.args.get('pending_receive', '').strip().lower()
+    if selected_pending_receive not in ('', 'immediate', 'scheduled'):
+        selected_pending_receive = ''
     super_admin_filter = ""
     if role == 'superadmin':
         if selected_loc == 'PC1':
@@ -2018,6 +3600,11 @@ def admin_dashboard(module):
             super_admin_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')"
     
     final_log_filter = role_log_filter + super_admin_filter
+    pending_receive_filter = ""
+    if selected_pending_receive == 'immediate':
+        pending_receive_filter = " AND COALESCE(l.request_receive_mode, 'immediate') = 'immediate'"
+    elif selected_pending_receive == 'scheduled':
+        pending_receive_filter = " AND COALESCE(l.request_receive_mode, 'immediate') = 'scheduled'"
 
     ga_selected_loc = request.args.get('ga_loc', '')
     ga_role_filter = ""
@@ -2093,7 +3680,7 @@ def admin_dashboard(module):
         FROM transaction_logs l
         LEFT JOIN users u ON l.emp_id = u.emp_id
         LEFT JOIN products p ON l.product_id = p.id
-        WHERE l.status = 'Pending' {role_log_filter} 
+        WHERE l.status = 'Pending' {role_log_filter} {pending_receive_filter}
         ORDER BY l.timestamp ASC
     '''
     pending_logs = conn.execute(pending_query).fetchall()
@@ -2172,10 +3759,63 @@ def admin_dashboard(module):
                            role=role,
                            admin_module=admin_module,
                            selected_loc=selected_loc,
+                           selected_pending_receive=selected_pending_receive,
                            ga_requests=ga_requests,
                            ga_pending_count=ga_pending_count,
                            ga_selected_loc=ga_selected_loc,
                            ga_status_options=GA_REQUEST_STATUS_OPTIONS)
+
+@app.route('/admin/stock_audit')
+def stock_audit():
+    """📊 Stock Audit Report"""
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('index'))
+    
+    product_id = request.args.get('product_id', type=int)
+    popup_mode = str(request.args.get('popup', '')).strip().lower() in ('1', 'true', 'yes', 'on')
+    available_years = get_stock_audit_available_years()
+    selected_year = request.args.get('year', type=int) or available_years[0]
+    selected_month = request.args.get('month', type=int)
+
+    if request.args.get('format') == 'xlsx':
+        return export_stock_audit_monthly_excel(selected_year)
+
+    monthly_payload = get_stock_audit_monthly_snapshot(selected_year, selected_month)
+    audit_rows = monthly_payload['rows']
+    active_day_count = calendar.monthrange(monthly_payload['selected_year'], monthly_payload['selected_month'])[1]
+    if product_id:
+        audit_rows = [item for item in audit_rows if item['id'] == product_id]
+    
+    if request.args.get('format') == 'json':
+        return jsonify({
+            'data': audit_rows,
+            'month': monthly_payload['selected_month'],
+            'year': monthly_payload['selected_year']
+        })
+
+    summary = monthly_payload['summary'].copy()
+    if product_id:
+        summary = {
+            'total_products': len(audit_rows),
+            'total_opening': sum(item['opening_balance'] for item in audit_rows),
+            'total_received': sum(item['received'] for item in audit_rows),
+            'total_withdrawn': sum(item['withdrawn'] for item in audit_rows),
+            'total_closing': sum(item['closing_balance'] for item in audit_rows),
+            'items_to_order': sum(1 for item in audit_rows if item['order_qty'] > 0),
+            'total_order_qty': sum(item['order_qty'] for item in audit_rows),
+        }
+    
+    return render_template('stock_audit.html',
+                          audit_rows=audit_rows,
+                          summary=summary,
+                          product_id=product_id,
+                          popup_mode=popup_mode,
+                          available_years=available_years,
+                          selected_year=monthly_payload['selected_year'],
+                          available_months=monthly_payload['month_options'],
+                          selected_month=monthly_payload['selected_month'],
+                          selected_month_name=monthly_payload['month_name'],
+                          active_day_count=active_day_count)
 
 @app.route('/admin/update_ga_request/<int:request_id>', methods=['POST'])
 def update_ga_request(request_id):
@@ -2230,6 +3870,16 @@ def update_ga_request(request_id):
                     'id': ga_request['id'],
                     'title': ga_request['title'],
                     'handled_by': handled_by,
+                },
+                new_status,
+                admin_note
+            ),
+            html_body=build_ga_status_email_html(
+                {
+                    'id': ga_request['id'],
+                    'title': ga_request['title'],
+                    'handled_by': handled_by,
+                    'emp_id': ga_request['emp_id'],
                 },
                 new_status,
                 admin_note
@@ -2314,8 +3964,41 @@ def daily_alert():
                 msg += f"👤 {alert['emp_name']} ({alert['department']})\n📦 {alert['product_name']}\n📅 เบิกเมื่อ: {alert['timestamp']}\n──────────────\n"
 
         if msg:
-            send_line_message(msg.strip(), location=location_key)
-            sent_messages.append(f"[{location_label}] {msg[:80]}...")
+            exp_payload = []
+            for item in loc_expiry:
+                date_parts = item['formatted_expiry'].split('-')
+                show_date = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}" if len(date_parts) == 3 else item['formatted_expiry']
+                exp_payload.append({
+                    'name': item['name'],
+                    'category': item['category'],
+                    'show_date': show_date
+                })
+
+            helmet_payload = []
+            for alert in loc_helmets:
+                helmet_payload.append({
+                    'emp_name': alert['emp_name'],
+                    'department': alert['department'],
+                    'product_name': alert['product_name'],
+                    'show_date': alert['timestamp']
+                })
+
+            periodic_payload = {
+                'location_label': location_label,
+                'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'expiring_items': exp_payload,
+                'helmet_alerts': helmet_payload,
+            }
+
+            send_smart_notification(
+                notification_type='low_stock',
+                message=msg.strip(),
+                location=location_label,
+                email_body=build_periodic_alert_email_body(periodic_payload),
+                html_body=build_periodic_alert_email_html(periodic_payload),
+                admin_id='superadmin'
+            )
+            sent_messages.append(f"[{location_label}] sent")
 
     if sent_messages:
         return f"Alert sent: {'|'.join(sent_messages)}", 200
@@ -2328,6 +4011,9 @@ def get_pending_requests():
         return "Unauthorized", 401
     
     role = session.get('admin_role', 'superadmin')
+    receive_mode = request.args.get('receive_mode', '').strip().lower()
+    if receive_mode not in ('', 'immediate', 'scheduled'):
+        receive_mode = ''
     conn = get_db_connection()
     
     # กรองตามสิทธิ์ Admin (PC1 / CC)
@@ -2337,13 +4023,19 @@ def get_pending_requests():
     elif role == 'admin_cc':
         role_log_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')"
 
+    receive_filter = ""
+    if receive_mode == 'immediate':
+        receive_filter = " AND COALESCE(l.request_receive_mode, 'immediate') = 'immediate'"
+    elif receive_mode == 'scheduled':
+        receive_filter = " AND COALESCE(l.request_receive_mode, 'immediate') = 'scheduled'"
+
     query = f'''
         SELECT l.*, u.name as emp_name, u.department,
                p.name as product_name, p.unit, p.category, p.base_unit, p.package_unit, p.conversion_rate
         FROM transaction_logs l
         LEFT JOIN users u ON l.emp_id = u.emp_id
         LEFT JOIN products p ON l.product_id = p.id
-        WHERE l.status = 'Pending' {role_log_filter} 
+        WHERE l.status = 'Pending' {role_log_filter} {receive_filter}
         ORDER BY l.timestamp ASC
     '''
     
@@ -2445,9 +4137,16 @@ def approve_request(log_id):
             return redirect(url_for('admin_dashboard', module='stock'))
 
         # สำหรับยาแบบแยกหน่วย: products.stock ถูกลดแล้วตอน confirm (apply_withdrawal)
-        # สำหรับรายการอื่น: ต้องลด products.stock ตอน approve
+        # สำหรับรายการอื่น: ต้องลด products.stock ตอน approve และปลด reservation พร้อมกัน
         if not is_split_med:
-            conn.execute('UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?', (qty_to_withdraw, product_id))
+            stock_update = conn.execute(
+                'UPDATE products SET stock = MAX(0, stock - ?), reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ? AND stock >= ?',
+                (qty_to_withdraw, qty_to_withdraw, product_id, qty_to_withdraw)
+            )
+            if stock_update.rowcount == 0:
+                conn.rollback()
+                flash('❌ สต็อกปัจจุบันไม่พอสำหรับการอนุมัติ', 'danger')
+                return redirect(url_for('admin_dashboard', module='stock'))
         conn.execute('UPDATE products SET withdraw = withdraw + ? WHERE id = ?', (qty_to_withdraw, product_id))
         conn.commit()
 
@@ -2468,7 +4167,34 @@ def approve_request(log_id):
             f"🧾 ผู้อนุมัติ: {admin_label}\n"
             f"🕒 เวลาอนุมัติ: {thai_now}"
         )
-        send_line_message(approval_message, location=(user_info['location'] if user_info else ''), role=role)
+        # 📧 ส่งแจ้งเตือนผ่าน EMAIL & LINE ตามการตั้งค่า
+        send_smart_notification(
+            notification_type='approval',
+            message=approval_message,
+            location=(user_info['location'] if user_info else ''),
+            role=role,
+            email_body=build_approval_email_body({
+                'requester_name': user_info['name'] if user_info else log['emp_id'],
+                'department': user_info['department'] if user_info else '-',
+                'location': user_info['location'] if user_info else '-',
+                'product_name': product_info['name'] if product_info else product_id,
+                'qty': approved_qty,
+                'unit': approved_unit,
+                'approver': admin_label,
+                'approved_at': thai_now,
+            }),
+            html_body=build_approval_email_html({
+                'requester_name': user_info['name'] if user_info else log['emp_id'],
+                'department': user_info['department'] if user_info else '-',
+                'location': user_info['location'] if user_info else '-',
+                'product_name': product_info['name'] if product_info else product_id,
+                'qty': approved_qty,
+                'unit': approved_unit,
+                'approver': admin_label,
+                'approved_at': thai_now,
+            }),
+            admin_id='superadmin'
+        )
 
         flash('✅ อนุมัติและตัดสต็อกแบบ FIFO เรียบร้อยแล้ว', 'success')
         return redirect(url_for('admin_dashboard', module='stock'))
@@ -2494,7 +4220,27 @@ def check_safety_alert(product_id): # ฟังก์ชันนี้จะถ
             f"🚩 จุดสั่งซื้อ (Safety): {product['safety_stock']} {product['unit']}\n"
             f"--- กรุณาพิจารณาสั่งซื้อเพิ่ม ---"
         )
-        send_line_message(alert_msg, location=(product['location'] if product and 'location' in product.keys() else ''))
+        # 📧 ส่งแจ้งเตือนผ่าน EMAIL & LINE ตามการตั้งค่า
+        send_smart_notification(
+            notification_type='low_stock',
+            message=alert_msg,
+            location=(product['location'] if product and 'location' in product.keys() else ''),
+            email_body=build_low_stock_email_body({
+                'product_name': product['name'],
+                'stock': product['stock'],
+                'safety_stock': product['safety_stock'],
+                'unit': product['unit'],
+                'location': product['location'] if 'location' in product.keys() else '-',
+            }),
+            html_body=build_low_stock_email_html({
+                'product_name': product['name'],
+                'stock': product['stock'],
+                'safety_stock': product['safety_stock'],
+                'unit': product['unit'],
+                'location': product['location'] if 'location' in product.keys() else '-',
+            }),
+            admin_id='superadmin'
+        )
 
 @app.route('/admin/reject/<int:log_id>', methods=['POST'])
 def reject_request(log_id):
@@ -2537,10 +4283,7 @@ def reject_request(log_id):
         if is_medicine:
             conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (log['qty'], log['product_id']))
         else:
-            conn.execute(
-                'UPDATE products SET stock = stock + ?, reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?',
-                (log['qty'], log['qty'], log['product_id'])
-            )
+            conn.execute('UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?', (log['qty'], log['product_id']))
 
         update_result = conn.execute('UPDATE transaction_logs SET status = "Rejected" WHERE id = ? AND status = "Pending"', (log_id,))
         if update_result.rowcount == 0:
@@ -2610,7 +4353,15 @@ def toggle_product_status(product_id):
     product = conn.execute('SELECT is_active FROM products WHERE id = ?', (product_id,)).fetchone()
     if product:
         new_status = 0 if product['is_active'] == 1 else 1
-        conn.execute('UPDATE products SET is_active = ? WHERE id = ?', (new_status, product_id))
+        conn.execute(
+            """
+            UPDATE products
+            SET is_active = ?,
+                status = CASE WHEN ? = 1 THEN 'Active' ELSE 'Inactive' END
+            WHERE id = ?
+            """,
+            (new_status, new_status, product_id)
+        )
         conn.commit()
         conn.close()
         return jsonify({'success': True, 'new_status': new_status})
@@ -2636,14 +4387,52 @@ def add_product():
     base_unit = clean_input_text(request.form.get('base_unit', ''), 30) or None
     conversion_rate = max(1, request.form.get('conversion_rate', 1, type=int) or 1)
     base_unit_to_tablet_rate = max(0, request.form.get('base_unit_to_tablet_rate', 0, type=int) or 0)
+    split_mode = clean_input_text(request.form.get('split_mode', 'single'), 20).lower() or 'single'
+    split_enabled = str(request.form.get('split_enabled', '0')).strip().lower() in ('1', 'true', 'on', 'yes')
+    package_tablet_total = max(0, request.form.get('package_tablet_total', 0, type=int) or 0)
+    open_base_qty = max(0, request.form.get('open_base_qty', 0, type=int) or 0)
+    open_extra_tablet_qty = max(0, request.form.get('open_extra_tablet_qty', 0, type=int) or 0)
+
+    if split_mode not in ('single', 'multi'):
+        split_mode = 'single'
+
+    if category == 'ยา' and split_enabled:
+        package_unit = package_unit or unit
+        if split_mode == 'multi':
+            if not package_unit:
+                return jsonify({'success': False, 'message': 'กรุณาระบุหน่วยนำเข้า เช่น กระปุก/ขวด/แผง'}), 400
+            if not base_unit:
+                return jsonify({'success': False, 'message': 'กรุณาระบุหน่วยแยก เช่น ซอง/ห่อ'}), 400
+            if package_tablet_total <= 0:
+                return jsonify({'success': False, 'message': f'กรุณาระบุ 1 {package_unit} มีกี่เม็ด'}), 400
+            if base_unit_to_tablet_rate <= 0:
+                return jsonify({'success': False, 'message': f'กรุณาระบุ 1 {base_unit} มีกี่เม็ด'}), 400
+            if package_tablet_total < base_unit_to_tablet_rate:
+                return jsonify({'success': False, 'message': 'จำนวนเม็ดต่อหน่วยแยกมากกว่าจำนวนเม็ดต่อหน่วยนำเข้า'}), 400
+            conversion_rate = max(1, package_tablet_total // base_unit_to_tablet_rate)
+        else:
+            # single layer: ถ้าระบุเม็ดต่อหน่วยนำเข้า ให้ตั้งเป็นหน่วยเม็ดโดยตรง
+            if package_tablet_total > 0:
+                base_unit = 'เม็ด'
+                conversion_rate = max(1, package_tablet_total)
+                base_unit_to_tablet_rate = 0
+        if package_tablet_total <= 0:
+            if base_unit_to_tablet_rate > 0:
+                package_tablet_total = conversion_rate * base_unit_to_tablet_rate
+            elif str(base_unit or '').strip().lower() in {'เม็ด', 'tablet', 'tablets', 'pill', 'pills', 'capsule', 'capsules'}:
+                package_tablet_total = conversion_rate
+
     # Only store split-unit info when both package_unit and base_unit are provided
-    if not package_unit or not base_unit:
+    if not split_enabled or not package_unit or not base_unit:
         package_unit = None
         base_unit = None
         conversion_rate = 1
         base_unit_to_tablet_rate = 0
+        package_tablet_total = 0
+        open_base_qty = 0
+        open_extra_tablet_qty = 0
 
-    if category == 'ยา' and package_unit and base_unit and base_unit != 'เม็ด' and base_unit_to_tablet_rate <= 0:
+    if category == 'ยา' and split_enabled and split_mode == 'multi' and package_unit and base_unit and base_unit != 'เม็ด' and base_unit_to_tablet_rate <= 0:
         return jsonify({'success': False, 'message': f'กรุณาระบุ 1 {base_unit} มีกี่เม็ด'}), 400
 
     if not re.fullmatch(r'[A-Z0-9_-]{2,40}', code):
@@ -2662,16 +4451,25 @@ def add_product():
             lot_number = datetime.now().strftime('%d%m%Y') + "-NEW"
             receive_date = datetime.now().strftime('%Y-%m-%d')
             cursor = conn.execute('''
-                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_no, received_date, package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_number, receive_date, package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate))
+                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_no, received_date, package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate, package_tablet_total)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (code, name, category, unit, location, safety_stock, stock, expiry_date, lot_number, receive_date, package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate, package_tablet_total))
         else:
             cursor = conn.execute('''
-                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (code, name, category, unit, location, safety_stock, stock, '', package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate))
+                INSERT INTO products (code, name, category, unit, location, safety_stock, stock, expiry_date, package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate, package_tablet_total)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (code, name, category, unit, location, safety_stock, stock, '', package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate, package_tablet_total))
         
         product_id = cursor.lastrowid
+
+        if package_unit and base_unit and conversion_rate > 1 and (open_base_qty > 0 or open_extra_tablet_qty > 0):
+            conn.execute(
+                '''
+                INSERT INTO open_packages (product_id, base_unit_qty, extra_tablet_qty, status)
+                VALUES (?, ?, ?, ?)
+                ''',
+                (product_id, open_base_qty, open_extra_tablet_qty, 'active')
+            )
 
         # 3. ถ้ามีการใส่สต็อกเริ่มต้นมาด้วย ให้สร้าง "Lot แรก" อัตโนมัติ
         if stock > 0:
@@ -2741,8 +4539,10 @@ def export_excel():
             COALESCE(p.package_unit, '') as 'หน่วยหลัก',
             COALESCE(p.base_unit, '') as 'หน่วยย่อย',
             COALESCE(p.conversion_rate, 1) as 'อัตราแบ่ง',
+            COALESCE(p.package_tablet_total, 0) as '1 หน่วยนำเข้า = กี่เม็ด',
             COALESCE(p.base_unit_to_tablet_rate, 0) as '1 หน่วยย่อย = กี่เม็ด',
             COALESCE(op.base_unit_qty, 0) as 'หน่วยย่อยที่เปิดแล้ว',
+            COALESCE(op.extra_tablet_qty, 0) as 'เศษเม็ดที่เปิดแล้ว',
             CASE WHEN p.is_active = 1 THEN 'เปิดใช้งาน' ELSE 'ปิดใช้งาน' END as 'สถานะการใช้งาน',
             CASE
                 WHEN COUNT(pl.id) > 1 THEN 'หลาย Lot'
@@ -2757,7 +4557,9 @@ def export_excel():
         FROM products p
         LEFT JOIN product_lots pl ON pl.product_id = p.id AND pl.qty > 0
         LEFT JOIN (
-            SELECT product_id, COALESCE(SUM(base_unit_qty), 0) as base_unit_qty
+            SELECT product_id,
+                   COALESCE(SUM(base_unit_qty), 0) as base_unit_qty,
+                   COALESCE(SUM(extra_tablet_qty), 0) as extra_tablet_qty
             FROM open_packages WHERE status = 'active'
             GROUP BY product_id
         ) op ON op.product_id = p.id
@@ -2782,15 +4584,147 @@ def export_excel():
     # 3. สร้างไฟล์ Excel ใน Memory แยก Sheet ตามหมวดหมู่ (ไม่มี Sheet "ทั้งหมด")
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        medicine_columns = [
+            'หน่วยหลัก',
+            'หน่วยย่อย',
+            'อัตราแบ่ง',
+            '1 หน่วยนำเข้า = กี่เม็ด',
+            '1 หน่วยย่อย = กี่เม็ด',
+            'หน่วยย่อยที่เปิดแล้ว',
+            'เศษเม็ดที่เปิดแล้ว',
+        ]
+
+        first_data_row = 1
+        last_data_row = 5000
+
+        list_columns = {
+            'หมวดหมู่': ['ยา', 'แม่บ้าน', 'Safety', 'ของใช้สำนักงาน', 'IT อุปกรณ์', 'อื่นๆ'],
+            'สถานที่เก็บ (Location)': ['PC1', 'Coil Center', 'General', 'CC', 'ห้องยา'],
+            'สถานะการใช้งาน': ['เปิดใช้งาน', 'ปิดใช้งาน'],
+        }
+
+        integer_columns = [
+            'จุดสั่งซื้อ (Safety Stock)',
+            'จำนวนคงเหลือ',
+            'อัตราแบ่ง',
+            '1 หน่วยนำเข้า = กี่เม็ด',
+            '1 หน่วยย่อย = กี่เม็ด',
+            'หน่วยย่อยที่เปิดแล้ว',
+            'เศษเม็ดที่เปิดแล้ว',
+            'จำนวนใน Lot',
+        ]
+
+        workbook = writer.book
+        header_format = workbook.add_format({
+            'bold': True,
+            'bg_color': '#DCEBFF',
+            'font_color': '#123A66',
+            'border': 1,
+            'align': 'center',
+            'valign': 'vcenter'
+        })
+        medicine_header_format = workbook.add_format({
+            'bold': True,
+            'bg_color': '#E8F8EE',
+            'font_color': '#0F5F3A',
+            'border': 1,
+            'align': 'center',
+            'valign': 'vcenter'
+        })
+        normal_cell_format = workbook.add_format({'border': 1})
+        medicine_cell_format = workbook.add_format({'bg_color': '#F4FCF7', 'border': 1})
+
+        def _decorate_sheet(sheet_name, df_sheet, is_medicine=False):
+            ws = writer.sheets[sheet_name]
+            headers = list(df_sheet.columns)
+            col_map = {name: idx for idx, name in enumerate(headers)}
+
+            # สีหัวตารางและสีคอลัมน์หน่วยยา
+            for idx, col_name in enumerate(headers):
+                head_fmt = medicine_header_format if col_name in medicine_columns else header_format
+                ws.write(0, idx, col_name, head_fmt)
+                if col_name in medicine_columns:
+                    ws.set_column(idx, idx, None, medicine_cell_format)
+                else:
+                    ws.set_column(idx, idx, None, normal_cell_format)
+
+            if headers:
+                ws.autofilter(0, 0, 0, len(headers) - 1)
+            ws.freeze_panes(1, 0)
+
+            # validation dropdown/list และเลขจำนวนเต็ม
+            for col_name, options in list_columns.items():
+                if col_name not in col_map:
+                    continue
+                col_idx = col_map[col_name]
+                ws.data_validation(first_data_row, col_idx, last_data_row, col_idx, {
+                    'validate': 'list',
+                    'source': options,
+                    'error_title': 'ข้อมูลไม่ถูกต้อง',
+                    'error_message': f'กรุณาเลือกค่าในรายการที่กำหนดสำหรับคอลัมน์ {col_name}',
+                })
+
+            for col_name in integer_columns:
+                if col_name not in col_map:
+                    continue
+                if (not is_medicine) and col_name in medicine_columns:
+                    continue
+                col_idx = col_map[col_name]
+                ws.data_validation(first_data_row, col_idx, last_data_row, col_idx, {
+                    'validate': 'integer',
+                    'criteria': '>=',
+                    'value': 0,
+                    'error_title': 'รูปแบบตัวเลขไม่ถูกต้อง',
+                    'error_message': f'{col_name} ต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป',
+                })
+
+        # ใส่ชีตคำอธิบายคอลัมน์เพื่อให้กรอกไฟล์ได้ถูกต้อง
+        guide_sheet_name = 'README_IMPORT'
+        guide_rows = [
+            {'คอลัมน์': 'Legend: แถวพื้นเขียว', 'คำอธิบาย': 'คือคอลัมน์เฉพาะชีทยาเท่านั้น'},
+            {'คอลัมน์': 'Legend: แถวพื้นขาว', 'คำอธิบาย': 'คือคอลัมน์ที่ใช้ได้ทุกชีท'},
+            {'คอลัมน์': 'รหัสของ', 'คำอธิบาย': 'รหัสสินค้าต้องไม่ซ้ำ ใช้เป็น key หลักตอน import'},
+            {'คอลัมน์': 'การกรอกข้อมูล', 'คำอธิบาย': 'แนะนำให้แก้ไขในชีทหมวดจริงโดยตรง (ระบบมี dropdown + validation แล้ว)'},
+            {'คอลัมน์': 'จำนวนคงเหลือ', 'คำอธิบาย': 'จำนวนหน่วยแพ็ค/หน่วยหลักที่เก็บใน stock หลัก'},
+            {'คอลัมน์': 'หน่วยหลัก', 'คำอธิบาย': 'หน่วยนำเข้า เช่น กระปุก/ขวด/แผง'},
+            {'คอลัมน์': 'หน่วยย่อย', 'คำอธิบาย': 'หน่วยเบิกย่อย เช่น ซอง/ห่อ/เม็ด'},
+            {'คอลัมน์': 'อัตราแบ่ง', 'คำอธิบาย': '1 หน่วยหลัก = กี่หน่วยย่อย'},
+            {'คอลัมน์': '1 หน่วยนำเข้า = กี่เม็ด', 'คำอธิบาย': 'จำนวนเม็ดจริงต่อหน่วยหลัก (รองรับหารไม่ลงตัว)'},
+            {'คอลัมน์': '1 หน่วยย่อย = กี่เม็ด', 'คำอธิบาย': 'จำนวนเม็ดต่อหน่วยย่อย เช่น ซองละ 10 เม็ด'},
+            {'คอลัมน์': 'หน่วยย่อยที่เปิดแล้ว', 'คำอธิบาย': 'จำนวนหน่วยย่อยที่ค้างจากแพ็คที่เปิดแล้ว'},
+            {'คอลัมน์': 'เศษเม็ดที่เปิดแล้ว', 'คำอธิบาย': 'เศษเม็ดคงเหลือจากการแตกหน่วยที่หารไม่ลงตัว'},
+            {'คอลัมน์': 'สถานะการใช้งาน', 'คำอธิบาย': 'ใช้ค่า เปิดใช้งาน หรือ ปิดใช้งาน'},
+            {'คอลัมน์': 'Lot No.', 'คำอธิบาย': 'ถ้าระบุจะใช้เพื่อ upsert lot เดิม'},
+            {'คอลัมน์': 'วันที่รับเข้า', 'คำอธิบาย': 'รองรับรูปแบบวันที่ที่ระบบเดิมใช้อยู่'},
+            {'คอลัมน์': 'วันหมดอายุ', 'คำอธิบาย': 'ถ้าไม่ระบุให้เว้นว่างได้'},
+            {'คอลัมน์': 'จำนวนใน Lot', 'คำอธิบาย': 'จำนวนคงเหลือใน lot นั้นๆ'},
+        ]
+        df_guide = pd.DataFrame(guide_rows)
+        df_guide.to_excel(writer, index=False, sheet_name=guide_sheet_name)
+        _auto_col_widths(writer, guide_sheet_name, df_guide)
+        _decorate_sheet(guide_sheet_name, df_guide, is_medicine=False)
+        guide_ws = writer.sheets[guide_sheet_name]
+        for row_idx, col_name in enumerate(df_guide['คอลัมน์'].tolist(), start=1):
+            if str(col_name).strip() in medicine_columns or str(col_name).strip() == 'Legend: แถวพื้นเขียว':
+                guide_ws.write(row_idx, 0, col_name, medicine_cell_format)
+                guide_ws.write(row_idx, 1, df_guide.iloc[row_idx - 1]['คำอธิบาย'], medicine_cell_format)
+            elif str(col_name).strip() == 'Legend: แถวพื้นขาว':
+                guide_ws.write(row_idx, 0, col_name, normal_cell_format)
+                guide_ws.write(row_idx, 1, df_guide.iloc[row_idx - 1]['คำอธิบาย'], normal_cell_format)
+
         categories = df['หมวดหมู่'].dropna().unique()
         for cat in sorted(categories):
             df_cat = df[df['หมวดหมู่'] == cat].copy()
             if df_cat.empty:
                 continue
+            is_medicine_cat = str(cat).strip() == 'ยา'
+            if not is_medicine_cat:
+                df_cat = df_cat.drop(columns=[col for col in medicine_columns if col in df_cat.columns])
             # ตัดชื่อ Sheet ให้ไม่เกิน 31 ตัวอักษร (ข้อจำกัดของ Excel)
             sheet_name = str(cat)[:31]
             df_cat.to_excel(writer, index=False, sheet_name=sheet_name)
             _auto_col_widths(writer, sheet_name, df_cat)
+            _decorate_sheet(sheet_name, df_cat, is_medicine=is_medicine_cat)
 
     output.seek(0)
 
@@ -2893,6 +4827,9 @@ def import_excel():
         return base_unit, raw_unit, conversion_rate
 
     def import_medicine_file(conn, df):
+        open_base_col = next((col for col in df.columns if 'หน่วยย่อยที่เปิดแล้ว' in str(col) or 'เปิดแล้ว' in str(col)), None)
+        open_extra_col = next((col for col in df.columns if 'เศษเม็ดที่เปิดแล้ว' in str(col) or 'extra tablet' in str(col).lower()), None)
+
         rows_to_import = []
         for _, row in df.iterrows():
             raw_name = str(row.iloc[1]).strip() if len(row) > 1 and pd.notna(row.iloc[1]) else ''
@@ -2910,11 +4847,15 @@ def import_excel():
             stock = safe_int(row.iloc[2]) if len(row) > 2 else 0
             unit = str(row.iloc[3]).strip() if len(row) > 3 and pd.notna(row.iloc[3]) else 'ชิ้น'
             unit = normalize_medicine_unit(raw_name, unit)
+            open_base = safe_int(row[open_base_col]) if open_base_col and open_base_col in row.index and pd.notna(row[open_base_col]) else None
+            open_extra = safe_int(row[open_extra_col]) if open_extra_col and open_extra_col in row.index and pd.notna(row[open_extra_col]) else None
             rows_to_import.append({
                 'raw_name': raw_name,
                 'name': name,
                 'stock': stock,
-                'unit': unit
+                'unit': unit,
+                'open_base': open_base,
+                'open_extra': open_extra
             })
 
         updated_count = 0
@@ -2954,6 +4895,33 @@ def import_excel():
                     SET name=?, category='ยา', unit=?, stock=?, base_unit=?, package_unit=?, conversion_rate=?, is_active=1
                     WHERE id=?
                 ''', (item['name'], item['unit'], item['stock'], base_unit, package_unit, conversion_rate, existing['id']))
+
+                if item['open_base'] is not None or item['open_extra'] is not None:
+                    effective_open_base = max(0, int(item['open_base'] or 0))
+                    effective_open_extra = max(0, int(item['open_extra'] or 0))
+                    existing_open = conn.execute(
+                        'SELECT id FROM open_packages WHERE product_id = ?',
+                        (existing['id'],)
+                    ).fetchone()
+                    if existing_open:
+                        conn.execute(
+                            '''
+                            UPDATE open_packages
+                            SET base_unit_qty = ?,
+                                extra_tablet_qty = ?,
+                                status = CASE WHEN ? > 0 OR ? > 0 THEN 'active' ELSE 'closed' END
+                            WHERE product_id = ?
+                            ''',
+                            (effective_open_base, effective_open_extra, effective_open_base, effective_open_extra, existing['id'])
+                        )
+                    elif effective_open_base > 0 or effective_open_extra > 0:
+                        conn.execute(
+                            '''
+                            INSERT INTO open_packages (product_id, base_unit_qty, extra_tablet_qty, status)
+                            VALUES (?, ?, ?, 'active')
+                            ''',
+                            (existing['id'], effective_open_base, effective_open_extra)
+                        )
                 updated_count += 1
             else:
                 next_cc_code += 1
@@ -2969,6 +4937,19 @@ def import_excel():
                     )
                     VALUES (?, ?, ?, 0, 'ยา', ?, 'ห้องยา', 0, 0, 1, ?, ?, ?)
                 ''', (generated_code, item['name'], item['stock'], item['unit'], base_unit, package_unit, conversion_rate))
+
+                inserted_product = conn.execute('SELECT id FROM products WHERE code = ?', (generated_code,)).fetchone()
+                if inserted_product and (item['open_base'] is not None or item['open_extra'] is not None):
+                    effective_open_base = max(0, int(item['open_base'] or 0))
+                    effective_open_extra = max(0, int(item['open_extra'] or 0))
+                    if effective_open_base > 0 or effective_open_extra > 0:
+                        conn.execute(
+                            '''
+                            INSERT INTO open_packages (product_id, base_unit_qty, extra_tablet_qty, status)
+                            VALUES (?, ?, ?, 'active')
+                            ''',
+                            (inserted_product['id'], effective_open_base, effective_open_extra)
+                        )
                 inserted_count += 1
 
         return updated_count, inserted_count
@@ -3063,6 +5044,8 @@ def import_excel():
                 # Sheet ที่ไม่มี code column → ข้ามไป
                 continue
 
+            is_medicine_sheet = str(sheet_name or '').strip() == 'ยา'
+
             name_col = next((col for col in df.columns if 'ชื่อของ' in col), None)
             cat_col = next((col for col in df.columns if 'หมวดหมู่' in col), None)
             unit_col = next((col for col in df.columns if 'หน่วยนับ' in col), None)
@@ -3075,11 +5058,13 @@ def import_excel():
             lot_qty_col = next((col for col in df.columns if 'จำนวนใน lot' in col.lower() or 'lot qty' in col.lower() or 'lot quantity' in col.lower()), None)
             active_col = next((col for col in df.columns if 'สถานะ' in col), None)
             # คอลัมน์สำหรับสินค้าแยกหน่วยย่อย (ยา)
-            pkg_unit_col = next((col for col in df.columns if 'หน่วยหลัก' in col), None)
-            base_unit_col = next((col for col in df.columns if 'หน่วยย่อย' in col and 'เปิด' not in col), None)
-            conv_rate_col = next((col for col in df.columns if 'อัตราแบ่ง' in col), None)
-            base_to_tablet_col = next((col for col in df.columns if '1 หน่วยย่อย = กี่เม็ด' in col or 'เม็ดต่อหน่วยย่อย' in col), None)
-            open_base_col = next((col for col in df.columns if 'หน่วยย่อยที่เปิดแล้ว' in col or 'เปิดแล้ว' in col), None)
+            pkg_unit_col = next((col for col in df.columns if 'หน่วยหลัก' in col), None) if is_medicine_sheet else None
+            base_unit_col = next((col for col in df.columns if 'หน่วยย่อย' in col and 'เปิด' not in col), None) if is_medicine_sheet else None
+            conv_rate_col = next((col for col in df.columns if 'อัตราแบ่ง' in col), None) if is_medicine_sheet else None
+            package_tablet_col = next((col for col in df.columns if '1 หน่วยนำเข้า = กี่เม็ด' in col or 'เม็ดต่อหน่วยนำเข้า' in col), None) if is_medicine_sheet else None
+            base_to_tablet_col = next((col for col in df.columns if '1 หน่วยย่อย = กี่เม็ด' in col or 'เม็ดต่อหน่วยย่อย' in col), None) if is_medicine_sheet else None
+            open_base_col = next((col for col in df.columns if 'หน่วยย่อยที่เปิดแล้ว' in col or 'เปิดแล้ว' in col), None) if is_medicine_sheet else None
+            open_extra_col = next((col for col in df.columns if 'เศษเม็ดที่เปิดแล้ว' in col or 'extra tablet' in col.lower()), None) if is_medicine_sheet else None
 
             for _, row in df.iterrows():
                 code = str(row[code_col]).strip()
@@ -3103,8 +5088,10 @@ def import_excel():
                 import_pkg_unit = str(row[pkg_unit_col]).strip() if pkg_unit_col and pd.notna(row[pkg_unit_col]) else None
                 import_base_unit = str(row[base_unit_col]).strip() if base_unit_col and pd.notna(row[base_unit_col]) else None
                 import_conv_rate = safe_int(row[conv_rate_col]) if conv_rate_col and pd.notna(row[conv_rate_col]) else None
+                import_package_tablet = safe_int(row[package_tablet_col]) if package_tablet_col and pd.notna(row[package_tablet_col]) else None
                 import_base_to_tablet = safe_int(row[base_to_tablet_col]) if base_to_tablet_col and pd.notna(row[base_to_tablet_col]) else None
                 import_open_base = safe_int(row[open_base_col]) if open_base_col and pd.notna(row[open_base_col]) else None
+                import_open_extra = safe_int(row[open_extra_col]) if open_extra_col and pd.notna(row[open_extra_col]) else None
                 # ล้าง empty string
                 if import_pkg_unit == '' or import_pkg_unit == 'nan': import_pkg_unit = None
                 if import_base_unit == '' or import_base_unit == 'nan': import_base_unit = None
@@ -3113,6 +5100,12 @@ def import_excel():
                 if active_col and pd.notna(row[active_col]):
                     status_text = str(row[active_col]).strip()
                     is_active = 1 if status_text == 'เปิดใช้งาน' else 0
+
+                is_medicine_row = str(category or '').strip() == 'ยา'
+                split_payload_present = bool(
+                    import_pkg_unit or import_base_unit or import_conv_rate is not None or
+                    import_base_to_tablet is not None or import_package_tablet is not None
+                )
 
                 baseline_product = baseline_products.get(code)
                 product_changed = baseline_product is None or any([
@@ -3147,18 +5140,19 @@ def import_excel():
                 existing = conn.execute('SELECT id FROM products WHERE code = ?', (code,)).fetchone()
                 if existing:
                     # อัปเดต split-unit fields ถ้ามีในไฟล์
-                    if import_pkg_unit or import_base_unit or import_conv_rate is not None or import_base_to_tablet is not None:
+                    if is_medicine_row and split_payload_present:
                         effective_pkg_unit = import_pkg_unit
                         effective_base_unit = import_base_unit
                         effective_conv_rate = max(1, import_conv_rate or 1)
                         effective_base_to_tablet = max(0, import_base_to_tablet or 0)
+                        effective_package_tablet = max(0, import_package_tablet or 0)
                         conn.execute('''
                             UPDATE products
                             SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?, lot_no=?, received_date=?, expiry_date=?,
-                                package_unit=?, base_unit=?, conversion_rate=?, base_unit_to_tablet_rate=?
+                                package_unit=?, base_unit=?, conversion_rate=?, base_unit_to_tablet_rate=?, package_tablet_total=?
                             WHERE id=?
                         ''', (name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date,
-                              effective_pkg_unit, effective_base_unit, effective_conv_rate, effective_base_to_tablet, existing['id']))
+                              effective_pkg_unit, effective_base_unit, effective_conv_rate, effective_base_to_tablet, effective_package_tablet, existing['id']))
                     elif product_changed:
                         conn.execute('''
                             UPDATE products
@@ -3169,39 +5163,41 @@ def import_excel():
                     updated_count += 1
 
                     # อัปเดต open_packages ถ้ามีคอลัมน์นี้ในไฟล์
-                    if open_base_col and import_open_base is not None:
+                    if is_medicine_row and open_base_col and import_open_base is not None:
                         existing_open = conn.execute(
                             'SELECT id FROM open_packages WHERE product_id=?', (product_id,)
                         ).fetchone()
+                        effective_open_extra = max(0, import_open_extra or 0)
                         if existing_open:
                             conn.execute(
-                                'UPDATE open_packages SET base_unit_qty=?, status=? WHERE product_id=?',
-                                (import_open_base, 'active' if import_open_base > 0 else 'closed', product_id)
+                                'UPDATE open_packages SET base_unit_qty=?, extra_tablet_qty=?, status=CASE WHEN ? > 0 OR ? > 0 THEN "active" ELSE "closed" END WHERE product_id=?',
+                                (import_open_base, effective_open_extra, import_open_base, effective_open_extra, product_id)
                             )
-                        elif import_open_base > 0:
+                        elif import_open_base > 0 or effective_open_extra > 0:
                             conn.execute(
-                                'INSERT INTO open_packages (product_id, base_unit_qty, status) VALUES (?, ?, ?)',
-                                (product_id, import_open_base, 'active')
+                                'INSERT INTO open_packages (product_id, base_unit_qty, extra_tablet_qty, status) VALUES (?, ?, ?, ?)',
+                                (product_id, import_open_base, effective_open_extra, 'active')
                             )
                 else:
                     cursor = conn.execute('''
                         INSERT INTO products (code, name, stock, safety_stock, category, unit, location, withdraw, reserved_stock, is_active, lot_no, received_date, expiry_date,
-                                                                                         package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate)
-                                                VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+                                                                                         package_unit, base_unit, conversion_rate, base_unit_to_tablet_rate, package_tablet_total)
+                                                VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (code, name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date,
-                                                    import_pkg_unit, import_base_unit, max(1, import_conv_rate or 1), max(0, import_base_to_tablet or 0)))
+                                                    import_pkg_unit, import_base_unit, max(1, import_conv_rate or 1), max(0, import_base_to_tablet or 0), max(0, import_package_tablet or 0)))
                     product_id = cursor.lastrowid
                     inserted_count += 1
 
-                    if import_open_base and import_open_base > 0:
+                    if (import_open_base and import_open_base > 0) or (import_open_extra and import_open_extra > 0):
                         conn.execute(
-                            'INSERT INTO open_packages (product_id, base_unit_qty, status) VALUES (?, ?, ?)',
-                            (product_id, import_open_base, 'active')
+                            'INSERT INTO open_packages (product_id, base_unit_qty, extra_tablet_qty, status) VALUES (?, ?, ?, ?)',
+                            (product_id, max(0, import_open_base or 0), max(0, import_open_extra or 0), 'active')
                         )
 
                 if not (product_changed or lot_changed or
-                        (open_base_col and import_open_base is not None) or
-                    import_pkg_unit or import_base_unit or import_conv_rate is not None or import_base_to_tablet is not None):
+                        (is_medicine_row and open_base_col and import_open_base is not None) or
+                        (is_medicine_row and open_extra_col and import_open_extra is not None) or
+                    (is_medicine_row and split_payload_present)):
                     continue
 
                 if lot_no:
@@ -3268,6 +5264,11 @@ def get_product(code):
                 FROM open_packages
                 WHERE product_id = ? AND status = 'active'
             ''', (product['id'],)).fetchone()[0]
+            open_extra_tablet_qty = conn.execute('''
+                SELECT COALESCE(SUM(extra_tablet_qty), 0)
+                FROM open_packages
+                WHERE product_id = ? AND status = 'active'
+            ''', (product['id'],)).fetchone()[0]
             lot_total_qty = conn.execute('''
                 SELECT COALESCE(SUM(qty), 0)
                 FROM product_lots
@@ -3275,16 +5276,56 @@ def get_product(code):
             ''', (product['id'],)).fetchone()[0]
 
             stock_package_qty = int(product['stock'] or 0)
-            total_base_qty = (stock_package_qty * conversion_rate) + int(open_base_qty or 0)
+            package_tablet_total = int(product['package_tablet_total'] or 0)
+            base_to_tablet_rate = int(product['base_unit_to_tablet_rate'] or 0)
+            extra_base_from_open_remainder = 0
+            package_remainder_tablets = 0
+            total_remainder_tablets = int(open_extra_tablet_qty or 0)
+            display_open_extra_tablet_qty = int(open_extra_tablet_qty or 0)
+            if base_to_tablet_rate > 0:
+                if package_tablet_total > 0:
+                    package_remainder_tablets = stock_package_qty * (package_tablet_total % base_to_tablet_rate)
+                    total_remainder_tablets = package_remainder_tablets + int(open_extra_tablet_qty or 0)
+                extra_base_from_open_remainder = total_remainder_tablets // base_to_tablet_rate
+                display_open_extra_tablet_qty = total_remainder_tablets % base_to_tablet_rate
+
+            total_base_qty = (stock_package_qty * conversion_rate) + int(open_base_qty or 0) + extra_base_from_open_remainder
+            if package_tablet_total <= 0 and base_to_tablet_rate > 0:
+                package_tablet_total = conversion_rate * base_to_tablet_rate
+            total_tablet_qty = 0
+            if package_tablet_total > 0:
+                total_tablet_qty = (stock_package_qty * package_tablet_total) + (int(open_base_qty or 0) * base_to_tablet_rate) + int(open_extra_tablet_qty or 0)
+                if base_to_tablet_rate > 0:
+                    total_base_qty = total_tablet_qty // base_to_tablet_rate
+                    display_open_extra_tablet_qty = total_tablet_qty % base_to_tablet_rate
             split_summary = {
                 'stock_package_qty': stock_package_qty,
                 'open_base_qty': int(open_base_qty or 0),
+                'open_extra_tablet_qty': int(display_open_extra_tablet_qty),
+                'open_extra_tablet_qty_raw': int(open_extra_tablet_qty or 0),
+                'package_remainder_tablets': int(package_remainder_tablets),
+                'total_remainder_tablets': int(total_remainder_tablets),
+                'extra_base_from_open_remainder': int(extra_base_from_open_remainder),
                 'total_base_qty': int(total_base_qty),
+                'total_tablet_qty': int(total_tablet_qty or 0),
                 'lot_total_qty': int(lot_total_qty or 0)
             }
     conn.close()
     if product:
         payload = dict(product)
+        conversion_rate = int(payload.get('conversion_rate') or 1)
+        base_unit = str(payload.get('base_unit') or '').strip().lower()
+        base_to_tablet_rate = int(payload.get('base_unit_to_tablet_rate') or 0)
+        tablet_like_units = {'เม็ด', 'tablet', 'tablets', 'pill', 'pills', 'capsule', 'capsules'}
+        if conversion_rate > 1 and base_to_tablet_rate > 0 and base_unit not in tablet_like_units:
+            payload['split_mode'] = 'multi'
+            payload['package_tablet_total'] = int(payload.get('package_tablet_total') or (conversion_rate * base_to_tablet_rate))
+        elif conversion_rate > 1 and base_unit:
+            payload['split_mode'] = 'single'
+            payload['package_tablet_total'] = int(payload.get('package_tablet_total') or (conversion_rate if base_unit in tablet_like_units else 0))
+        else:
+            payload['split_mode'] = 'single'
+            payload['package_tablet_total'] = int(payload.get('package_tablet_total') or 0)
         payload['split_summary'] = split_summary
         return jsonify(payload)
     return jsonify({'error': 'Product not found'}), 404
@@ -3296,25 +5337,58 @@ def edit_product():
     
     code = clean_input_text(request.form.get('code'), 40).upper()
     name = clean_input_text(request.form.get('name'), 150)
+    category = clean_input_text(request.form.get('category', ''), 60)
     unit = clean_input_text(request.form.get('unit'), 30)
     package_unit = clean_input_text(request.form.get('package_unit', ''), 30) or None
     base_unit = clean_input_text(request.form.get('base_unit', ''), 30) or None
     conversion_rate = max(1, request.form.get('conversion_rate', 1, type=int) or 1)
     base_unit_to_tablet_rate = max(0, request.form.get('base_unit_to_tablet_rate', 0, type=int) or 0)
+    split_mode = clean_input_text(request.form.get('split_mode', 'single'), 20).lower() or 'single'
+    split_enabled = str(request.form.get('split_enabled', '0')).strip().lower() in ('1', 'true', 'on', 'yes')
+    package_tablet_total = max(0, request.form.get('package_tablet_total', 0, type=int) or 0)
     open_base_qty = max(0, request.form.get('open_base_qty', 0, type=int) or 0)
+    open_extra_tablet_qty = max(0, request.form.get('open_extra_tablet_qty', 0, type=int) or 0)
+    if split_mode not in ('single', 'multi'):
+        split_mode = 'single'
+
+    if category == 'ยา' and split_enabled:
+        package_unit = package_unit or unit
+        if split_mode == 'multi':
+            if not package_unit:
+                return jsonify({'success': False, 'message': 'กรุณาระบุหน่วยนำเข้า เช่น กระปุก/ขวด/แผง'}), 400
+            if not base_unit:
+                return jsonify({'success': False, 'message': 'กรุณาระบุหน่วยแยก เช่น ซอง/ห่อ'}), 400
+            if package_tablet_total <= 0:
+                return jsonify({'success': False, 'message': f'กรุณาระบุ 1 {package_unit} มีกี่เม็ด'}), 400
+            if base_unit_to_tablet_rate <= 0:
+                return jsonify({'success': False, 'message': f'กรุณาระบุ 1 {base_unit} มีกี่เม็ด'}), 400
+            if package_tablet_total < base_unit_to_tablet_rate:
+                return jsonify({'success': False, 'message': 'จำนวนเม็ดต่อหน่วยแยกมากกว่าจำนวนเม็ดต่อหน่วยนำเข้า'}), 400
+            conversion_rate = max(1, package_tablet_total // base_unit_to_tablet_rate)
+        else:
+            if package_tablet_total > 0:
+                conversion_rate = max(1, package_tablet_total)
+                base_unit_to_tablet_rate = 0
+        if package_tablet_total <= 0:
+            if base_unit_to_tablet_rate > 0:
+                package_tablet_total = conversion_rate * base_unit_to_tablet_rate
+            elif str(base_unit or '').strip().lower() in {'เม็ด', 'tablet', 'tablets', 'pill', 'pills', 'capsule', 'capsules'}:
+                package_tablet_total = conversion_rate
+
     # เก็บข้อมูลแยกหน่วยย่อยเฉพาะกรณีที่กรอกครบทั้งสองหน่วยเท่านั้น
-    if not package_unit or not base_unit:
+    if not split_enabled or not package_unit or not base_unit:
         package_unit = None
         base_unit = None
         conversion_rate = 1
         base_unit_to_tablet_rate = 0
+        package_tablet_total = 0
         open_base_qty = 0
+        open_extra_tablet_qty = 0
     safety_stock = max(0, int(request.form.get('safety_stock', 0) or 0))
     stock = max(0, int(request.form.get('stock', 0) or 0))
     expiry_date = standardize_date(request.form.get('expiry_date', ''))
-    category = clean_input_text(request.form.get('category', ''), 60)
 
-    if category == 'ยา' and package_unit and base_unit and base_unit != 'เม็ด' and base_unit_to_tablet_rate <= 0:
+    if category == 'ยา' and split_enabled and split_mode == 'multi' and package_unit and base_unit and base_unit != 'เม็ด' and base_unit_to_tablet_rate <= 0:
         return jsonify({'success': False, 'message': f'กรุณาระบุ 1 {base_unit} มีกี่เม็ด'}), 400
 
     if not code or not name or not unit:
@@ -3324,9 +5398,9 @@ def edit_product():
     try:
         conn.execute('''
             UPDATE products 
-            SET name=?, unit=?, base_unit=?, package_unit=?, conversion_rate=?, base_unit_to_tablet_rate=?, safety_stock=?, stock=?, expiry_date=?
+            SET name=?, unit=?, base_unit=?, package_unit=?, conversion_rate=?, base_unit_to_tablet_rate=?, package_tablet_total=?, safety_stock=?, stock=?, expiry_date=?
             WHERE code=?
-        ''', (name, unit, base_unit, package_unit, conversion_rate, base_unit_to_tablet_rate, safety_stock, stock, expiry_date, code))
+        ''', (name, unit, base_unit, package_unit, conversion_rate, base_unit_to_tablet_rate, package_tablet_total, safety_stock, stock, expiry_date, code))
 
         # อัปเดต open_packages ถ้าเป็นสินค้าแยกหน่วยย่อย
         if package_unit and base_unit and conversion_rate > 1:
@@ -3338,13 +5412,13 @@ def edit_product():
                 ).fetchone()
                 if existing_open:
                     conn.execute(
-                        'UPDATE open_packages SET base_unit_qty=?, status=? WHERE product_id=?',
-                        (open_base_qty, 'active' if open_base_qty > 0 else 'closed', pid)
+                        'UPDATE open_packages SET base_unit_qty=?, extra_tablet_qty=?, status=CASE WHEN ? > 0 OR ? > 0 THEN "active" ELSE "closed" END WHERE product_id=?',
+                        (open_base_qty, open_extra_tablet_qty, open_base_qty, open_extra_tablet_qty, pid)
                     )
-                elif open_base_qty > 0:
+                elif open_base_qty > 0 or open_extra_tablet_qty > 0:
                     conn.execute(
-                        'INSERT INTO open_packages (product_id, base_unit_qty, status) VALUES (?, ?, ?)',
-                        (pid, open_base_qty, 'active')
+                        'INSERT INTO open_packages (product_id, base_unit_qty, extra_tablet_qty, status) VALUES (?, ?, ?, ?)',
+                        (pid, open_base_qty, open_extra_tablet_qty, 'active')
                     )
 
         conn.commit()
@@ -3498,6 +5572,268 @@ def filter_logs():
     response.headers['X-Total-Pages'] = total_pages # ส่งเลขหน้าใหม่ไปให้ JS
     return response
 
+# ==================== 📬 Email Notification Settings ====================
+
+@app.route('/admin/email_settings', methods=['GET', 'POST'])
+def email_settings():
+    """⚙️ Email Notification Settings Page"""
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('index'))
+
+    role = session.get('admin_role', 'superadmin')
+    if role != 'superadmin':
+        flash('❌ เฉพาะบัญชี superadmin เท่านั้นที่ตั้งค่า Email Notifications ได้', 'danger')
+        return redirect(url_for('admin_dashboard', module='stock'))
+
+    admin_id = 'superadmin'
+    popup_mode = str(request.args.get('popup', '')).strip().lower() in ('1', 'true', 'yes', 'on')
+    
+    if request.method == 'POST':
+        # Save settings
+        conn = get_db_connection()
+        try:
+            ensure_notification_settings_columns(conn)
+            existing_row = conn.execute(
+                'SELECT * FROM notification_settings WHERE admin_id = ?',
+                (admin_id,)
+            ).fetchone()
+            existing = dict(existing_row) if existing_row else {}
+
+            email_recipients = (request.form.get('email_recipients', '') if 'email_recipients' in request.form else existing.get('email_recipients', '')).strip()
+            email_recipients_pc1 = (request.form.get('email_recipients_pc1', '') if 'email_recipients_pc1' in request.form else existing.get('email_recipients_pc1', '')).strip()
+            email_recipients_cc = (request.form.get('email_recipients_cc', '') if 'email_recipients_cc' in request.form else existing.get('email_recipients_cc', '')).strip()
+
+            # Parse checkboxes
+            settings = {
+                'approval_email': (request.form.get('approval_email') == 'on') if 'approval_email' in request.form else bool(existing.get('approval_email', True)),
+                'approval_line': False,
+                'rejection_email': (request.form.get('rejection_email') == 'on') if 'rejection_email' in request.form else bool(existing.get('rejection_email', True)),
+                'rejection_line': False,
+                'low_stock_email': (request.form.get('low_stock_email') == 'on') if 'low_stock_email' in request.form else bool(existing.get('low_stock_email', True)),
+                'low_stock_line': False,
+                'email_recipients': email_recipients,
+                'email_recipients_pc1': email_recipients_pc1,
+                'email_recipients_cc': email_recipients_cc
+            }
+            
+            # Upsert ป้องกันชน UNIQUE และรองรับ concurrent requests
+            cols = ', '.join(settings.keys())
+            placeholders = ', '.join(['?'] * (len(settings) + 1))
+            update_fields = ', '.join(f'{k} = excluded.{k}' for k in settings.keys())
+            values = [admin_id] + list(settings.values())
+            conn.execute(
+                f'''
+                INSERT INTO notification_settings (admin_id, {cols})
+                VALUES ({placeholders})
+                ON CONFLICT(admin_id) DO UPDATE SET
+                    {update_fields},
+                    updated_at = CURRENT_TIMESTAMP
+                ''',
+                values
+            )
+            conn.execute("DELETE FROM notification_settings WHERE admin_id != 'superadmin'")
+            
+            conn.commit()
+            flash('✅ บันทึกการตั้งค่าแจ้งเตือนเรียบร้อย', 'success')
+            if popup_mode:
+                return redirect(url_for('email_settings', popup='1'))
+            return redirect(url_for('admin_dashboard', module='stock'))
+        finally:
+            conn.close()
+    
+    # Get current settings
+    conn = get_db_connection()
+    try:
+        ensure_notification_settings_columns(conn)
+        settings = conn.execute(
+            'SELECT * FROM notification_settings WHERE admin_id = ?',
+            (admin_id,)
+        ).fetchone()
+        if not settings and admin_id != 'superadmin':
+            settings = conn.execute(
+                'SELECT * FROM notification_settings WHERE admin_id = ?',
+                ('superadmin',)
+            ).fetchone()
+
+        recent_test_logs = conn.execute(
+            '''
+            SELECT admin_id, recipients, subject, status, error_message, created_at
+            FROM email_test_logs
+            ORDER BY datetime(created_at) DESC, id DESC
+            LIMIT 10
+            '''
+        ).fetchall()
+
+        recent_delivery_logs = conn.execute(
+            '''
+            SELECT admin_id, notification_type, scope, channel, recipients, status, error_message, location, role, created_at
+            FROM notification_delivery_logs
+            ORDER BY datetime(created_at) DESC, id DESC
+            LIMIT 30
+            '''
+        ).fetchall()
+        
+        if settings:
+            settings = dict(settings)
+        else:
+            settings = {
+                'approval_email': True,
+                'approval_line': False,
+                'rejection_email': True,
+                'rejection_line': False,
+                'low_stock_email': True,
+                'low_stock_line': False,
+                'email_recipients': '',
+                'email_recipients_pc1': '',
+                'email_recipients_cc': ''
+            }
+            settings['_effective_owner'] = 'superadmin'
+            settings['_viewer_role'] = role
+    finally:
+        conn.close()
+    
+    return render_template(
+        'email_settings.html',
+        settings=settings,
+        recent_test_logs=recent_test_logs,
+        recent_delivery_logs=recent_delivery_logs,
+        popup_mode=popup_mode
+    )
+
+@app.route('/admin/email_settings/test', methods=['POST'])
+def email_settings_test():
+    """ส่งอีเมลทดสอบจากหน้าตั้งค่า และบันทึก log ผลการทดสอบ"""
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('index'))
+
+    role = session.get('admin_role', 'superadmin')
+    if role != 'superadmin':
+        flash('❌ เฉพาะบัญชี superadmin เท่านั้นที่ทดสอบ Email Notifications ได้', 'danger')
+        return redirect(url_for('admin_dashboard', module='stock'))
+
+    admin_id = 'superadmin'
+    popup_mode = str(request.form.get('popup', '')).strip().lower() in ('1', 'true', 'yes', 'on')
+    test_scope = clean_input_text(request.form.get('test_scope', 'all'), 20).lower() or 'all'
+
+    form_recipients_default = parse_email_recipients(request.form.get('email_recipients', '').strip())
+    form_recipients_pc1 = parse_email_recipients(request.form.get('email_recipients_pc1', '').strip())
+    form_recipients_cc = parse_email_recipients(request.form.get('email_recipients_cc', '').strip())
+
+    # บันทึกค่าผู้รับจากฟอร์มก่อนทดสอบ เพื่อไม่ให้ค่าหายหลัง redirect
+    raw_default = request.form.get('email_recipients', '').strip()
+    raw_pc1 = request.form.get('email_recipients_pc1', '').strip()
+    raw_cc = request.form.get('email_recipients_cc', '').strip()
+    try:
+        conn = get_db_connection()
+        ensure_notification_settings_columns(conn)
+        existing = conn.execute(
+            'SELECT email_recipients, email_recipients_pc1, email_recipients_cc FROM notification_settings WHERE admin_id = ?',
+            (admin_id,)
+        ).fetchone()
+        if existing:
+            if 'email_recipients' not in request.form:
+                raw_default = existing['email_recipients'] or ''
+            if 'email_recipients_pc1' not in request.form:
+                raw_pc1 = existing['email_recipients_pc1'] or ''
+            if 'email_recipients_cc' not in request.form:
+                raw_cc = existing['email_recipients_cc'] or ''
+
+        conn.execute(
+            '''
+            INSERT INTO notification_settings (admin_id, email_recipients, email_recipients_pc1, email_recipients_cc)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(admin_id) DO UPDATE SET
+                email_recipients = excluded.email_recipients,
+                email_recipients_pc1 = excluded.email_recipients_pc1,
+                email_recipients_cc = excluded.email_recipients_cc,
+                updated_at = CURRENT_TIMESTAMP
+            ''',
+            (admin_id, raw_default, raw_pc1, raw_cc)
+        )
+        conn.execute("DELETE FROM notification_settings WHERE admin_id != 'superadmin'")
+        conn.commit()
+    except Exception as e:
+        print(f'Warning: cannot persist recipients before test: {e}')
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    def collect_test_recipients(scope_name, default_list, pc1_list, cc_list):
+        if scope_name == 'default':
+            return list(dict.fromkeys(default_list))
+        if scope_name == 'pc1':
+            return list(dict.fromkeys(pc1_list or default_list))
+        if scope_name == 'cc':
+            return list(dict.fromkeys(cc_list or default_list))
+        merged = []
+        merged.extend(default_list)
+        merged.extend(pc1_list)
+        merged.extend(cc_list)
+        return list(dict.fromkeys(merged))
+
+    recipients = collect_test_recipients(test_scope, form_recipients_default, form_recipients_pc1, form_recipients_cc)
+
+    if not recipients:
+        conn = get_db_connection()
+        try:
+            ensure_notification_settings_columns(conn)
+            row = conn.execute(
+                'SELECT email_recipients, email_recipients_pc1, email_recipients_cc FROM notification_settings WHERE admin_id = ?',
+                (admin_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if row:
+            db_default = parse_email_recipients(row['email_recipients'])
+            db_pc1 = parse_email_recipients(row['email_recipients_pc1'])
+            db_cc = parse_email_recipients(row['email_recipients_cc'])
+            recipients = collect_test_recipients(test_scope, db_default, db_pc1, db_cc)
+
+    scope_label = 'ALL' if test_scope == 'all' else test_scope.upper()
+    subject = f"[PCM TEST:{scope_label}] Email Notification Test {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    body = (
+        "This is a test email from PCM Email Notification Settings.\n\n"
+        f"Admin: {admin_id}\n"
+        f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    html_body = f"""
+    <div style=\"font-family:Segoe UI,Arial,sans-serif;line-height:1.5\">
+      <h3 style=\"margin-bottom:8px\">PCM Email Notification Test</h3>
+      <p style=\"margin:0 0 8px 0\">This is a test email from PCM system.</p>
+      <ul style=\"margin:0;padding-left:18px\">
+        <li><strong>Admin:</strong> {admin_id}</li>
+        <li><strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</li>
+      </ul>
+    </div>
+    """
+
+    if not recipients:
+        log_email_test_result(admin_id, [], subject, 'failed', 'no-recipients')
+        flash('❌ ไม่พบผู้รับอีเมลทดสอบ กรุณากรอก Email Recipients ก่อน', 'danger')
+        if popup_mode:
+            return redirect(url_for('email_settings', popup='1'))
+        return redirect(url_for('email_settings'))
+
+    sent, error = send_email_message(
+        subject=subject,
+        body=body,
+        recipients=recipients,
+        html_body=html_body
+    )
+
+    if sent:
+        log_email_test_result(admin_id, recipients, subject, 'sent', '')
+        flash(f'✅ ส่งอีเมลทดสอบสำเร็จ ({len(recipients)} ผู้รับ)', 'success')
+    else:
+        log_email_test_result(admin_id, recipients, subject, 'failed', error)
+        flash(f'❌ ส่งอีเมลทดสอบไม่สำเร็จ: {error}', 'danger')
+
+    if popup_mode:
+        return redirect(url_for('email_settings', popup='1'))
+    return redirect(url_for('email_settings'))
+
 @app.route('/admin/logout', methods=['POST'])
 def admin_logout():
     session.clear()
@@ -3573,6 +5909,7 @@ def add_product_ajax():
     product_id = request.form.get('product_id', type=int)
     lot_number = normalize_lot_number(request.form.get('lot_number'))
     qty = int(request.form.get('add_qty', 0) or 0)
+    qty_unit = (request.form.get('qty_unit', 'package') or 'package').strip().lower()
     receive_date = standardize_date(request.form.get('receive_date'))
     expire_date = standardize_date(request.form.get('expire_date', ''))
 
@@ -3581,37 +5918,91 @@ def add_product_ajax():
 
     conn = get_db_connection()
     try:
-        # 1. Upsert Lot แบบ normalize เพื่อลดความเสี่ยงข้อมูลซ้ำจากรูปแบบเลข Lot ต่างกัน
-        lot_rows = conn.execute(
-            'SELECT id, lot_number, received_date FROM product_lots WHERE product_id = ?',
-            (product_id,)
-        ).fetchall()
-        existing_lot = next((
-            row for row in lot_rows
-            if normalize_lot_number(row['lot_number']) == lot_number and standardize_date(row['received_date']) == receive_date
-        ), None)
+        product = conn.execute('''
+            SELECT id, code, name, category, unit, base_unit, package_unit, conversion_rate
+            FROM products WHERE id = ?
+        ''', (product_id,)).fetchone()
+        if not product:
+            return jsonify({'success': False, 'message': 'ไม่พบรายการสินค้า'}), 404
 
-        if existing_lot:
-            conn.execute('''
-                UPDATE product_lots
-                SET lot_number = ?, qty = qty + ?, expiry_date = CASE WHEN ? = '' THEN expiry_date ELSE ? END
-                WHERE id = ?
-            ''', (lot_number, qty, expire_date, expire_date, existing_lot['id']))
-        else:
-            conn.execute('''
-                INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (product_id, lot_number, qty, receive_date, expire_date))
+        is_split_med = is_split_tablet_medicine(product)
+        if not is_split_med:
+            qty_unit = 'package'
+        if qty_unit not in ('package', 'base'):
+            return jsonify({'success': False, 'message': 'หน่วยเพิ่มสต็อกไม่ถูกต้อง'}), 400
+
+        conversion_rate = max(1, int(product['conversion_rate'] or 1))
+        lot_qty_to_add = qty
+        stock_qty_to_add = qty
+        open_base_to_add = 0
+        if is_split_med and qty_unit == 'base':
+            stock_qty_to_add = qty // conversion_rate
+            open_base_to_add = qty % conversion_rate
+            lot_qty_to_add = stock_qty_to_add
+
+        # 1. Upsert Lot แบบ normalize เพื่อลดความเสี่ยงข้อมูลซ้ำจากรูปแบบเลข Lot ต่างกัน
+        if lot_qty_to_add > 0:
+            lot_rows = conn.execute(
+                'SELECT id, lot_number, received_date FROM product_lots WHERE product_id = ?',
+                (product_id,)
+            ).fetchall()
+            existing_lot = next((
+                row for row in lot_rows
+                if normalize_lot_number(row['lot_number']) == lot_number and standardize_date(row['received_date']) == receive_date
+            ), None)
+
+            if existing_lot:
+                conn.execute('''
+                    UPDATE product_lots
+                    SET lot_number = ?, qty = qty + ?, expiry_date = CASE WHEN ? = '' THEN expiry_date ELSE ? END
+                    WHERE id = ?
+                ''', (lot_number, lot_qty_to_add, expire_date, expire_date, existing_lot['id']))
+            else:
+                conn.execute('''
+                    INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (product_id, lot_number, lot_qty_to_add, receive_date, expire_date))
 
         # 2. อัปเดตยอดรวม Stock ใน Table products
-        conn.execute('UPDATE products SET stock = stock + ? WHERE id = ?', (qty, product_id))
+        if stock_qty_to_add > 0:
+            conn.execute('UPDATE products SET stock = stock + ? WHERE id = ?', (stock_qty_to_add, product_id))
+
+        if open_base_to_add > 0:
+            existing_open = conn.execute('''
+                SELECT id
+                FROM open_packages
+                WHERE product_id = ? AND status = 'active'
+                ORDER BY opened_date ASC, id ASC
+                LIMIT 1
+            ''', (product_id,)).fetchone()
+
+            if existing_open:
+                conn.execute('''
+                    UPDATE open_packages
+                    SET base_unit_qty = base_unit_qty + ?, status = 'active'
+                    WHERE id = ?
+                ''', (open_base_to_add, existing_open['id']))
+            else:
+                conn.execute('''
+                    INSERT INTO open_packages (product_id, lot_id, opened_date, base_unit_qty, extra_tablet_qty, package_unit_qty_before, status)
+                    VALUES (?, NULL, datetime('now'), ?, 0, 1, 'active')
+                ''', (product_id, open_base_to_add))
 
         # 3. บันทึก Log การนำเข้า
         admin_name = session.get('admin_name')
+        action_text = f"รับเข้า Lot: {lot_number}"
+        log_qty = qty
+        if is_split_med:
+            package_unit = product['package_unit'] or product['unit'] or 'แพ็ค'
+            base_unit = product['base_unit'] or 'หน่วยย่อย'
+            if qty_unit == 'base':
+                action_text = f"รับเข้า Lot: {lot_number} ({qty} {base_unit})"
+            else:
+                action_text = f"รับเข้า Lot: {lot_number} ({qty} {package_unit})"
         conn.execute('''
             INSERT INTO transaction_logs (emp_id, product_id, action, qty, status) 
             VALUES (?, ?, ?, ?, 'Completed')
-        ''', (f"ADMIN:{admin_name}", product_id, f"รับเข้า Lot: {lot_number}", qty))
+        ''', (f"ADMIN:{admin_name}", product_id, action_text, log_qty))
 
         conn.commit()
         return jsonify({'success': True, 'message': 'เพิ่ม Lot ของสำเร็จ!'})
@@ -3640,7 +6031,7 @@ def write_off_ajax():
     try:
         start_write_transaction(conn)
         product = conn.execute('''
-            SELECT id, stock, unit, category, base_unit, package_unit, conversion_rate
+            SELECT id, stock, unit, category, base_unit, package_unit, conversion_rate, base_unit_to_tablet_rate, package_tablet_total
             FROM products WHERE id = ?
         ''', (product_id,)).fetchone()
 
@@ -3657,6 +6048,11 @@ def write_off_ajax():
             return jsonify({'success': False, 'message': 'หน่วยตัดจำหน่ายไม่ถูกต้อง'})
 
         conv = max(1, int(product['conversion_rate'] or 1))
+        base_to_tablet_rate = max(0, int(product['base_unit_to_tablet_rate'] or 0))
+        package_tablet_total = max(0, int(product['package_tablet_total'] or 0))
+        if package_tablet_total <= 0 and base_to_tablet_rate > 0:
+            package_tablet_total = conv * base_to_tablet_rate
+        per_package_extra_tablet = max(0, package_tablet_total - (conv * base_to_tablet_rate)) if base_to_tablet_rate > 0 else 0
         stock_pkg_qty = int(product['stock'] or 0)
         open_base_qty = 0
 
@@ -3739,7 +6135,7 @@ def write_off_ajax():
         if is_split_med and qty_unit == 'base':
             # ใช้ของคงเหลือใน open_packages ก่อน
             open_rows = conn.execute('''
-                SELECT id, base_unit_qty
+                SELECT id, base_unit_qty, COALESCE(extra_tablet_qty, 0) as extra_tablet_qty
                 FROM open_packages
                 WHERE product_id = ? AND status = 'active' AND base_unit_qty > 0
                 ORDER BY opened_date ASC, id ASC
@@ -3754,16 +6150,16 @@ def write_off_ajax():
                 conn.execute('''
                     UPDATE open_packages
                     SET base_unit_qty = MAX(0, base_unit_qty - ?),
-                        status = CASE WHEN base_unit_qty - ? <= 0 THEN 'used' ELSE 'active' END
+                        status = CASE WHEN base_unit_qty - ? <= 0 AND COALESCE(extra_tablet_qty, 0) <= 0 THEN 'used' ELSE 'active' END
                     WHERE id = ?
                 ''', (take, take, row['id']))
                 open_remaining -= take
 
             if new_open_base_qty > 0:
                 conn.execute('''
-                    INSERT INTO open_packages (product_id, lot_id, opened_date, base_unit_qty, package_unit_qty_before, status)
-                    VALUES (?, NULL, datetime('now'), ?, 1, 'active')
-                ''', (product_id, int(new_open_base_qty)))
+                    INSERT INTO open_packages (product_id, lot_id, opened_date, base_unit_qty, extra_tablet_qty, package_unit_qty_before, status)
+                    VALUES (?, NULL, datetime('now'), ?, ?, 1, 'active')
+                ''', (product_id, int(new_open_base_qty), int(per_package_extra_tablet)))
 
         # --- 2. อัปเดตสต็อกรวมในตารางหลัก (products) ---
         if qty_package_to_cut > 0:
@@ -4012,7 +6408,7 @@ def list_users():
     search = clean_input_text(request.args.get('search', ''), 100)
     conn = get_db_connection()
 
-    query = "SELECT emp_id, name, department, location, COALESCE(email, '') AS email FROM users WHERE 1=1"
+    query = "SELECT emp_id, name, COALESCE(name_eng, '') AS name_eng, department, location, COALESCE(email, '') AS email FROM users WHERE 1=1"
     params = []
 
     if role == 'admin_pc1':
@@ -4021,9 +6417,9 @@ def list_users():
         query += " AND (location = 'CC' OR location = 'Coil Center' OR location LIKE '%CC%' OR location LIKE '%Coil Center%')"
 
     if search:
-        query += " AND (emp_id LIKE ? OR name LIKE ? OR department LIKE ? OR location LIKE ? OR COALESCE(email, '') LIKE ?)"
+        query += " AND (emp_id LIKE ? OR name LIKE ? OR COALESCE(name_eng, '') LIKE ? OR department LIKE ? OR location LIKE ? OR COALESCE(email, '') LIKE ?)"
         like_term = f"%{search}%"
-        params.extend([like_term, like_term, like_term, like_term, like_term])
+        params.extend([like_term, like_term, like_term, like_term, like_term, like_term])
 
     query += " ORDER BY emp_id ASC"
 
@@ -4038,6 +6434,7 @@ def add_user_ajax():
 
     emp_id = clean_input_text(request.form.get('emp_id'), 20)
     name = clean_input_text(request.form.get('name'), 100)
+    name_eng = clean_input_text(request.form.get('name_eng'), 100)
     dept = clean_input_text(request.form.get('department'), 100)
     loc = normalize_location_value(request.form.get('location'))
     email = normalize_email_value(request.form.get('email'))
@@ -4053,8 +6450,8 @@ def add_user_ajax():
     
     conn = get_db_connection()
     try:
-        conn.execute('INSERT INTO users (emp_id, name, department, location, email, is_locked) VALUES (?, ?, ?, ?, ?, 0)',
-                     (emp_id, name, dept or '-', loc, email))
+        conn.execute('INSERT INTO users (emp_id, name, name_eng, department, location, email, is_locked) VALUES (?, ?, ?, ?, ?, ?, 0)',
+                     (emp_id, name, name_eng or '', dept or '-', loc, email))
         conn.commit()
         return jsonify({'success': True})
     except Exception:
@@ -4099,6 +6496,7 @@ def update_user_ajax():
     
     emp_id = clean_input_text(request.form.get('emp_id'), 20)
     name = clean_input_text(request.form.get('name'), 100)
+    name_eng = clean_input_text(request.form.get('name_eng'), 100)
     dept = clean_input_text(request.form.get('department'), 100)
     loc = normalize_location_value(request.form.get('location'))
     email = normalize_email_value(request.form.get('email'))
@@ -4134,8 +6532,8 @@ def update_user_ajax():
         conn.close()
         return jsonify({'success': False, 'message': 'ไม่มีสิทธิ์ย้ายพนักงานออกนอก CC'}), 403
 
-    conn.execute('UPDATE users SET name=?, department=?, location=?, email=? WHERE emp_id=?', 
-                 (name, dept or '-', loc, email, emp_id))
+    conn.execute('UPDATE users SET name=?, name_eng=?, department=?, location=?, email=? WHERE emp_id=?', 
+                 (name, name_eng or '', dept or '-', loc, email, emp_id))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -4266,32 +6664,47 @@ def scheduled_daily_alert():
             ('CC', is_cc_location, 'cc'),
             ('PC1', is_pc1_location, 'pc1')
         ]:
-            msg = ""
-
             loc_expiry = [i for i in expiring_items if location_check(i['location'])]
             loc_helmets = [h for h in helmet_alerts if location_check(h['location'])]
 
-            if loc_expiry:
-                msg += f"⚠️ [{location_label}] แจ้งเตือนของใกล้หมดอายุ\n"
-                for item in loc_expiry:
-                    date_parts = item['formatted_expiry'].split('-')
-                    show_date = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}" if len(date_parts) == 3 else item['formatted_expiry']
-                    msg += f"📦 {item['name']} ({item['category']})\n🗓️ หมดอายุ: {show_date}\n──────────────\n"
+            exp_payload = []
+            for item in loc_expiry:
+                date_parts = item['formatted_expiry'].split('-')
+                show_date = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}" if len(date_parts) == 3 else item['formatted_expiry']
+                exp_payload.append({
+                    'name': item['name'],
+                    'category': item['category'],
+                    'show_date': show_date
+                })
 
-            if loc_helmets:
-                if msg: msg += "\n"
-                msg += f"👷 [{location_label}] ครบกำหนดเปลี่ยนหมวกเซฟตี้\n"
-                for alert in loc_helmets:
-                    lot_text = f" [Lot: {alert['lot_id']}]" if alert['lot_id'] else ""
-                    last_date = alert['last_timestamp'][:10]
-                    date_parts = last_date.split('-')
-                    show_date = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}" if len(date_parts) == 3 else last_date
-                    msg += f"👤 {alert['emp_name']} ({alert['department']})\n"
-                    msg += f"📦 {alert['product_name']}{lot_text}\n"
-                    msg += f"🗓️ เบิกล่าสุด: {show_date}\n──────────────\n"
+            helmet_payload = []
+            for alert in loc_helmets:
+                lot_text = f" [Lot: {alert['lot_id']}]" if alert['lot_id'] else ""
+                last_date = alert['last_timestamp'][:10]
+                date_parts = last_date.split('-')
+                show_date = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}" if len(date_parts) == 3 else last_date
+                helmet_payload.append({
+                    'emp_name': alert['emp_name'],
+                    'department': alert['department'],
+                    'product_name': f"{alert['product_name']}{lot_text}",
+                    'show_date': show_date
+                })
 
-            if msg:
-                send_line_message(msg.strip(), location=location_key)
+            periodic_payload = {
+                'location_label': location_label,
+                'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'expiring_items': exp_payload,
+                'helmet_alerts': helmet_payload,
+            }
+
+            send_smart_notification(
+                notification_type='low_stock',
+                message=build_periodic_alert_email_body(periodic_payload),
+                location=location_label,
+                email_body=build_periodic_alert_email_body(periodic_payload),
+                html_body=build_periodic_alert_email_html(periodic_payload),
+                admin_id='superadmin'
+            )
 
 def update_scheduler_time(new_time):
     """
@@ -4357,7 +6770,7 @@ def save_alert_time():
 
     update_scheduler_time(new_time)
     
-    return jsonify({'success': True, 'message': f'เปลี่ยนเวลาเป็น {new_time} น. เรียบร้อย'})
+    return jsonify({'success': True, 'message': f'เปลี่ยนเวลาแจ้งเตือนอีเมลเป็น {new_time} น. เรียบร้อย'})
 
 @app.route('/admin/get_ga_email_settings')
 def get_ga_email_settings():
@@ -4466,6 +6879,39 @@ def setup_settings():
     except Exception as e:
         return f"❌ เกิดข้อผิดพลาด: {str(e)}"
 
+
+@app.route('/admin/backup_database')
+def backup_database():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('index'))
+    if session.get('admin_role') != 'superadmin':
+        flash('❌ เฉพาะบัญชี superadmin เท่านั้นที่สำรองข้อมูลได้', 'danger')
+        return redirect(url_for('admin_dashboard', module='stock'))
+
+    backup_timestamp = get_thailand_time().strftime('%Y%m%d_%H%M%S')
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    backup_path = os.path.join(BACKUP_DIR, f'factory_stock_backup_{backup_timestamp}.db')
+
+    try:
+        source_conn = sqlite3.connect(DB_NAME)
+        backup_conn = sqlite3.connect(backup_path)
+        try:
+            source_conn.backup(backup_conn)
+        finally:
+            backup_conn.close()
+            source_conn.close()
+    except Exception:
+        if os.path.exists(backup_path):
+            os.remove(backup_path)
+        raise
+
+    return send_file(
+        backup_path,
+        as_attachment=True,
+        download_name=f'factory_stock_backup_{backup_timestamp}.db',
+        mimetype='application/octet-stream'
+    )
+
 # --- 2. ตั้ง Job แบบใช้ฟังก์ชันธรรมดา ---
 @scheduler.task('cron', id='Daily_Alert_Job', hour=14, minute=45, timezone='Asia/Bangkok')
 def scheduled_daily_alert_task():
@@ -4480,7 +6926,7 @@ def test_alert():
         return "Unauthorized", 401
 
     scheduled_daily_alert()
-    return "🚀 สั่งรันระบบแจ้งเตือนเรียบร้อย! เช็ค LINE และ Terminal"
+    return "🚀 สั่งรันระบบแจ้งเตือนเรียบร้อย! เช็ค Email และ Terminal"
 
 @app.route('/admin/get_monthly_report_data')
 def get_monthly_report_data():
@@ -4569,7 +7015,7 @@ if __name__ == '__main__':
         # 3. เพิ่ม Job เข้าไปในระบบ (ถ้ามีอยู่แล้วให้ทับของเก่า)
         scheduler.add_job(
             id='Daily_Alert_Job',
-            func=scheduled_daily_alert, # ชื่อฟังก์ชันส่ง LINE 
+            func=scheduled_daily_alert, # ชื่อฟังก์ชันส่ง Email
             trigger='cron',
             hour=int(h),
             minute=int(m),

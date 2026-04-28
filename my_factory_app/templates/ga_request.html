@@ -62,6 +62,33 @@
             border-radius: 16px;
             border: 1px solid rgba(12, 67, 135, 0.12);
         }
+
+        .ga-image-viewer-stage {
+            background: #f2f5fb;
+            border: 1px dashed rgba(27, 42, 58, 0.2);
+            border-radius: 14px;
+            min-height: 320px;
+            max-height: 70vh;
+            overflow: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: default;
+        }
+
+        .ga-image-viewer-stage.is-dragging {
+            cursor: grabbing !important;
+        }
+
+        .ga-image-viewer-stage img {
+            max-width: 100%;
+            max-height: none;
+            transform-origin: center center;
+            transition: transform 0.15s ease;
+            -webkit-user-select: none;
+            user-select: none;
+            pointer-events: none;
+        }
     </style>
 </head>
 
@@ -193,7 +220,16 @@
                                     <td>
                                         <div class="fw-medium">{{ req['title'] }}</div>
                                         {% if req['image_path'] %}
-                                        <div class="small mt-1"><a href="{{ ga_image_url(req['image_path']) }}" target="_blank">เปิดรูปแนบ</a></div>
+                                        <div class="small mt-1">
+                                            <button type="button"
+                                                class="btn btn-link btn-sm p-0 align-baseline"
+                                                data-image-url="{{ ga_image_url(req['image_path']) }}"
+                                                data-image-title="{{ req['title'] | e }}"
+                                                data-request-no="{{ req['id'] }}"
+                                                onclick="openGaImageViewer(this)">
+                                                <i class="fas fa-image me-1"></i>เปิดรูปแนบ
+                                            </button>
+                                        </div>
                                         {% endif %}
                                         {% if req['admin_note'] %}
                                         <div class="small text-muted mt-1">หมายเหตุ: {{ req['admin_note'] }}</div>
@@ -217,7 +253,136 @@
         </div>
     </div>
 
+    <div class="modal fade" id="gaImageViewerModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-dark text-white border-0">
+                    <div>
+                        <h5 class="modal-title fw-medium mb-1"><i class="fas fa-image text-info me-2"></i>รูปแนบ GA Request</h5>
+                        <div class="small text-white-50" id="gaImageViewerMeta">-</div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-3 p-lg-4">
+                    <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+                        <div class="btn-group" role="group" aria-label="zoom-controls">
+                            <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" onclick="zoomGaImage(-0.2)">
+                                <i class="fas fa-magnifying-glass-minus me-1"></i> ย่อ
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" onclick="resetGaImageZoom()">
+                                <i class="fas fa-expand me-1"></i> พอดีจอ
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" onclick="zoomGaImage(0.2)">
+                                <i class="fas fa-magnifying-glass-plus me-1"></i> ขยาย
+                            </button>
+                        </div>
+                        <span class="badge bg-light text-dark" id="gaImageZoomLabel">100%</span>
+                        <a id="gaImageDownloadBtn" href="#" class="btn btn-sm btn-primary rounded-pill" download>
+                            <i class="fas fa-download me-1"></i> ดาวน์โหลดรูปภาพ
+                        </a>
+                    </div>
+                    <div class="ga-image-viewer-stage" id="gaImageViewerStage">
+                        <img id="gaImageViewerImg" src="" alt="GA Attachment">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        let gaImageScale = 1;
+        const GA_IMAGE_MIN_SCALE = 0.4;
+        const GA_IMAGE_MAX_SCALE = 3;
+        let gaImageDragging = false;
+        let gaDragStartX = 0;
+        let gaDragStartY = 0;
+        let gaStageStartScrollLeft = 0;
+        let gaStageStartScrollTop = 0;
+
+        function applyGaImageTransform() {
+            const img = document.getElementById('gaImageViewerImg');
+            const zoomLabel = document.getElementById('gaImageZoomLabel');
+            const stage = document.getElementById('gaImageViewerStage');
+            if (!img || !zoomLabel) return;
+            img.style.transform = `scale(${gaImageScale})`;
+            zoomLabel.textContent = `${Math.round(gaImageScale * 100)}%`;
+            if (stage && !gaImageDragging) {
+                stage.style.cursor = gaImageScale > 1 ? 'grab' : 'default';
+            }
+        }
+
+        function resetGaImageZoom() {
+            gaImageScale = 1;
+            applyGaImageTransform();
+        }
+
+        function zoomGaImage(step) {
+            gaImageScale = Math.max(GA_IMAGE_MIN_SCALE, Math.min(GA_IMAGE_MAX_SCALE, gaImageScale + step));
+            applyGaImageTransform();
+        }
+
+        function startGaImageDrag(event) {
+            const stage = document.getElementById('gaImageViewerStage');
+            if (!stage || gaImageScale <= 1) return;
+
+            gaImageDragging = true;
+            gaDragStartX = event.clientX;
+            gaDragStartY = event.clientY;
+            gaStageStartScrollLeft = stage.scrollLeft;
+            gaStageStartScrollTop = stage.scrollTop;
+            stage.classList.add('is-dragging');
+            stage.style.cursor = 'grabbing';
+        }
+
+        function moveGaImageDrag(event) {
+            if (!gaImageDragging) return;
+            const stage = document.getElementById('gaImageViewerStage');
+            if (!stage) return;
+            event.preventDefault();
+
+            const deltaX = event.clientX - gaDragStartX;
+            const deltaY = event.clientY - gaDragStartY;
+            stage.scrollLeft = gaStageStartScrollLeft - deltaX;
+            stage.scrollTop = gaStageStartScrollTop - deltaY;
+        }
+
+        function endGaImageDrag() {
+            gaImageDragging = false;
+            const stage = document.getElementById('gaImageViewerStage');
+            if (stage) {
+                stage.classList.remove('is-dragging');
+                stage.style.cursor = gaImageScale > 1 ? 'grab' : 'default';
+            }
+        }
+
+        function openGaImageViewer(triggerEl) {
+            const imageUrl = triggerEl.getAttribute('data-image-url') || '';
+            const title = triggerEl.getAttribute('data-image-title') || '';
+            const requestNo = triggerEl.getAttribute('data-request-no') || '';
+            const img = document.getElementById('gaImageViewerImg');
+            const meta = document.getElementById('gaImageViewerMeta');
+            const downloadBtn = document.getElementById('gaImageDownloadBtn');
+            const stage = document.getElementById('gaImageViewerStage');
+
+            if (!imageUrl || !img || !meta || !downloadBtn) return;
+
+            img.src = imageUrl;
+            img.alt = title ? `GA Attachment - ${title}` : 'GA Attachment';
+            meta.textContent = title ? `${title}${requestNo ? ` | #${requestNo}` : ''}` : (requestNo ? `GA Request #${requestNo}` : 'รูปแนบ');
+            downloadBtn.href = imageUrl;
+            downloadBtn.setAttribute('download', `${requestNo || 'ga-request'}-attachment`);
+
+            resetGaImageZoom();
+            endGaImageDrag();
+            if (stage) {
+                stage.scrollLeft = 0;
+                stage.scrollTop = 0;
+            }
+
+            new bootstrap.Modal(document.getElementById('gaImageViewerModal')).show();
+        }
+
         function previewAttachment(event) {
             const file = event.target.files && event.target.files[0];
             const previewWrapper = document.getElementById('previewWrapper');
@@ -232,6 +397,32 @@
             preview.src = URL.createObjectURL(file);
             previewWrapper.classList.remove('d-none');
         }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const gaViewerStage = document.getElementById('gaImageViewerStage');
+            if (gaViewerStage) {
+                gaViewerStage.addEventListener('wheel', (event) => {
+                    event.preventDefault();
+                    zoomGaImage(event.deltaY > 0 ? -0.1 : 0.1);
+                }, { passive: false });
+                gaViewerStage.addEventListener('mousedown', startGaImageDrag);
+                gaViewerStage.addEventListener('mousemove', moveGaImageDrag);
+                gaViewerStage.addEventListener('mouseup', endGaImageDrag);
+                gaViewerStage.addEventListener('mouseleave', endGaImageDrag);
+            }
+
+            document.addEventListener('mouseup', endGaImageDrag);
+
+            const gaViewerModalEl = document.getElementById('gaImageViewerModal');
+            if (gaViewerModalEl) {
+                gaViewerModalEl.addEventListener('hidden.bs.modal', () => {
+                    const img = document.getElementById('gaImageViewerImg');
+                    if (img) img.src = '';
+                    endGaImageDrag();
+                    resetGaImageZoom();
+                });
+            }
+        });
     </script>
 </body>
 

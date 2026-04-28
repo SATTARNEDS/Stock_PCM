@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Notification Settings - PCM</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --mail-ink: #17344f;
+            --mail-muted: #5f7080;
+            --mail-line: #d8e2ef;
+            --mail-accent: #0f7ab8;
+            --mail-accent-soft: #e6f3fb;
+            --mail-surface: #ffffff;
+            --mail-surface-soft: #f7faff;
+            --mail-warning-soft: #fff7e6;
+        }
+        body {
+            background:
+                radial-gradient(circle at top left, rgba(15, 122, 184, 0.14), transparent 38%),
+                linear-gradient(180deg, #f6f9fd 0%, #edf3fb 100%);
+            color: var(--mail-ink);
+            font-family: 'Noto Sans Thai', sans-serif;
+        }
+        body.popup-mode {
+            background:
+                radial-gradient(circle at top right, rgba(15, 122, 184, 0.1), transparent 34%),
+                linear-gradient(180deg, #f4f8fd 0%, #ebf1f9 100%);
+        }
+        .page-shell {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 1.25rem;
+        }
+        .page-shell.popup-shell {
+            max-width: 100%;
+            padding: 0.85rem;
+        }
+        .card {
+            border-radius: 1rem;
+        }
+        .hero-card {
+            border: 1px solid rgba(203, 216, 236, 0.9);
+            border-radius: 1.1rem;
+            overflow: hidden;
+            box-shadow: 0 16px 36px rgba(29, 52, 78, 0.12);
+        }
+        .hero-header {
+            background: linear-gradient(135deg, #10293e 0%, #0f6d95 100%);
+            color: #fff;
+            padding: 1.05rem 1.2rem;
+        }
+        .hero-title {
+            font-family: 'Kanit', 'Noto Sans Thai', sans-serif;
+            font-size: 1.35rem;
+            margin: 0;
+        }
+        .hero-subtitle {
+            color: rgba(255, 255, 255, 0.8);
+            margin-top: 0.15rem;
+            font-size: 0.88rem;
+        }
+        .section-card {
+            border: 1px solid rgba(210, 223, 241, 0.92);
+            box-shadow: 0 14px 30px rgba(29, 52, 78, 0.08);
+            background: linear-gradient(180deg, rgba(255,255,255,0.97), rgba(248,252,255,0.98));
+        }
+        .settings-surface {
+            background: linear-gradient(180deg, #ffffff, #f6fbff);
+            border: 1px solid var(--mail-line);
+            border-radius: 0.95rem;
+            padding: 0.95rem;
+        }
+        .section-title {
+            font-family: 'Kanit', 'Noto Sans Thai', sans-serif;
+            font-size: 1rem;
+            margin-bottom: 0.8rem;
+        }
+        .email-recipient-input {
+            font-family: monospace;
+            font-size: 0.88rem;
+            border-radius: 0.75rem;
+            border: 1px solid #bcd0ea;
+            min-height: 96px;
+            background: #fff;
+        }
+        .email-recipient-input:focus,
+        .form-check-input:focus {
+            box-shadow: 0 0 0 0.2rem rgba(15, 122, 184, 0.16);
+            border-color: #5ea7d7;
+        }
+        .recipient-card {
+            border: 1px solid var(--mail-line);
+            border-radius: 0.9rem;
+            background: var(--mail-surface);
+            padding: 0.85rem;
+            height: 100%;
+        }
+        .toggle-card {
+            border: 1px solid #d5e3f5;
+            border-radius: 0.95rem;
+            background: linear-gradient(180deg, #fff, #f8fbff);
+            box-shadow: 0 10px 24px rgba(18, 52, 82, 0.08);
+        }
+        .toggle-card .card-header {
+            border-bottom: 1px solid #e0ebf8;
+            background: transparent;
+        }
+        .form-check {
+            margin: 0;
+            padding: 0.6rem 0.75rem;
+            border: 1px solid #d8e7f5;
+            border-radius: 0.75rem;
+            background: #fff;
+        }
+        .form-check-input {
+            margin-right: 0.5rem;
+            margin-top: 0.2rem;
+        }
+        .note-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            background: var(--mail-warning-soft);
+            border: 1px solid #f5dfab;
+            color: #8a650f;
+            font-size: 0.76rem;
+            font-weight: 600;
+            padding: 0.34rem 0.62rem;
+            border-radius: 999px;
+        }
+        .tip-card {
+            border: 1px solid #cbe1f4;
+            border-radius: 0.85rem;
+            background: var(--mail-accent-soft);
+        }
+        .btn-soft {
+            border-radius: 999px;
+            font-weight: 600;
+            border: 1px solid rgba(161, 188, 219, 0.9);
+            background: #fff;
+            color: #2d5574;
+            padding-inline: 0.95rem;
+        }
+        .btn-soft:hover {
+            background: #f2f7fc;
+            color: #194462;
+        }
+        .btn-primary,
+        .btn-success {
+            border: 0;
+            border-radius: 999px;
+            font-weight: 700;
+            padding-inline: 1.05rem;
+            box-shadow: 0 8px 18px rgba(15, 122, 184, 0.22);
+        }
+        .table thead th {
+            font-size: 0.78rem;
+            letter-spacing: 0.02em;
+            color: #3f5971;
+            border-bottom: 1px solid #d7e4f2;
+            background: #f7fbff !important;
+        }
+        .table tbody td {
+            border-bottom-color: #e4edf7;
+            color: #2f475d;
+            font-size: 0.82rem;
+        }
+        .doc-list {
+            margin: 0;
+            padding-left: 1.1rem;
+        }
+        .doc-list li {
+            margin-bottom: 0.35rem;
+            color: #40576d;
+        }
+        .table-shell-header-dark {
+            background: linear-gradient(135deg, #1f3953, #294b69);
+            color: #fff;
+        }
+        .table-shell-header-blue {
+            background: linear-gradient(135deg, #1c668e, #2687ba);
+            color: #fff;
+        }
+        @media (max-width: 768px) {
+            .page-shell {
+                padding: 0.85rem;
+            }
+            .hero-title {
+                font-size: 1.15rem;
+            }
+        }
+    </style>
+</head>
+<body class="{% if popup_mode %}popup-mode{% endif %}">
+    <div class="page-shell {% if popup_mode %}popup-shell{% endif %}">
+        <div class="hero-card mb-3">
+            <div class="hero-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <h5 class="hero-title"><i class="fas fa-envelope-open-text text-info me-2"></i>Email Notification Settings</h5>
+                    <div class="hero-subtitle">จัดการผู้รับและประเภทการแจ้งเตือนอีเมลจากศูนย์กลางเดียว</div>
+                </div>
+                {% if not popup_mode %}
+                <a href="{{ url_for('admin_dashboard', module='stock') }}" class="btn btn-outline-light btn-sm rounded-pill px-3">
+                    <i class="fas fa-arrow-left me-1"></i>กลับหน้า Admin
+                </a>
+                {% else %}
+               
+                {% endif %}
+            </div>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="mb-3">
+            {% for category, message in messages %}
+            <div class="alert alert-{{ 'success' if category == 'success' else ('danger' if category == 'danger' else 'info') }} shadow-sm mb-2" role="alert">
+                {{ message }}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        {% if settings.get('_effective_owner') and settings.get('_effective_owner') == 'superadmin' %}
+        <div class="alert alert-warning shadow-sm" role="alert">
+            <i class="fas fa-info-circle me-2"></i>
+            หน้านี้ใช้ค่ากลางของ <strong>superadmin</strong> เพียงชุดเดียวทั้งระบบ เพื่อป้องกันข้อมูลตั้งค่าแยกบัญชีแล้วหาย
+        </div>
+        {% endif %}
+
+        <div class="card section-card border-0">
+            <div class="card-body">
+                <form method="POST" id="settingsForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    {% if popup_mode %}
+                    <input type="hidden" name="popup" value="1">
+                    {% endif %}
+                    <!-- Email Recipients Field -->
+                    <div class="settings-surface mb-3">
+                        <label class="form-label fw-bold section-title"><i class="fas fa-envelope me-2 text-primary"></i>Email Recipients (Default)</label>
+                        <textarea 
+                            class="form-control email-recipient-input"
+                            name="email_recipients" 
+                            rows="3" 
+                            placeholder="example@company.com&#10;another@company.com&#10;(separated by comma or newline)"
+                        >{{ settings.get('email_recipients', '') }}</textarea>
+                        <small class="text-muted d-block mt-2">
+                            💡 ช่องนี้ใช้เป็นค่า default หากไม่ได้กำหนดผู้รับเฉพาะฝั่ง PC1/CC
+                        </small>
+                        <small class="text-muted d-block">รองรับหลายอีเมลโดยคั่นด้วย newline, comma (,), semicolon (;), หรือเว้นวรรค</small>
+                    </div>
+
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <div class="recipient-card">
+                                <label class="form-label fw-bold"><i class="fas fa-industry me-2 text-primary"></i>Recipients - PC1</label>
+                                <textarea
+                                    class="form-control email-recipient-input"
+                                    name="email_recipients_pc1"
+                                    rows="3"
+                                    placeholder="เช่น team-pc1@example.com&#10;หรือกรอกหลายรายการบรรทัดละ 1 อีเมล"
+                                >{{ settings.get('email_recipients_pc1', '') }}</textarea>
+                                <small class="text-muted d-block mt-1">ระบบจะใช้เมื่อรายการมี location เป็น PC1</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="recipient-card">
+                                <label class="form-label fw-bold"><i class="fas fa-warehouse me-2 text-success"></i>Recipients - CC</label>
+                                <textarea
+                                    class="form-control email-recipient-input"
+                                    name="email_recipients_cc"
+                                    rows="3"
+                                    placeholder="เช่น team-cc@example.com&#10;หรือกรอกหลายรายการบรรทัดละ 1 อีเมล"
+                                >{{ settings.get('email_recipients_cc', '') }}</textarea>
+                                <small class="text-muted d-block mt-1">ระบบจะใช้เมื่อรายการมี location เป็น CC/Coil Center</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Notification Types -->
+                    <div class="mb-4">
+                        <h6 class="fw-bold section-title"><i class="fas fa-bell me-2 text-primary"></i>Notification Types</h6>
+                        
+                        <!-- Approval Notifications -->
+                        <div class="card mb-3 toggle-card border-0">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fas fa-check-circle me-2 text-success"></i>Request Approval</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-check mb-2">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="checkbox" 
+                                        id="approval_email" 
+                                        name="approval_email"
+                                        {{ 'checked' if settings.get('approval_email') else '' }}
+                                    >
+                                    <label class="form-check-label" for="approval_email">
+                                        <i class="fas fa-envelope me-1"></i>Send via Email
+                                    </label>
+                                </div>
+                                <span class="note-pill"><i class="fas fa-lock"></i>Email-only channel</span>
+                            </div>
+                        </div>
+
+                        <!-- Rejection Notifications -->
+                        <div class="card mb-3 toggle-card border-0">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fas fa-times-circle me-2 text-danger"></i>Request Rejection</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-check mb-2">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="checkbox" 
+                                        id="rejection_email" 
+                                        name="rejection_email"
+                                        {{ 'checked' if settings.get('rejection_email') else '' }}
+                                    >
+                                    <label class="form-check-label" for="rejection_email">
+                                        <i class="fas fa-envelope me-1"></i>Send via Email
+                                    </label>
+                                </div>
+                                <span class="note-pill"><i class="fas fa-lock"></i>Email-only channel</span>
+                            </div>
+                        </div>
+
+                        <!-- Low Stock Notifications -->
+                        <div class="card toggle-card border-0">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fas fa-exclamation-triangle me-2 text-warning"></i>Low Stock Alert</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="form-check mb-2">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="checkbox" 
+                                        id="low_stock_email" 
+                                        name="low_stock_email"
+                                        {{ 'checked' if settings.get('low_stock_email') else '' }}
+                                    >
+                                    <label class="form-check-label" for="low_stock_email">
+                                        <i class="fas fa-envelope me-1"></i>Send via Email
+                                    </label>
+                                </div>
+                                <span class="note-pill"><i class="fas fa-lock"></i>Email-only channel</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Info Box -->
+                    <div class="alert tip-card d-flex align-items-start" role="alert">
+                        <i class="fas fa-info-circle me-3 mt-1"></i>
+                        <div>
+                            <strong>💡 Tip:</strong> ระบบส่งการแจ้งเตือนผ่าน Email เท่านั้น หากปิดสวิตช์ประเภทใดไว้จะไม่ส่งประเภทนั้น
+                        </div>
+                    </div>
+
+                    <!-- Buttons -->
+                    <div class="d-flex gap-2 justify-content-between">
+                        <div class="d-flex gap-2">
+                            {% if not popup_mode %}
+                            <a href="{{ url_for('admin_dashboard', module='stock') }}" class="btn btn-soft">
+                                <i class="fas fa-arrow-left me-1"></i>ย้อนกลับ
+                            </a>
+                            {% endif %}
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-1"></i>บันทึกการตั้งค่า
+                            </button>
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap justify-content-end">
+                            <button type="submit"
+                                    class="btn btn-soft btn-sm"
+                                    name="test_scope"
+                                    value="default"
+                                    formaction="{{ url_for('email_settings_test') }}"
+                                    formmethod="post">
+                                <i class="fas fa-paper-plane me-1"></i>ทดสอบ Default
+                            </button>
+                            <button type="submit"
+                                    class="btn btn-soft btn-sm"
+                                    name="test_scope"
+                                    value="pc1"
+                                    formaction="{{ url_for('email_settings_test') }}"
+                                    formmethod="post">
+                                <i class="fas fa-industry me-1"></i>ทดสอบ PC1
+                            </button>
+                            <button type="submit"
+                                    class="btn btn-soft btn-sm"
+                                    name="test_scope"
+                                    value="cc"
+                                    formaction="{{ url_for('email_settings_test') }}"
+                                    formmethod="post">
+                                <i class="fas fa-warehouse me-1"></i>ทดสอบ CC
+                            </button>
+                            <button type="submit"
+                                    class="btn btn-success btn-sm"
+                                    name="test_scope"
+                                    value="all"
+                                    formaction="{{ url_for('email_settings_test') }}"
+                                    formmethod="post">
+                                <i class="fas fa-paper-plane me-1"></i>ทดสอบทุกฝั่ง
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card section-card border-0 mt-4">
+            <div class="card-header table-shell-header-blue">
+                <h5 class="mb-0"><i class="fas fa-history me-2"></i>ประวัติการทดสอบส่งอีเมล</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>เวลา</th>
+                                <th>ผู้ทดสอบ</th>
+                                <th>ผู้รับ</th>
+                                <th>สถานะ</th>
+                                <th>ข้อความ</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if recent_test_logs %}
+                                {% for item in recent_test_logs %}
+                                <tr>
+                                    <td class="text-nowrap">{{ item.created_at }}</td>
+                                    <td>{{ item.admin_id }}</td>
+                                    <td class="small">{{ item.recipients or '-' }}</td>
+                                    <td>
+                                        {% if item.status == 'sent' %}
+                                            <span class="badge bg-success">sent</span>
+                                        {% else %}
+                                            <span class="badge bg-danger">failed</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="small">{{ item.error_message or '-' }}</td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted py-3">ยังไม่มีประวัติทดสอบ</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card section-card border-0 mt-4">
+            <div class="card-header table-shell-header-dark">
+                <h5 class="mb-0"><i class="fas fa-route me-2"></i>ประวัติการ Route แจ้งเตือน</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>เวลา</th>
+                                <th>ประเภท</th>
+                                <th>Scope</th>
+                                <th>Channel</th>
+                                <th>Location/Role</th>
+                                <th>ผู้รับ</th>
+                                <th>สถานะ</th>
+                                <th>ข้อความ</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if recent_delivery_logs %}
+                                {% for item in recent_delivery_logs %}
+                                <tr>
+                                    <td class="text-nowrap">{{ item.created_at }}</td>
+                                    <td class="small">{{ item.notification_type }}</td>
+                                    <td><span class="badge bg-info-subtle text-info-emphasis">{{ item.scope or '-' }}</span></td>
+                                    <td><span class="badge {% if item.channel == 'email' %}bg-primary{% else %}bg-success{% endif %}">{{ item.channel or '-' }}</span></td>
+                                    <td class="small">{{ item.location or '-' }} / {{ item.role or '-' }}</td>
+                                    <td class="small">{{ item.recipients or '-' }}</td>
+                                    <td>
+                                        {% if item.status == 'sent' %}
+                                            <span class="badge bg-success">sent</span>
+                                        {% else %}
+                                            <span class="badge bg-danger">failed</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="small">{{ item.error_message or '-' }}</td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="8" class="text-center text-muted py-3">ยังไม่มีประวัติ route</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Documentation -->
+        <div class="card section-card border-0 mt-4">
+            <div class="card-header table-shell-header-blue">
+                <h5 class="mb-0"><i class="fas fa-book me-2"></i>วิธีใช้งาน</h5>
+            </div>
+            <div class="card-body">
+                <ol class="doc-list">
+                    <li><strong>ใส่ Email:</strong> ใส่ email addresses ที่ต้องการให้ได้รับการแจ้งเตือน</li>
+                    <li><strong>เลือก Notification Type:</strong> เลือกว่าจะรับแจ้งเตือนประเภทไหน</li>
+                    <li><strong>Email-Only:</strong> ระบบส่งผ่านอีเมลเท่านั้น</li>
+                    <li><strong>บันทึก:</strong> กดปุ่ม "บันทึกการตั้งค่า"</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

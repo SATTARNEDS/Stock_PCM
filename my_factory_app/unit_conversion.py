@@ -60,22 +60,45 @@ class UnitConversionManager:
         
         # Get count of open boxes
         cursor.execute('''
-            SELECT SUM(base_unit_qty) as total
+            SELECT SUM(base_unit_qty) as total,
+                   SUM(extra_tablet_qty) as extra_total
             FROM open_packages
             WHERE product_id = ? AND status = 'active'
         ''', (product_id,))
         open_box_row = cursor.fetchone()
-        open_box = {'total': open_box_row[0]} if open_box_row else {'total': 0}
+        open_box = {
+            'total': open_box_row[0] if open_box_row else 0,
+            'extra_total': open_box_row[1] if open_box_row else 0,
+        }
         
         # Extract values safely
         base_unit = product.get('base_unit') or 'tablet'
         package_unit = product.get('package_unit') or product.get('unit') or 'box'
         conversion_rate = float(product.get('conversion_rate') or 1)
+        package_tablet_total = int(product.get('package_tablet_total') or 0)
+        base_unit_to_tablet_rate = int(product.get('base_unit_to_tablet_rate') or 0)
         stock_package_unit = product.get('stock') or 0
         open_box_qty = (open_box['total'] or 0) if open_box['total'] else 0
+        open_extra_tablet_qty = (open_box['extra_total'] or 0) if open_box['extra_total'] else 0
+
+        if package_tablet_total <= 0 and base_unit_to_tablet_rate > 0:
+            package_tablet_total = int(conversion_rate) * base_unit_to_tablet_rate
+
+        per_package_extra_tablets = 0
+        if package_tablet_total > 0 and base_unit_to_tablet_rate > 0:
+            per_package_extra_tablets = max(0, package_tablet_total - (int(conversion_rate) * base_unit_to_tablet_rate))
+
+        package_remainder_tablets_total = int(stock_package_unit or 0) * int(per_package_extra_tablets or 0)
+        pooled_extra_tablet_qty = int(open_extra_tablet_qty) + package_remainder_tablets_total
+
+        open_extra_base_equivalent = 0
+        open_extra_tablet_remainder = int(pooled_extra_tablet_qty)
+        if base_unit_to_tablet_rate > 0:
+            open_extra_base_equivalent = int(pooled_extra_tablet_qty) // int(base_unit_to_tablet_rate)
+            open_extra_tablet_remainder = int(pooled_extra_tablet_qty) % int(base_unit_to_tablet_rate)
         
         # Convert to base units
-        stock_base_unit = (stock_package_unit * conversion_rate) + open_box_qty
+        stock_base_unit = (stock_package_unit * conversion_rate) + open_box_qty + open_extra_base_equivalent
         
         return {
             'product_id': product_id,
@@ -84,10 +107,18 @@ class UnitConversionManager:
             'base_unit': base_unit,
             'package_unit': package_unit,
             'conversion_rate': conversion_rate,
+            'package_tablet_total': package_tablet_total,
+            'base_unit_to_tablet_rate': base_unit_to_tablet_rate,
+            'per_package_extra_tablets': per_package_extra_tablets,
+            'package_remainder_tablets_total': int(package_remainder_tablets_total),
+            'pooled_extra_tablet_qty': int(pooled_extra_tablet_qty),
             'stock_base_unit': int(stock_base_unit),
             'stock_package_unit': stock_package_unit,
             'open_box_qty': int(open_box_qty),
-            'has_open_box': open_box_qty > 0
+            'open_extra_tablet_qty': int(open_extra_tablet_qty),
+            'open_extra_base_equivalent': int(open_extra_base_equivalent),
+            'open_extra_tablet_remainder': int(open_extra_tablet_remainder),
+            'has_open_box': (open_box_qty > 0) or (open_extra_tablet_qty > 0)
         }
     
     # ============================================
@@ -178,6 +209,97 @@ class UnitConversionManager:
         }
         """
         info = self.get_product_unit_info(product_id)
+
+        base_to_tablet_rate = int(info.get('base_unit_to_tablet_rate') or 0)
+        package_tablet_total = int(info.get('package_tablet_total') or 0)
+
+        # โหมดหลายชั้น: รวมเศษจากทุกแพ็คทันที (คำนวณด้วยเม็ดรวม)
+        if base_to_tablet_rate > 0 and package_tablet_total > 0:
+            requested_tablets = int(qty_base_unit) * base_to_tablet_rate
+            open_box_tablets = int(info.get('open_box_qty') or 0) * base_to_tablet_rate
+            open_extra_tablets = int(info.get('open_extra_tablet_qty') or 0)
+            available_tablets = (int(info.get('stock_package_unit') or 0) * package_tablet_total) + open_box_tablets + open_extra_tablets
+
+            if available_tablets < requested_tablets:
+                shortage_tablets = requested_tablets - available_tablets
+                shortage_base = (shortage_tablets + base_to_tablet_rate - 1) // base_to_tablet_rate
+                return {
+                    'can_fulfill': False,
+                    'message': f"❌ ของไม่พอ: เหลือ {available_tablets} เม็ด, ต้องการ {requested_tablets} เม็ด",
+                    'shortage': int(shortage_base)
+                }
+
+            qty_remaining_tablets = requested_tablets
+            from_open_box = 0
+            from_open_extra_base = 0
+            from_open_extra_tablets = 0
+
+            if use_open_box and open_box_tablets > 0:
+                take_open_box_tablets = min(open_box_tablets, qty_remaining_tablets)
+                from_open_box = take_open_box_tablets // base_to_tablet_rate
+                qty_remaining_tablets -= take_open_box_tablets
+
+            if qty_remaining_tablets > 0 and open_extra_tablets > 0:
+                from_open_extra_tablets = min(open_extra_tablets, qty_remaining_tablets)
+                from_open_extra_base = from_open_extra_tablets // base_to_tablet_rate
+                qty_remaining_tablets -= from_open_extra_tablets
+
+            full_packages_needed = 0
+            new_open_box_qty = 0
+            new_open_extra_tablets = 0
+            if qty_remaining_tablets > 0:
+                full_packages_needed = (qty_remaining_tablets + package_tablet_total - 1) // package_tablet_total
+                if full_packages_needed > int(info.get('stock_package_unit') or 0):
+                    return {
+                        'can_fulfill': False,
+                        'message': '❌ สต็อกแพ็กไม่พอสำหรับการตัดจ่าย',
+                        'shortage': int(full_packages_needed - int(info.get('stock_package_unit') or 0))
+                    }
+                tablets_from_packages = full_packages_needed * package_tablet_total
+                leftover_tablets = tablets_from_packages - qty_remaining_tablets
+                new_open_box_qty = leftover_tablets // base_to_tablet_rate
+                new_open_extra_tablets = leftover_tablets % base_to_tablet_rate
+
+            total_packages_used = float(full_packages_needed)
+            if float(info.get('conversion_rate') or 0) > 0:
+                total_packages_used += (from_open_box + from_open_extra_base) / float(info['conversion_rate'])
+
+            package_unit = info['package_unit']
+            note_parts = []
+            if from_open_box > 0:
+                note_parts.append(f"เบิกจาก{package_unit}ที่เปิดแล้ว {from_open_box} {info['base_unit']}")
+            if from_open_extra_tablets > 0:
+                note_parts.append(f"ใช้เศษเม็ดที่เปิดแล้ว {from_open_extra_tablets} เม็ด")
+            if full_packages_needed > 0:
+                if (new_open_box_qty > 0) or (new_open_extra_tablets > 0):
+                    full_closed_packages = max(0, full_packages_needed - 1)
+                    remain_note = []
+                    if new_open_box_qty > 0:
+                        remain_note.append(f"{new_open_box_qty} {info['base_unit']}")
+                    if new_open_extra_tablets > 0:
+                        remain_note.append(f"เศษ {new_open_extra_tablets} เม็ด")
+                    remain_text = ' + '.join(remain_note) if remain_note else '0'
+                    if full_closed_packages > 0:
+                        note_parts.append(f"เบิก {full_closed_packages} {package_unit}เต็ม + เปิดใหม่ 1 {package_unit} (เหลือ {remain_text})")
+                    else:
+                        note_parts.append(f"เปิดใหม่ 1 {package_unit} (เหลือ {remain_text})")
+                else:
+                    note_parts.append(f"เบิก {full_packages_needed} {package_unit}เต็ม")
+
+            return {
+                'can_fulfill': True,
+                'multi_mode': True,
+                'from_open_box': int(from_open_box),
+                'from_open_extra_base': int(from_open_extra_base),
+                'from_open_extra_tablets': int(from_open_extra_tablets),
+                'full_packages_needed': int(full_packages_needed),
+                'new_open_box_qty': int(new_open_box_qty),
+                'new_open_extra_tablets': int(new_open_extra_tablets),
+                'open_box_id': None,
+                'total_packages_used': float(total_packages_used),
+                'transaction_note': ' + '.join(note_parts),
+                'message': f"✅ เบิก {qty_base_unit} {info['base_unit']} ({requested_tablets} เม็ด)"
+            }
         
         # Check stock first
         check = self.check_stock_available(product_id, qty_base_unit)
@@ -191,6 +313,7 @@ class UnitConversionManager:
         # Strategy: Use open box first, then full packages
         qty_remaining = qty_base_unit
         from_open_box = 0
+        from_open_extra_base = 0
         full_packages_needed = 0
         new_open_box_qty = 0
         open_box_id = None
@@ -208,6 +331,12 @@ class UnitConversionManager:
                 take_from_open = min(open_box['base_unit_qty'], qty_remaining)
                 from_open_box = take_from_open
                 qty_remaining -= take_from_open
+
+        # 1.5 ใช้เศษเม็ดจากแพ็คที่เปิดแล้วก่อน หากประกอบเป็นหน่วยย่อยได้
+        if qty_remaining > 0 and int(info.get('open_extra_base_equivalent') or 0) > 0:
+            take_from_open_extra = min(int(info.get('open_extra_base_equivalent') or 0), qty_remaining)
+            from_open_extra_base = take_from_open_extra
+            qty_remaining -= take_from_open_extra
         
         # 2. If still need more, deduct from full packages
         if qty_remaining > 0:
@@ -225,12 +354,19 @@ class UnitConversionManager:
         total_packages_used = full_packages_needed
         if from_open_box > 0:
             total_packages_used += from_open_box / info['conversion_rate']
+        if from_open_extra_base > 0:
+            total_packages_used += from_open_extra_base / info['conversion_rate']
         
         # Create transaction note
         note_parts = []
         package_unit = info['package_unit']
         if from_open_box > 0:
             note_parts.append(f"เบิกจาก{package_unit}ที่เปิดแล้ว {from_open_box} {info['base_unit']}")
+        if from_open_extra_base > 0 and int(info.get('base_unit_to_tablet_rate') or 0) > 0:
+            note_parts.append(
+                f"ใช้เศษเม็ดที่เปิดแล้ว {from_open_extra_base * int(info.get('base_unit_to_tablet_rate') or 0)} เม็ด "
+                f"= {from_open_extra_base} {info['base_unit']}"
+            )
         if full_packages_needed > 0:
             if new_open_box_qty > 0:
                 full_closed_packages = max(0, full_packages_needed - 1)
@@ -244,6 +380,7 @@ class UnitConversionManager:
         return {
             'can_fulfill': True,
             'from_open_box': from_open_box,
+            'from_open_extra_base': from_open_extra_base,
             'full_packages_needed': full_packages_needed,
             'new_open_box_qty': new_open_box_qty,
             'open_box_id': open_box_id,
@@ -288,21 +425,22 @@ class UnitConversionManager:
                 raise ValueError('สต็อกแพ็กไม่พอสำหรับการตัดจ่าย')
             
             # 2. If taking from open_box, reduce it
-            if calc['from_open_box'] > 0 and calc.get('open_box_id'):
-                self.cursor.execute('''
-                    UPDATE open_packages 
-                    SET base_unit_qty = MAX(0, base_unit_qty - ?),
-                        status = CASE WHEN base_unit_qty - ? <= 0 THEN 'used' ELSE 'active' END
-                    WHERE id = ?
-                ''', (calc['from_open_box'], calc['from_open_box'], calc['open_box_id']))
+            if calc['from_open_box'] > 0:
+                self._consume_open_base_units(product_id, int(calc['from_open_box']))
+
+            # 2.5 ใช้เศษเม็ดจากแพ็คที่เปิดแล้ว (แปลงเป็นหน่วยย่อย)
+            if calc.get('from_open_extra_base', 0) > 0 and int(info.get('base_unit_to_tablet_rate') or 0) > 0:
+                consume_tablets = int(calc.get('from_open_extra_tablets') or (int(calc['from_open_extra_base']) * int(info.get('base_unit_to_tablet_rate') or 0)))
+                self._consume_open_extra_tablets(product_id, consume_tablets)
             
             # 3. Create new open_package if needed
             if calc['new_open_box_qty'] > 0:
+                new_open_extra_tablets = int(calc.get('new_open_extra_tablets') or int(info.get('per_package_extra_tablets') or 0))
                 self.cursor.execute('''
                     INSERT INTO open_packages 
-                    (product_id, lot_id, opened_date, base_unit_qty, package_unit_qty_before, status)
-                    VALUES (?, ?, datetime('now'), ?, 1, 'active')
-                ''', (product_id, lot_id, calc['new_open_box_qty']))
+                    (product_id, lot_id, opened_date, base_unit_qty, extra_tablet_qty, package_unit_qty_before, status)
+                    VALUES (?, ?, datetime('now'), ?, ?, 1, 'active')
+                ''', (product_id, lot_id, calc['new_open_box_qty'], new_open_extra_tablets))
             
             # 4. Log transaction
             self.cursor.execute('''
@@ -337,6 +475,71 @@ class UnitConversionManager:
                 'success': False,
                 'message': f"❌ บันทึกล้มเหลว: {str(e)}"
             }
+
+    def _consume_open_extra_tablets(self, product_id, tablets_to_consume):
+        """Consume extra tablets from active open packages by FIFO order."""
+        remaining = max(0, int(tablets_to_consume or 0))
+        if remaining <= 0:
+            return
+
+        rows = self.cursor.execute('''
+            SELECT id, COALESCE(base_unit_qty, 0) AS base_unit_qty, COALESCE(extra_tablet_qty, 0) AS extra_tablet_qty
+            FROM open_packages
+            WHERE product_id = ? AND status = 'active' AND COALESCE(extra_tablet_qty, 0) > 0
+            ORDER BY datetime(opened_date) ASC, id ASC
+        ''', (product_id,)).fetchall()
+
+        for row in rows:
+            if remaining <= 0:
+                break
+            current_extra = int(row['extra_tablet_qty'] or 0)
+            take = min(current_extra, remaining)
+            new_extra = current_extra - take
+            new_status = 'active'
+            if int(row['base_unit_qty'] or 0) <= 0 and new_extra <= 0:
+                new_status = 'used'
+
+            self.cursor.execute(
+                'UPDATE open_packages SET extra_tablet_qty = ?, status = ? WHERE id = ?',
+                (new_extra, new_status, row['id'])
+            )
+            remaining -= take
+
+        if remaining > 0:
+            raise ValueError('เศษเม็ดที่เปิดแล้วไม่เพียงพอสำหรับการตัดจ่าย')
+
+    def _consume_open_base_units(self, product_id, base_units_to_consume):
+        """Consume base units from active open packages by FIFO order."""
+        remaining = max(0, int(base_units_to_consume or 0))
+        if remaining <= 0:
+            return
+
+        rows = self.cursor.execute('''
+            SELECT id, COALESCE(base_unit_qty, 0) AS base_unit_qty, COALESCE(extra_tablet_qty, 0) AS extra_tablet_qty
+            FROM open_packages
+            WHERE product_id = ? AND status = 'active' AND COALESCE(base_unit_qty, 0) > 0
+            ORDER BY datetime(opened_date) ASC, id ASC
+        ''', (product_id,)).fetchall()
+
+        for row in rows:
+            if remaining <= 0:
+                break
+
+            current_base = int(row['base_unit_qty'] or 0)
+            take = min(current_base, remaining)
+            new_base = current_base - take
+            new_status = 'active'
+            if new_base <= 0 and int(row['extra_tablet_qty'] or 0) <= 0:
+                new_status = 'used'
+
+            self.cursor.execute(
+                'UPDATE open_packages SET base_unit_qty = ?, status = ? WHERE id = ?',
+                (new_base, new_status, row['id'])
+            )
+            remaining -= take
+
+        if remaining > 0:
+            raise ValueError('หน่วยย่อยที่เปิดแล้วไม่เพียงพอสำหรับการตัดจ่าย')
     
     # ============================================================================
     # 6. RECEIVE WITH UNIT CONVERSION
