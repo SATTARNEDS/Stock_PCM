@@ -1237,6 +1237,108 @@
                 </div>
             </div>
 
+            {# ===== ตารางเบิกล่วงหน้าที่อนุมัติแล้ว รอรับของ ===== #}
+            {% if scheduled_approved_logs %}
+            <div class="card border-0 shadow-sm mb-4 dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}" id="scheduledApprovedSection">
+                <div class="card-header py-3 border-0 d-flex flex-wrap justify-content-between align-items-center gap-2"
+                     style="background:linear-gradient(135deg,#ff6b35,#f7931e);color:#fff;">
+                    <span class="fw-medium">
+                        <i class="fas fa-clock me-2"></i>รายการเบิกล่วงหน้า (อนุมัติแล้ว รอรับของ)
+                    </span>
+                    <span class="badge bg-white text-dark rounded-pill px-3">{{ scheduled_approved_logs|length }} รายการ</span>
+                </div>
+                <div class="card-body p-0 table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-4">กำหนดรับของ</th>
+                                <th>ผู้เบิก</th>
+                                <th>รายการ</th>
+                                <th class="text-center">จำนวน</th>
+                                <th class="text-center">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in scheduled_approved_logs %}
+                            {% set hours_left = ((log['requested_receive_at']|string)[:16]) %}
+                            <tr>
+                                <td class="ps-4">
+                                    <span class="fw-bold text-danger">{{ log['requested_receive_at']|format_ts }}</span>
+                                </td>
+                                <td>
+                                    <div class="fw-medium text-dark">{{ log['emp_name'] or log['emp_id'] }}</div>
+                                    <small class="text-muted">{{ log['department'] or '-' }} · {{ log['location'] or '-' }}</small>
+                                </td>
+                                <td>
+                                    <div>{{ log['product_name'] or '-' }}</div>
+                                    <small class="text-muted">{{ log['category'] or '' }}</small>
+                                    {% if log['note'] %}
+                                    <div class="small text-muted mt-1"><i class="fas fa-sticky-note me-1"></i>{{ log['note'] }}</div>
+                                    {% endif %}
+                                </td>
+                                <td class="text-center fw-medium text-primary">
+                                    {% if log['qty_base_unit'] and log['base_unit'] %}
+                                        {{ log['qty_base_unit'] }} {{ log['base_unit'] }}
+                                    {% else %}
+                                        {{ log['qty'] }} {{ log['unit'] or '' }}
+                                    {% endif %}
+                                </td>
+                                <td class="text-center">
+                                    {# ปุ่มเปลี่ยนวันรับ #}
+                                    <button type="button"
+                                        class="btn btn-sm btn-outline-primary rounded-pill px-3 me-1 mb-1"
+                                        onclick="openRescheduleModal({{ log['id'] }}, '{{ log['requested_receive_at'][:16] if log['requested_receive_at'] else '' }}', '{{ (log['product_name'] or '')|e }}')">
+                                        <i class="fas fa-calendar-alt me-1"></i>เปลี่ยนวัน
+                                    </button>
+                                    {# ปุ่มยกเลิก #}
+                                    <form action="{{ url_for('cancel_scheduled_withdrawal', log_id=log['id']) }}" method="POST" class="d-inline">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="button"
+                                            onclick="confirmAction(this.form, 'ยกเลิกการเบิกล่วงหน้านี้?\nสต็อกจะได้รับการคืนให้ระบบ', 'warning', this)"
+                                            class="btn btn-sm btn-outline-danger rounded-pill px-3 mb-1">
+                                            <i class="fas fa-times me-1"></i>ยกเลิก
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+
+            {# ===== Modal เปลี่ยนวันรับของ ===== #}
+            <div class="modal fade" id="rescheduleModal" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content border-0 shadow">
+                        <div class="modal-header border-0" style="background:linear-gradient(135deg,#0b6cc7,#0e91d8);">
+                            <h6 class="modal-title text-white fw-bold"><i class="fas fa-calendar-alt me-2"></i>เปลี่ยนวันรับของ</h6>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <form id="rescheduleForm" method="POST" action="">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="modal-body p-4">
+                                <div class="mb-3">
+                                    <label class="form-label fw-medium text-dark">รายการ</label>
+                                    <div id="rescheduleProductName" class="text-muted small"></div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label fw-medium text-dark" for="newReceiveAt">วันและเวลารับของใหม่</label>
+                                    <input type="datetime-local" class="form-control shadow-none" id="newReceiveAt" name="new_receive_at" required>
+                                </div>
+                            </div>
+                            <div class="modal-footer border-0">
+                                <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">ยกเลิก</button>
+                                <button type="submit" class="btn btn-primary rounded-pill px-4">
+                                    <i class="fas fa-save me-1"></i>บันทึก
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
             <div class="card border-0 shadow-sm mb-4 dashboard-section {% if admin_module != 'ga' %}is-hidden{% endif %}" id="gaRequestSection">
                 <div class="card-header bg-dark text-white py-3 border-0 d-flex flex-wrap justify-content-between align-items-center gap-2">
                     <div>
@@ -4151,6 +4253,18 @@
                     }
                 }
             });
+        }
+
+        function openRescheduleModal(logId, currentDatetime, productName) {
+            const modal = document.getElementById('rescheduleModal');
+            const form = document.getElementById('rescheduleForm');
+            form.action = `/admin/reschedule_withdrawal/${logId}`;
+            document.getElementById('rescheduleProductName').textContent = productName;
+            // แปลง "YYYY-MM-DD HH:MM" → "YYYY-MM-DDTHH:MM" สำหรับ datetime-local
+            const dtValue = currentDatetime ? currentDatetime.replace(' ', 'T') : '';
+            document.getElementById('newReceiveAt').value = dtValue;
+            const bsModal = new bootstrap.Modal(modal);
+            bsModal.show();
         }
 
         function submitImport() {

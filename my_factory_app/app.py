@@ -89,7 +89,7 @@ GA_REQUEST_STATUS_OPTIONS = ('Pending', 'In Progress', 'Resolved', 'Rejected')
 SENSITIVE_POST_ENDPOINTS = {
     'index', 'admin_login', 'logout_user', 'admin_logout',
     'add_to_cart', 'remove_from_cart', 'update_cart_qty', 'confirm_withdrawal',
-    'approve_request', 'reject_request', 'import_excel', 'clear_system_data',
+    'approve_request', 'reject_request', 'cancel_scheduled_withdrawal', 'reschedule_withdrawal', 'import_excel', 'clear_system_data',
     'toggle_product_status', 'add_product', 'edit_product', 'add_product_ajax',
     'write_off_ajax', 'unlock_user_ajax', 'unlock_user', 'add_user_ajax', 'delete_user',
     'update_user_ajax', 'save_alert_time', 'daily_alert', 'reset_lock',
@@ -1804,6 +1804,7 @@ def build_periodic_alert_email_html(payload):
     location_label = escape(str(payload.get('location_label') or '-'))
     expiring_items = payload.get('expiring_items') or []
     helmet_alerts = payload.get('helmet_alerts') or []
+    scheduled_withdrawals = payload.get('scheduled_withdrawals') or []
     generated_at = escape(str(payload.get('generated_at') or '-'))
 
     expiry_rows = ''
@@ -1860,8 +1861,46 @@ def build_periodic_alert_email_html(payload):
             '</td></tr>'
         )
 
+    scheduled_rows = ''
+    for sw in scheduled_withdrawals:
+        qty_text = f"{sw.get('qty', '')} {sw.get('unit', '')}".strip()
+        note_text = escape(str(sw.get('note') or ''))
+        scheduled_rows += (
+            '<tr>'
+            f"<td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{escape(str(sw.get('emp_name') or '-'))}</td>"
+            f"<td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{escape(str(sw.get('department') or '-'))}</td>"
+            f"<td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{escape(str(sw.get('product_name') or '-'))}</td>"
+            f"<td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{escape(qty_text)}</td>"
+            f"<td style=\"padding:9px 0;color:#e25900;font-size:13px;border-bottom:1px solid #edf1f7;white-space:nowrap;font-weight:600;\">{escape(str(sw.get('show_dt') or '-'))}</td>"
+            f"<td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{note_text}</td>"
+            '</tr>'
+        )
+
+    scheduled_section = ''
+    if scheduled_rows:
+        scheduled_section = (
+            '<tr><td style="padding:10px 22px 0 22px;">'
+            '<div style="background:#fff7ed;border-left:4px solid #e25900;border-radius:0 8px 8px 0;padding:8px 12px;margin-bottom:4px;">'
+            '<span style="font-size:14px;font-weight:700;color:#9a3300;">&#9200; การเบิกล่วงหน้าที่ครบกำหนดภายใน 24 ชั่วโมง</span>'
+            '</div>'
+            '</td></tr>'
+            '<tr><td style="padding:4px 22px 8px 22px;">'
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">'
+            '<tr>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">พนักงาน</th>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">แผนก</th>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">รายการ</th>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">จำนวน</th>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">กำหนดรับ</th>'
+            '<th align="left" style="padding:8px 0;color:#6a768f;font-size:12px;border-bottom:1px solid #edf1f7;">หมายเหตุ</th>'
+            '</tr>'
+            f'{scheduled_rows}'
+            '</table>'
+            '</td></tr>'
+        )
+
     no_alert_section = ''
-    if not expiry_rows and not helmet_rows:
+    if not expiry_rows and not helmet_rows and not scheduled_rows:
         no_alert_section = (
             '<tr><td style="padding:14px 22px 10px 22px;">'
             '<div style="background:#f8fbff;border:1px dashed #c6d7ee;border-radius:10px;padding:12px 14px;color:#304a68;font-size:13px;">'
@@ -1901,6 +1940,7 @@ def build_periodic_alert_email_html(payload):
                 </tr>
                 {expiry_section}
                 {helmet_section}
+                {scheduled_section}
                 {no_alert_section}
                 {action_section}
                 <tr><td style=\"padding:12px 22px 22px 22px;background:#fafcff;color:#7a879e;font-size:12px;border-top:1px solid #edf1f7;\">อีเมลนี้ถูกส่งอัตโนมัติจากระบบ PCM</td></tr>
@@ -3685,6 +3725,23 @@ def admin_dashboard(module):
     '''
     pending_logs = conn.execute(pending_query).fetchall()
 
+    # --- รายการเบิกล่วงหน้าที่อนุมัติแล้ว รอรับของในอนาคต ---
+    scheduled_approved_query = f'''
+        SELECT l.*, u.name as emp_name, u.department, u.location,
+               p.name as product_name, p.unit, p.category, p.base_unit, p.package_unit, p.conversion_rate
+        FROM transaction_logs l
+        LEFT JOIN users u ON l.emp_id = u.emp_id
+        LEFT JOIN products p ON l.product_id = p.id
+        WHERE l.request_receive_mode = 'scheduled'
+        AND l.status = 'Approved'
+        AND l.requested_receive_at IS NOT NULL
+        AND trim(l.requested_receive_at) != ''
+        AND l.requested_receive_at >= datetime('now', '+7 hours')
+        {role_log_filter}
+        ORDER BY l.requested_receive_at ASC
+    '''
+    scheduled_approved_logs = conn.execute(scheduled_approved_query).fetchall()
+
     stock_search = request.args.get('stock_search', '')
     stock_cat = request.args.get('stock_cat', '')
     stock_query = f"SELECT * FROM products WHERE 1=1 {product_loc_filter}"
@@ -3749,6 +3806,7 @@ def admin_dashboard(module):
     return render_template('admin_dashboard.html',
                            pending_logs=pending_logs,
                            stock_pending_count=stock_pending_count,
+                           scheduled_approved_logs=scheduled_approved_logs,
                            items=all_stock,
                            categories=categories,
                            low_stock=low_stock,
@@ -4302,6 +4360,135 @@ def reject_request(log_id):
         return redirect(url_for('admin_dashboard', module='stock'))
     finally:
         conn.close()
+
+
+@app.route('/admin/cancel_scheduled_withdrawal/<int:log_id>', methods=['POST'])
+def cancel_scheduled_withdrawal(log_id):
+    """ยกเลิกการเบิกล่วงหน้าที่อนุมัติแล้ว (คืนสต็อก)"""
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('index'))
+
+    if not validate_csrf_token():
+        flash('❌ CSRF token ไม่ถูกต้อง', 'danger')
+        return redirect(url_for('admin_dashboard', module='stock'))
+
+    conn = get_db_connection()
+    try:
+        start_write_transaction(conn)
+
+        log = conn.execute(
+            '''SELECT l.*, p.base_unit, p.package_unit, p.conversion_rate
+               FROM transaction_logs l
+               LEFT JOIN products p ON l.product_id = p.id
+               WHERE l.id = ? AND l.status = 'Approved' AND l.request_receive_mode = 'scheduled'
+               AND l.requested_receive_at >= datetime('now', '+7 hours')''',
+            (log_id,)
+        ).fetchone()
+
+        if not log:
+            flash('⚠️ ไม่พบรายการ หรือรายการนี้ไม่สามารถยกเลิกได้', 'warning')
+            return redirect(url_for('admin_dashboard', module='stock'))
+
+        product_id = log['product_id']
+        qty_to_restore = int(log['qty'] or 0)
+
+        product = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
+        is_split_med = is_split_tablet_medicine(product) if product else False
+
+        lot_restore_qty = qty_to_restore
+        if is_split_med:
+            lot_restore_qty = int(log['qty_base_unit'] or 0) or qty_to_restore
+
+        # คืนสต็อกสินค้า
+        conn.execute(
+            'UPDATE products SET stock = stock + ?, withdraw = MAX(0, withdraw - ?) WHERE id = ?',
+            (qty_to_restore, qty_to_restore, product_id)
+        )
+
+        # คืนสต็อกใน lot (ถ้ามี lot_id)
+        if log['lot_id']:
+            conn.execute(
+                'UPDATE product_lots SET qty = qty + ? WHERE id = ?',
+                (lot_restore_qty, log['lot_id'])
+            )
+
+        # อัปเดตสถานะเป็น Cancelled
+        update_result = conn.execute(
+            "UPDATE transaction_logs SET status = 'Cancelled' WHERE id = ? AND status = 'Approved'",
+            (log_id,)
+        )
+        if update_result.rowcount == 0:
+            conn.rollback()
+            flash('⚠️ ไม่สามารถยกเลิกได้ กรุณาลองใหม่', 'warning')
+            return redirect(url_for('admin_dashboard', module='stock'))
+
+        conn.commit()
+        flash('✅ ยกเลิกการเบิกล่วงหน้าเรียบร้อย สต็อกได้รับการคืนแล้ว', 'success')
+        return redirect(url_for('admin_dashboard', module='stock'))
+
+    except Exception as e:
+        conn.rollback()
+        print(f'Cancel scheduled withdrawal error: {e}')
+        flash('❌ เกิดข้อผิดพลาด กรุณาลองใหม่', 'danger')
+        return redirect(url_for('admin_dashboard', module='stock'))
+    finally:
+        conn.close()
+
+
+@app.route('/admin/reschedule_withdrawal/<int:log_id>', methods=['POST'])
+def reschedule_withdrawal(log_id):
+    """เปลี่ยนวันรับของของการเบิกล่วงหน้าที่อนุมัติแล้ว"""
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('index'))
+
+    if not validate_csrf_token():
+        flash('❌ CSRF token ไม่ถูกต้อง', 'danger')
+        return redirect(url_for('admin_dashboard', module='stock'))
+
+    new_date_str = request.form.get('new_receive_at', '').strip()
+    if not new_date_str:
+        flash('⚠️ กรุณาระบุวันที่และเวลาใหม่', 'warning')
+        return redirect(url_for('admin_dashboard', module='stock'))
+
+    try:
+        new_dt = datetime.strptime(new_date_str, '%Y-%m-%dT%H:%M')
+        if new_dt <= get_thailand_time():
+            flash('⚠️ วันที่ใหม่ต้องเป็นเวลาในอนาคต', 'warning')
+            return redirect(url_for('admin_dashboard', module='stock'))
+        new_receive_at = new_dt.strftime('%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        flash('⚠️ รูปแบบวันที่ไม่ถูกต้อง', 'warning')
+        return redirect(url_for('admin_dashboard', module='stock'))
+
+    conn = get_db_connection()
+    try:
+        start_write_transaction(conn)
+
+        log = conn.execute(
+            "SELECT id FROM transaction_logs WHERE id = ? AND status = 'Approved' AND request_receive_mode = 'scheduled'",
+            (log_id,)
+        ).fetchone()
+
+        if not log:
+            flash('⚠️ ไม่พบรายการ หรือรายการนี้ไม่สามารถแก้ไขได้', 'warning')
+            return redirect(url_for('admin_dashboard', module='stock'))
+
+        conn.execute(
+            'UPDATE transaction_logs SET requested_receive_at = ? WHERE id = ?',
+            (new_receive_at, log_id)
+        )
+        conn.commit()
+        flash(f'✅ เปลี่ยนวันรับของเป็น {new_dt.strftime("%d/%m/%Y %H:%M")} น. เรียบร้อย', 'success')
+        return redirect(url_for('admin_dashboard', module='stock'))
+
+    except Exception as e:
+        conn.rollback()
+        print(f'Reschedule withdrawal error: {e}')
+        flash('❌ เกิดข้อผิดพลาด กรุณาลองใหม่', 'danger')
+        return redirect(url_for('admin_dashboard', module='stock'))
+    finally:
+        conn.close()
+
 
 @app.route('/admin/get_next_code')
 def get_next_code():
@@ -6648,10 +6835,30 @@ def scheduled_daily_alert():
             HAVING last_timestamp <= datetime('now', '+7 hours', '-23 months')
         '''
         helmet_alerts = conn.execute(helmet_query).fetchall()
+
+        # ==========================================
+        # 3. แจ้งเตือนการขอเบิกล่วงหน้าที่ใกล้ถึงกำหนด (ภายใน 24 ชั่วโมง)
+        # ==========================================
+        scheduled_query = '''
+            SELECT l.id, l.qty, l.note, l.requested_receive_at,
+                   u.name AS emp_name, u.department, u.location,
+                   p.name AS product_name, p.unit
+            FROM transaction_logs l
+            LEFT JOIN users u ON l.emp_id = u.emp_id
+            LEFT JOIN products p ON l.product_id = p.id
+            WHERE l.request_receive_mode = 'scheduled'
+            AND l.status = 'Pending'
+            AND l.requested_receive_at IS NOT NULL
+            AND trim(l.requested_receive_at) != ''
+            AND l.requested_receive_at >= datetime('now', '+7 hours')
+            AND l.requested_receive_at <= datetime('now', '+7 hours', '+24 hours')
+            ORDER BY l.requested_receive_at ASC
+        '''
+        scheduled_withdrawals = conn.execute(scheduled_query).fetchall()
         conn.close()
         
         # ==========================================
-        # 3. จัดกลุ่มแยก CC / PC1 แล้วส่งแยกกัน
+        # 4. จัดกลุ่มแยก CC / PC1 แล้วส่งแยกกัน
         # ==========================================
         def is_cc_location(loc):
             loc = str(loc or '').lower()
@@ -6666,6 +6873,7 @@ def scheduled_daily_alert():
         ]:
             loc_expiry = [i for i in expiring_items if location_check(i['location'])]
             loc_helmets = [h for h in helmet_alerts if location_check(h['location'])]
+            loc_scheduled = [s for s in scheduled_withdrawals if location_check(s['location'])]
 
             exp_payload = []
             for item in loc_expiry:
@@ -6690,11 +6898,30 @@ def scheduled_daily_alert():
                     'show_date': show_date
                 })
 
+            scheduled_payload = []
+            for sw in loc_scheduled:
+                raw_dt = sw['requested_receive_at'] or ''
+                try:
+                    dt_obj = datetime.strptime(raw_dt[:16], '%Y-%m-%d %H:%M')
+                    show_dt = f"{dt_obj.day:02d}/{dt_obj.month:02d}/{dt_obj.year}  {dt_obj.hour:02d}:{dt_obj.minute:02d} น."
+                except Exception:
+                    show_dt = raw_dt
+                scheduled_payload.append({
+                    'emp_name': sw['emp_name'] or '-',
+                    'department': sw['department'] or '-',
+                    'product_name': sw['product_name'] or '-',
+                    'qty': sw['qty'],
+                    'unit': sw['unit'] or '',
+                    'show_dt': show_dt,
+                    'note': sw['note'] or ''
+                })
+
             periodic_payload = {
                 'location_label': location_label,
                 'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'expiring_items': exp_payload,
                 'helmet_alerts': helmet_payload,
+                'scheduled_withdrawals': scheduled_payload,
             }
 
             send_smart_notification(
