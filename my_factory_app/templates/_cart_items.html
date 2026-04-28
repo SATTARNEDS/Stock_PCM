@@ -3,12 +3,15 @@
     <table class="table table-borderless align-middle">
         <tbody>
             {% for item in cart_items %}
-            {% set pkg = (item['package_unit']|default(item['unit'])|string|lower) %}
-            {% set is_medicine_item = (('ยา' in (item['category']|string)) or ('medicine' in (item['category']|string|lower)) or ('pharma' in (item['category']|string|lower)) or ('drug' in (item['category']|string|lower))) and (('pack' in pkg) or ('package' in pkg) or ('box' in pkg) or ('jar' in pkg) or ('bottle' in pkg) or ('แพ็ค' in pkg) or ('กล่อง' in pkg) or ('กระปุก' in pkg) or ('ขวด' in pkg)) %}
-            {% set display_unit = (item['base_unit'] if item['base_unit'] else 'เม็ด') if is_medicine_item else item['unit'] %}
+            {% set is_split_medicine = item['is_split_medicine'] if 'is_split_medicine' in item.keys() else false %}
+            {% set display_unit = item['base_unit_label'] if is_split_medicine else item['unit'] %}
             <tr class="border-bottom">
                 <td>
-                    <div class="fw-medium">{{ item['name'] }}</div>
+                    <div class="fw-medium">{{ item['name'] }}
+                        {% if item['split_unit_hint_label'] %}
+                        <span class="split-unit-badge">{{ item['split_unit_hint_label'] }}</span>
+                        {% endif %}
+                    </div>
                     <small class="text-muted">{{ item['code'] }}</small>
                 </td>
                 <td class="text-center" style="min-width: 120px;">
@@ -36,8 +39,7 @@
         </tbody>
     </table>
 </div>
-{% else %}
-<div class="text-center py-4 text-muted">
+                {% if c['is_medicine'] if 'is_medicine' in c.keys() else false %}
     <i class="fas fa-shopping-cart fa-3x mb-3 opacity-25"></i>
     <p>ยังไม่มีสินค้าในตะกร้า</p>
 </div>

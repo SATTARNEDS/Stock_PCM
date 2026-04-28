@@ -910,7 +910,9 @@
                     let rows = data.items.map(item => {
                         const isMed = !!(item.is_medicine || item.is_split_medicine); // ยาทุกประเภท
                         if (isMed) hasMed = true;
-                        const unit = item.is_split_medicine ? (item.base_unit || 'เม็ด') : (item.unit || '');
+                        const unit = item.is_split_medicine
+                            ? (item.base_unit_label || item.base_unit || 'เม็ด')
+                            : (item.unit || '');
                         const displayName = item.name || '';
                         const unitHintBadge = item.split_unit_hint_label
                             ? ` <span class="split-unit-badge">${escHtml(item.split_unit_hint_label)}</span>`

@@ -2644,12 +2644,22 @@ def menu():
         products_by_category[cat].append(item)
 
     cart_items = conn.execute('''
-        SELECT c.*, p.name, p.code, p.category, p.unit, p.base_unit, p.package_unit
+        SELECT c.*, p.name, p.code, p.category, p.unit, p.base_unit, p.package_unit,
+               p.conversion_rate, p.base_unit_to_tablet_rate, p.package_tablet_total
         FROM carts c JOIN products p ON c.product_id = p.id 
         WHERE c.emp_id = ?
     ''', (emp_id,)).fetchall()
     
     cart_list = [dict(row) for row in cart_items]
+    for item in cart_list:
+        split_medicine = is_split_tablet_medicine(item)
+        item['is_split_medicine'] = split_medicine
+        item['is_medicine'] = is_medicine_product(item)
+        hint_text = get_split_unit_hint_text(item)
+        item['split_unit_hint_label'] = hint_text
+        item['split_unit_hint_text'] = f" ({hint_text})" if hint_text else ''
+        item['base_unit_label'] = str(item.get('base_unit') or 'เม็ด').strip()
+        item['package_unit_label'] = str(item.get('package_unit') or item.get('unit') or 'กล่อง').strip()
     session['cart'] = cart_list 
 
     # การดึงประวัติการเบิก (History)
@@ -3414,6 +3424,8 @@ def api_get_cart():
         item['split_unit_hint_label'] = hint_text
         item['split_unit_hint_text'] = f" ({hint_text})" if hint_text else ''
         item['name_with_unit_hint'] = item.get('name', '')
+        item['base_unit_label'] = str(item.get('base_unit') or 'เม็ด').strip()
+        item['package_unit_label'] = str(item.get('package_unit') or item.get('unit') or 'กล่อง').strip()
     return jsonify({'success': True, 'count': len(items), 'items': items})
 
 
@@ -4140,52 +4152,44 @@ def approve_request(log_id):
 
         product_id = log['product_id']
         qty_to_withdraw = int(log['qty'] or 0)
-        
-        # ตรวจสอบว่าเป็นยาแบบแยกหน่วยหรือไม่
+
+        # ใช้เงื่อนไขเดียวกับหน้าเบิก/หน้าแอดมิน เพื่อแยก flow ยาแบบ split ให้ตรงกัน
         product_info_for_approve = conn.execute(
-            'SELECT base_unit, package_unit, conversion_rate FROM products WHERE id = ?', (product_id,)
+            'SELECT * FROM products WHERE id = ?', (product_id,)
         ).fetchone()
-        is_split_med = (
-            product_info_for_approve and
-            product_info_for_approve['base_unit'] and
-            product_info_for_approve['package_unit'] and
-            (product_info_for_approve['conversion_rate'] or 1) > 1
-        )
-        
-        lot_withdraw_qty = qty_to_withdraw
-        if is_split_med:
-            lot_withdraw_qty = int(log['qty_base_unit'] or 0)
-            if lot_withdraw_qty <= 0:
-                conv = int(product_info_for_approve['conversion_rate'] or 1)
-                lot_withdraw_qty = qty_to_withdraw * max(1, conv)
+        is_split_med = is_split_tablet_medicine(product_info_for_approve) if product_info_for_approve else False
 
-        lots = conn.execute('''
-            SELECT * FROM product_lots 
-            WHERE product_id = ? AND qty > 0 
-            ORDER BY received_date ASC, id ASC
-        ''', (product_id,)).fetchall()
-
-        remaining = lot_withdraw_qty
         last_lot_id = None
 
-        for lot in lots:
-            if remaining <= 0:
-                break
+        # ยาแบบ split ถูกตัดสต็อกจริงตั้งแต่ตอน confirm_withdrawal แล้ว
+        # ตอน approve จึงไม่ตัด product_lots ซ้ำเพื่อกันยอด lot ติดลบ/ไม่พอจากการตัดซ้ำ
+        if not is_split_med:
+            lot_withdraw_qty = qty_to_withdraw
+            lots = conn.execute('''
+                SELECT * FROM product_lots 
+                WHERE product_id = ? AND qty > 0 
+                ORDER BY received_date ASC, id ASC
+            ''', (product_id,)).fetchall()
 
-            take = min(lot['qty'], remaining)
-            conn.execute('UPDATE product_lots SET qty = qty - ? WHERE id = ?', (take, lot['id']))
-            remaining -= take
-            last_lot_id = lot['id']
+            total_lot_qty = sum(int(l['qty'] or 0) for l in lots)
 
-        if remaining > 0:
-            conn.rollback()
-            flash('❌ จำนวนของใน lot ไม่พอสำหรับการอนุมัติ', 'danger')
-            return redirect(url_for('admin_dashboard', module='stock'))
+            # ใช้ lot เฉพาะกรณีที่ยอด lot ครอบคลุมพอเท่านั้น
+            # ถ้า lot ขาด แต่ stock รวมพอ ให้ fallback ไปยึด stock หลักเพื่อไม่ block การอนุมัติ
+            if lots and total_lot_qty >= lot_withdraw_qty:
+                remaining = lot_withdraw_qty
+                for lot in lots:
+                    if remaining <= 0:
+                        break
+
+                    take = min(int(lot['qty'] or 0), remaining)
+                    conn.execute('UPDATE product_lots SET qty = qty - ? WHERE id = ?', (take, lot['id']))
+                    remaining -= take
+                    last_lot_id = lot['id']
 
         thai_now = get_thailand_time().strftime('%d/%m/%Y %H:%M:%S')
         update_result = conn.execute('''
             UPDATE transaction_logs 
-            SET status = "Approved", lot_id = ?, timestamp = ? 
+            SET status = "Approved", lot_id = COALESCE(?, lot_id), timestamp = ? 
             WHERE id = ? AND status = "Pending"
         ''', (last_lot_id, thai_now, log_id))
 
