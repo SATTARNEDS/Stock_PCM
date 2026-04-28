@@ -1,5 +1,5 @@
 {% for item in low_stock %}
-<tr class="align-middle">
+<tr class="align-middle" data-category="{{ item['category'] or '' }}" data-name="{{ item['name']|lower }}">
     <td class="ps-4"><code>{{ item['code'] }}</code></td>
     
     <td>

@@ -1617,15 +1617,21 @@
 
             <div class="card border-0 shadow-sm mb-4 dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}">
                 <div
-                    class="card-header bg-danger text-white py-3 d-flex justify-content-between align-items-center border-0">
+                    class="card-header bg-danger text-white py-3 d-flex flex-wrap justify-content-between align-items-center gap-2 border-0">
                     <h6 class="mb-0 fw-medium"><i class="fas fa-exclamation-triangle me-2"></i>รายการของใกล้หมด (Low
                         Stock)</h6>
-                    <select id="lowStockCatSelector" class="form-select form-select-sm shadow-none w-auto">
-                        <option value="">-- ทุกหมวดหมู่ --</option>
-                        {% for cat in categories %}
-                        <option value="{{ cat['category'] }}">{{ cat['category'] }}</option>
-                        {% endfor %}
-                    </select>
+                    <div class="d-flex gap-2 flex-wrap align-items-center">
+                        <input type="text" id="lowStockSearch" class="form-control form-control-sm shadow-none"
+                            placeholder="ค้นหาชื่อ..." style="width:160px;"
+                            oninput="filterLowStock()">
+                        <select id="lowStockCatSelector" class="form-select form-select-sm shadow-none w-auto"
+                            onchange="filterLowStock()">
+                            <option value="">-- ทุกหมวดหมู่ --</option>
+                            {% for cat in categories %}
+                            <option value="{{ cat['category'] }}">{{ cat['category'] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
                 </div>
                 <div class="card-body p-0 table-responsive low-stock-scroll">
                     <table class="table table-hover align-middle mb-0">
@@ -3160,6 +3166,38 @@
                 .then(checkAuth).then(res => res.text()).then(html => {
                     document.getElementById('stockTableBody').innerHTML = html;
                 });
+        }
+
+        function filterLowStock() {
+            const cat = (document.getElementById('lowStockCatSelector').value || '').trim().toLowerCase();
+            const search = (document.getElementById('lowStockSearch') ? document.getElementById('lowStockSearch').value : '').trim().toLowerCase();
+            const rows = document.querySelectorAll('#lowStockTableBody tr[data-category]');
+            let visibleCount = 0;
+            rows.forEach(row => {
+                const rowCat = (row.getAttribute('data-category') || '').toLowerCase();
+                const rowName = (row.getAttribute('data-name') || '').toLowerCase();
+                const catMatch = !cat || rowCat === cat;
+                const searchMatch = !search || rowName.includes(search);
+                if (catMatch && searchMatch) {
+                    row.style.display = '';
+                    visibleCount++;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+            // แสดง empty state ถ้าไม่มีผลลัพธ์
+            let emptyRow = document.getElementById('lowStockEmptyRow');
+            if (visibleCount === 0 && rows.length > 0) {
+                if (!emptyRow) {
+                    emptyRow = document.createElement('tr');
+                    emptyRow.id = 'lowStockEmptyRow';
+                    emptyRow.innerHTML = '<td colspan="4" class="text-center py-4 text-muted"><i class="fas fa-search me-1"></i> ไม่พบรายการที่ตรงกับเงื่อนไข</td>';
+                    document.getElementById('lowStockTableBody').appendChild(emptyRow);
+                }
+                emptyRow.style.display = '';
+            } else if (emptyRow) {
+                emptyRow.style.display = 'none';
+            }
         }
 
         function generateNextCode() {
