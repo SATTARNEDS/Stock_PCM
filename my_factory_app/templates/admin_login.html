@@ -48,9 +48,37 @@
             border: 0;
             box-shadow: 0 10px 20px rgba(185, 31, 31, 0.22);
         }
+
+        .global-loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .global-loading-overlay.is-active {
+            display: flex;
+        }
+
+        .global-loading-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 14px 16px;
+            min-width: 260px;
+            box-shadow: 0 16px 36px rgba(16, 24, 40, 0.2);
+        }
     </style>
 </head>
 <body>
+<div id="globalLoadingOverlay" class="global-loading-overlay" aria-hidden="true">
+    <div class="global-loading-card">
+        <div id="globalLoadingText" class="fw-medium">กำลังเข้าสู่ระบบ...</div>
+        <div class="small text-muted mt-1">กรุณารอสักครู่และอย่ากดซ้ำ</div>
+    </div>
+</div>
 <div class="login-container bg-dark">
     <div class="login-card text-center">
         <h3 class="fw-medium mb-4">🔒 Admin Access</h3>
@@ -80,5 +108,32 @@
         </div>
     </div>
 </div>
+<script>
+    function showGlobalLoading(text) {
+        const overlay = document.getElementById('globalLoadingOverlay');
+        const label = document.getElementById('globalLoadingText');
+        if (label) label.textContent = text || 'กำลังประมวลผล...';
+        if (overlay) {
+            overlay.classList.add('is-active');
+            overlay.setAttribute('aria-hidden', 'false');
+        }
+    }
+
+    document.addEventListener('submit', function(event) {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        if (form.dataset.submitting === '1') {
+            event.preventDefault();
+            return;
+        }
+        form.dataset.submitting = '1';
+        const submitBtn = form.querySelector('button[type="submit"]');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'กำลังเข้าสู่ระบบ...';
+        }
+        showGlobalLoading('กำลังตรวจสอบสิทธิ์แอดมิน...');
+    });
+</script>
 </body>
 </html>

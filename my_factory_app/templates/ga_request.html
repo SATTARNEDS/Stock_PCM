@@ -89,10 +89,61 @@
             user-select: none;
             pointer-events: none;
         }
+
+        .global-loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .global-loading-overlay.is-active {
+            display: flex;
+        }
+
+        .global-loading-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 14px 16px;
+            min-width: 280px;
+            box-shadow: 0 16px 36px rgba(16, 24, 40, 0.2);
+        }
+
+        .global-loading-bar {
+            height: 6px;
+            border-radius: 999px;
+            background: #e6eefc;
+            overflow: hidden;
+        }
+
+        .global-loading-bar::after {
+            content: "";
+            display: block;
+            width: 36%;
+            height: 100%;
+            background: linear-gradient(90deg, #4f8ff7, #1d67e9);
+            animation: loadingSlide 1.1s infinite ease-in-out;
+        }
+
+        @keyframes loadingSlide {
+            0% { transform: translateX(-120%); }
+            100% { transform: translateX(320%); }
+        }
     </style>
 </head>
 
 <body>
+    <div id="globalLoadingOverlay" class="global-loading-overlay" aria-hidden="true">
+        <div class="global-loading-card">
+            <div id="globalLoadingText" class="fw-medium mb-2">กำลังประมวลผลคำขอ...</div>
+            <div class="global-loading-bar"></div>
+            <div class="small text-muted mt-2">กรุณารอสักครู่และอย่ากดส่งซ้ำ</div>
+        </div>
+    </div>
+
     <div class="container py-4 py-lg-5">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
             <div>
@@ -119,7 +170,7 @@
                 <div class="glass-panel rounded-4 p-4 hero-card mb-4">
                     <div class="position-relative">
                         <span class="badge bg-primary-subtle text-primary rounded-pill px-3 py-2 mb-3">PCM Internal Services</span>
-                        <h2 class="h4 fw-medium mb-3">แจ้งซ่อม แจ้งปัญหา และขอความช่วยเหลือจากแผนก GA / IT</h2>
+                        <h2 class="h4 fw-medium mb-3">แจ้งซ่อม แจ้งปัญหา และขอความช่วยเหลือจากแผนก GA / IT / SAFETY</h2>
                         <p class="text-muted mb-0">ระบบจะผูก Location จากข้อมูลพนักงานและส่งอีเมลแจ้งผู้รับผิดชอบตามส่วนงานที่เลือก</p>
                     </div>
                 </div>
@@ -157,7 +208,7 @@
                         <h2 class="h5 mb-0 fw-medium"><i class="fas fa-pen-to-square me-2 text-primary"></i>ฟอร์มยื่นคำร้อง</h2>
                         <span class="badge bg-light text-dark rounded-pill px-3 py-2">รองรับรูปภาพประกอบ</span>
                     </div>
-                    <form method="POST" enctype="multipart/form-data" class="row g-3">
+                    <form method="POST" enctype="multipart/form-data" class="row g-3" id="gaRequestForm" data-loading-text="กำลังส่งคำร้องและอีเมลแจ้งเตือน...">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
 
@@ -187,7 +238,7 @@
                             <img id="attachmentPreview" class="preview-image w-100" alt="attachment preview">
                         </div>
                         <div class="col-12 text-end">
-                            <button type="submit" class="btn btn-primary rounded-pill px-4 py-2">
+                            <button type="submit" class="btn btn-primary rounded-pill px-4 py-2" id="gaRequestSubmitBtn">
                                 <i class="fas fa-paper-plane me-1"></i> ส่งคำร้อง
                             </button>
                         </div>
@@ -215,7 +266,7 @@
                                 <tr>
                                     <td class="small text-muted">{{ req['created_at'] | format_ts }}</td>
                                     <td>
-                                        <span class="badge {% if req['target_team'] == 'IT' %}bg-info-subtle text-info{% else %}bg-secondary-subtle text-secondary{% endif %} rounded-pill px-3 py-2">{{ req['target_team'] }}</span>
+                                        <span class="badge {% if req['target_team'] == 'IT' %}bg-info-subtle text-info{% elif req['target_team'] == 'SAFETY' %}bg-warning-subtle text-warning{% else %}bg-secondary-subtle text-secondary{% endif %} rounded-pill px-3 py-2">{{ req['target_team'] }}</span>
                                     </td>
                                     <td>
                                         <div class="fw-medium">{{ req['title'] }}</div>
@@ -291,6 +342,16 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        function showGlobalLoading(text) {
+            const overlay = document.getElementById('globalLoadingOverlay');
+            const label = document.getElementById('globalLoadingText');
+            if (label) label.textContent = text || 'กำลังประมวลผล...';
+            if (overlay) {
+                overlay.classList.add('is-active');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+        }
+
         let gaImageScale = 1;
         const GA_IMAGE_MIN_SCALE = 0.4;
         const GA_IMAGE_MAX_SCALE = 3;
@@ -399,6 +460,23 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
+            const gaRequestForm = document.getElementById('gaRequestForm');
+            if (gaRequestForm) {
+                gaRequestForm.addEventListener('submit', (event) => {
+                    if (gaRequestForm.dataset.submitting === '1') {
+                        event.preventDefault();
+                        return;
+                    }
+                    gaRequestForm.dataset.submitting = '1';
+                    const submitBtn = document.getElementById('gaRequestSubmitBtn');
+                    if (submitBtn) {
+                        submitBtn.disabled = true;
+                        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>กำลังส่ง...';
+                    }
+                    showGlobalLoading(gaRequestForm.dataset.loadingText || 'กำลังส่งคำร้องและอีเมลแจ้งเตือน...');
+                });
+            }
+
             const gaViewerStage = document.getElementById('gaImageViewerStage');
             if (gaViewerStage) {
                 gaViewerStage.addEventListener('wheel', (event) => {

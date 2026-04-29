@@ -85,7 +85,7 @@ ALLOWED_IMPORT_EXTENSIONS = {'xlsx', 'xlsm', 'xls'}
 ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 _default_ga_upload_root = os.path.join(os.environ.get('LOCALAPPDATA', BASE_DIR), 'PCM', 'ga_uploads')
 GA_REQUEST_UPLOAD_DIR = os.environ.get('GA_REQUEST_UPLOAD_DIR', _default_ga_upload_root)
-GA_REQUEST_TARGET_TEAMS = ('GA', 'IT')
+GA_REQUEST_TARGET_TEAMS = ('GA', 'IT', 'SAFETY')
 GA_REQUEST_STATUS_OPTIONS = ('Pending', 'In Progress', 'Resolved', 'Rejected')
 SENSITIVE_POST_ENDPOINTS = {
     'index', 'admin_login', 'logout_user', 'admin_logout',
@@ -7214,6 +7214,7 @@ def get_ga_email_settings():
     keys = [
         'ga_recipients_ga_pc1', 'ga_recipients_ga_cc',
         'ga_recipients_it_pc1', 'ga_recipients_it_cc',
+        'ga_recipients_safety_pc1', 'ga_recipients_safety_cc',
         'ga_recipients_default',
         'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_from', 'smtp_use_tls'
     ]
@@ -7230,6 +7231,8 @@ def save_ga_email_settings():
         'ga_recipients_ga_cc': clean_input_text(request.form.get('ga_recipients_ga_cc'), 500),
         'ga_recipients_it_pc1': clean_input_text(request.form.get('ga_recipients_it_pc1'), 500),
         'ga_recipients_it_cc': clean_input_text(request.form.get('ga_recipients_it_cc'), 500),
+        'ga_recipients_safety_pc1': clean_input_text(request.form.get('ga_recipients_safety_pc1'), 500),
+        'ga_recipients_safety_cc': clean_input_text(request.form.get('ga_recipients_safety_cc'), 500),
         'ga_recipients_default': clean_input_text(request.form.get('ga_recipients_default'), 500),
         'smtp_host': clean_input_text(request.form.get('smtp_host'), 200),
         'smtp_port': clean_input_text(request.form.get('smtp_port'), 10),
@@ -7241,7 +7244,9 @@ def save_ga_email_settings():
 
     recipient_keys = [
         'ga_recipients_ga_pc1', 'ga_recipients_ga_cc',
-        'ga_recipients_it_pc1', 'ga_recipients_it_cc', 'ga_recipients_default'
+        'ga_recipients_it_pc1', 'ga_recipients_it_cc',
+        'ga_recipients_safety_pc1', 'ga_recipients_safety_cc',
+        'ga_recipients_default'
     ]
     invalid_tokens = []
     for key in recipient_keys:
@@ -7288,6 +7293,8 @@ def init_settings_db():
         'ga_recipients_ga_cc': '',
         'ga_recipients_it_pc1': '',
         'ga_recipients_it_cc': '',
+        'ga_recipients_safety_pc1': '',
+        'ga_recipients_safety_cc': '',
         'ga_recipients_default': '',
         'smtp_host': 'smtp.gmail.com',
         'smtp_port': '587',

@@ -317,10 +317,60 @@
                 margin-bottom: 12px;
             }
         }
+
+        .global-loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .global-loading-overlay.is-active {
+            display: flex;
+        }
+
+        .global-loading-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 14px 16px;
+            min-width: 280px;
+            box-shadow: 0 16px 36px rgba(16, 24, 40, 0.2);
+        }
+
+        .global-loading-bar {
+            height: 6px;
+            border-radius: 999px;
+            background: #e6eefc;
+            overflow: hidden;
+        }
+
+        .global-loading-bar::after {
+            content: "";
+            display: block;
+            width: 36%;
+            height: 100%;
+            background: linear-gradient(90deg, #4f8ff7, #1d67e9);
+            animation: loadingSlide 1.1s infinite ease-in-out;
+        }
+
+        @keyframes loadingSlide {
+            0% { transform: translateX(-120%); }
+            100% { transform: translateX(320%); }
+        }
     </style>
 </head>
 
 <body>
+    <div id="globalLoadingOverlay" class="global-loading-overlay" aria-hidden="true">
+        <div class="global-loading-card">
+            <div id="globalLoadingText" class="fw-medium mb-2">กำลังโหลดข้อมูล...</div>
+            <div class="global-loading-bar"></div>
+            <div class="small text-muted mt-2">กรุณารอสักครู่และอย่ากดซ้ำ</div>
+        </div>
+    </div>
 
     <nav class="navbar navbar-white bg-white border-bottom px-3 py-2">
         <div class="container d-flex justify-content-between align-items-center gap-2">
@@ -489,6 +539,57 @@
         let timeout = null;
         let currentPage = 1;
         const categoryButtons = document.querySelectorAll('.cat-btn');
+        let globalLoadingCount = 0;
+
+        function showGlobalLoading(text) {
+            globalLoadingCount += 1;
+            const overlay = document.getElementById('globalLoadingOverlay');
+            const label = document.getElementById('globalLoadingText');
+            if (label) label.textContent = text || 'กำลังโหลดข้อมูล...';
+            if (overlay) {
+                overlay.classList.add('is-active');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+        }
+
+        function hideGlobalLoading(forceHide = false) {
+            if (forceHide) {
+                globalLoadingCount = 0;
+            } else {
+                globalLoadingCount = Math.max(0, globalLoadingCount - 1);
+            }
+            const overlay = document.getElementById('globalLoadingOverlay');
+            if (!overlay) return;
+            if (globalLoadingCount === 0) {
+                overlay.classList.remove('is-active');
+                overlay.setAttribute('aria-hidden', 'true');
+            }
+        }
+
+        function shouldShowLoadingForFetch(url, method) {
+            const text = String(url || '');
+            const methodUpper = String(method || 'GET').toUpperCase();
+            if (text.includes('/api/preview_withdrawal')) return false;
+            if (text.includes('/api/dismiss_notification')) return false;
+            if (text.includes('/update_cart_qty')) return false;
+            if (text.includes('/add_to_cart')) return false;
+            if (text.includes('/remove_from_cart')) return false;
+            if (methodUpper === 'GET' && text.includes('/api/search_products')) return true;
+            if (methodUpper === 'GET' && text.includes('/api/get_cart')) return true;
+            if (methodUpper === 'GET' && text.includes('/api/get_history')) return true;
+            return methodUpper !== 'GET';
+        }
+
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = function(input, init = {}) {
+            const url = typeof input === 'string' ? input : (input?.url || '');
+            const method = (init && init.method) || (typeof input !== 'string' && input?.method) || 'GET';
+            const showLoader = shouldShowLoadingForFetch(url, method);
+            if (showLoader) showGlobalLoading('กำลังโหลดข้อมูล...');
+            return nativeFetch(input, init).finally(() => {
+                if (showLoader) hideGlobalLoading();
+            });
+        };
 
         // Real-time Search Logic
         searchInput.addEventListener('input', () => {
@@ -682,8 +783,33 @@
                 showCancelButton: true,
                 confirmButtonText: 'ยืนยัน',
                 cancelButtonText: 'ยกเลิก'
-            }).then(res => { if (res.isConfirmed) this.submit(); });
+            }).then(res => {
+                if (!res.isConfirmed) return;
+                if (this.dataset.submitting === '1') return;
+                this.dataset.submitting = '1';
+                const btn = document.getElementById('confirmWithdrawalBtn');
+                if (btn) {
+                    btn.disabled = true;
+                    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>กำลังส่งคำขอ...';
+                }
+                showGlobalLoading('กำลังส่งคำขอและแจ้งเตือนอีเมล...');
+                this.submit();
+            });
         };
+
+        const logoutForm = document.querySelector('form[action*="/logout_user/"]');
+        if (logoutForm) {
+            logoutForm.addEventListener('submit', (event) => {
+                if (logoutForm.dataset.submitting === '1') {
+                    event.preventDefault();
+                    return;
+                }
+                logoutForm.dataset.submitting = '1';
+                const btn = logoutForm.querySelector('button[type="submit"]');
+                if (btn) btn.disabled = true;
+                showGlobalLoading('กำลังออกจากระบบ...');
+            });
+        }
 
         // Auto-open cart if needed
         window.onload = () => {

@@ -80,10 +80,39 @@
         .stat-pill.lowstock  { background: #f8d7da; color: #842029; }
         .stat-pill.ok        { background: #d1e7dd; color: #0a6640; }
         .stat-pill.neutral   { background: #e9ecef; color: #495057; }
+
+        .global-loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .global-loading-overlay.is-active {
+            display: flex;
+        }
+
+        .global-loading-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 14px 16px;
+            min-width: 260px;
+            box-shadow: 0 16px 36px rgba(16, 24, 40, 0.2);
+        }
     </style>
 </head>
 
 <body>
+    <div id="globalLoadingOverlay" class="global-loading-overlay" aria-hidden="true">
+        <div class="global-loading-card">
+            <div id="globalLoadingText" class="fw-medium">กำลังออกจากระบบ...</div>
+            <div class="small text-muted mt-1">กรุณารอสักครู่และอย่ากดซ้ำ</div>
+        </div>
+    </div>
+
     <div class="container py-4 py-lg-5">
         <div class="glass rounded-4 p-4 p-lg-5 mb-4">
             <div class="d-flex flex-wrap justify-content-between gap-3 align-items-center">
@@ -117,7 +146,7 @@
                             <div class="d-flex justify-content-between align-items-start">
                                 <div>
                                     <h2 class="h5 mb-1"><i class="fas fa-screwdriver-wrench me-2"></i>GA Request</h2>
-                                    <div class="small opacity-75">แจ้งซ่อม แจ้งปัญหา ส่งต่อ GA/IT</div>
+                                    <div class="small opacity-75">แจ้งซ่อม แจ้งปัญหา ส่งต่อ GA / IT / SAFETY</div>
                                 </div>
                                 {% if ga_pending > 0 %}
                                 <span class="badge bg-warning text-dark badge-counter rounded-pill">{{ ga_pending }} รอดำเนินการ</span>
@@ -178,6 +207,34 @@
             </div>
         </div>
     </div>
+
+    <script>
+        function showGlobalLoading(text) {
+            const overlay = document.getElementById('globalLoadingOverlay');
+            const label = document.getElementById('globalLoadingText');
+            if (label) label.textContent = text || 'กำลังประมวลผล...';
+            if (overlay) {
+                overlay.classList.add('is-active');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+        }
+
+        document.addEventListener('submit', function(event) {
+            const form = event.target;
+            if (!(form instanceof HTMLFormElement)) return;
+            if (form.dataset.submitting === '1') {
+                event.preventDefault();
+                return;
+            }
+            form.dataset.submitting = '1';
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>กำลังออก...';
+            }
+            showGlobalLoading('กำลังออกจากระบบ...');
+        });
+    </script>
 </body>
 
 </html>

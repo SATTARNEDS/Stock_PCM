@@ -195,9 +195,38 @@
                 font-size: 1.15rem;
             }
         }
+
+        .global-loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 3000;
+        }
+
+        .global-loading-overlay.is-active {
+            display: flex;
+        }
+
+        .global-loading-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 14px 16px;
+            min-width: 280px;
+            box-shadow: 0 16px 36px rgba(16, 24, 40, 0.2);
+        }
     </style>
 </head>
 <body class="{% if popup_mode %}popup-mode{% endif %}">
+    <div id="globalLoadingOverlay" class="global-loading-overlay" aria-hidden="true">
+        <div class="global-loading-card">
+            <div id="globalLoadingText" class="fw-medium">กำลังบันทึก/ทดสอบอีเมล...</div>
+            <div class="small text-muted mt-1">กรุณารอสักครู่และอย่ากดซ้ำ</div>
+        </div>
+    </div>
+
     <div class="page-shell {% if popup_mode %}popup-shell{% endif %}">
         <div class="hero-card mb-3">
             <div class="hero-header d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -524,5 +553,31 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function showGlobalLoading(text) {
+            const overlay = document.getElementById('globalLoadingOverlay');
+            const label = document.getElementById('globalLoadingText');
+            if (label) label.textContent = text || 'กำลังประมวลผล...';
+            if (overlay) {
+                overlay.classList.add('is-active');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+        }
+
+        document.addEventListener('submit', function(event) {
+            const form = event.target;
+            if (!(form instanceof HTMLFormElement)) return;
+            if (form.dataset.submitting === '1') {
+                event.preventDefault();
+                return;
+            }
+            form.dataset.submitting = '1';
+            const submitter = event.submitter;
+            const actionHint = submitter && submitter.getAttribute('formaction') ? 'กำลังทดสอบส่งอีเมล...' : 'กำลังบันทึกการตั้งค่าอีเมล...';
+            const buttons = form.querySelectorAll('button[type="submit"], input[type="submit"]');
+            buttons.forEach((btn) => { btn.disabled = true; });
+            showGlobalLoading(actionHint);
+        });
+    </script>
 </body>
 </html>

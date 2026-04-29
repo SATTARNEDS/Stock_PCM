@@ -2,13 +2,45 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>จัดการพนักงานค้าง</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@300;400;500&display=swap" rel="stylesheet">
-    <style>body { font-family: "Mitr", sans-serif; background-color: #f4f6f9; }</style>
+    <style>
+        body { font-family: "Mitr", sans-serif; background-color: #f4f6f9; }
+
+        .global-loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .global-loading-overlay.is-active {
+            display: flex;
+        }
+
+        .global-loading-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 14px 16px;
+            min-width: 260px;
+            box-shadow: 0 16px 36px rgba(16, 24, 40, 0.2);
+        }
+    </style>
 </head>
 <body class="bg-light">
+    <div id="globalLoadingOverlay" class="global-loading-overlay" aria-hidden="true">
+        <div class="global-loading-card">
+            <div id="globalLoadingText" class="fw-medium">กำลังปลดล็อกผู้ใช้งาน...</div>
+            <div class="small text-muted mt-1">กรุณารอสักครู่และอย่ากดซ้ำ</div>
+        </div>
+    </div>
+
     <nav class="navbar navbar-dark bg-dark px-4 mb-4">
         <a class="navbar-brand" href="/admin">🏭 Stock Manager</a>
         <a href="/admin" class="btn btn-outline-light btn-sm rounded-pill px-3">กลับ Dashboard</a>
@@ -56,5 +88,33 @@
             </div>
         </div>
     </div>
+
+    <script>
+        function showGlobalLoading(text) {
+            const overlay = document.getElementById('globalLoadingOverlay');
+            const label = document.getElementById('globalLoadingText');
+            if (label) label.textContent = text || 'กำลังประมวลผล...';
+            if (overlay) {
+                overlay.classList.add('is-active');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+        }
+
+        document.addEventListener('submit', function(event) {
+            const form = event.target;
+            if (!(form instanceof HTMLFormElement)) return;
+            if (form.dataset.submitting === '1') {
+                event.preventDefault();
+                return;
+            }
+            form.dataset.submitting = '1';
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>กำลังปลดล็อก...';
+            }
+            showGlobalLoading('กำลังปลดล็อกผู้ใช้งาน...');
+        });
+    </script>
 </body>
 </html>

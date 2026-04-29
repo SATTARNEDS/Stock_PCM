@@ -43,9 +43,60 @@
             color: #fff;
             box-shadow: 0 10px 22px rgba(13, 110, 253, 0.22);
         }
+
+        .global-loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .global-loading-overlay.is-active {
+            display: flex;
+        }
+
+        .global-loading-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 14px 16px;
+            min-width: 280px;
+            box-shadow: 0 16px 36px rgba(16, 24, 40, 0.2);
+        }
+
+        .global-loading-bar {
+            height: 6px;
+            border-radius: 999px;
+            background: #e6eefc;
+            overflow: hidden;
+        }
+
+        .global-loading-bar::after {
+            content: "";
+            display: block;
+            width: 36%;
+            height: 100%;
+            background: linear-gradient(90deg, #4f8ff7, #1d67e9);
+            animation: loadingSlide 1.1s infinite ease-in-out;
+        }
+
+        @keyframes loadingSlide {
+            0% { transform: translateX(-120%); }
+            100% { transform: translateX(320%); }
+        }
     </style>
 </head>
 <body class="bg-light">
+
+<div id="globalLoadingOverlay" class="global-loading-overlay" aria-hidden="true">
+    <div class="global-loading-card">
+        <div id="globalLoadingText" class="fw-medium mb-2">กำลังประมวลผลข้อมูล...</div>
+        <div class="global-loading-bar"></div>
+        <div class="small text-muted mt-2">กรุณารอสักครู่และอย่ากดซ้ำ</div>
+    </div>
+</div>
 
 <nav class="navbar navbar-dark bg-dark px-4 shadow-sm mb-4">
     <a class="navbar-brand fw-medium" href="/admin">🏭 Stock Manager (FIFO Mode)</a>
@@ -210,6 +261,23 @@
 <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        function showGlobalLoading(text) {
+            const overlay = document.getElementById('globalLoadingOverlay');
+            const label = document.getElementById('globalLoadingText');
+            if (label) label.textContent = text || 'กำลังประมวลผลข้อมูล...';
+            if (overlay) {
+                overlay.classList.add('is-active');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+        }
+
+        function hideGlobalLoading() {
+            const overlay = document.getElementById('globalLoadingOverlay');
+            if (!overlay) return;
+            overlay.classList.remove('is-active');
+            overlay.setAttribute('aria-hidden', 'true');
+        }
+
         // เริ่มการทำงานของ Choices.js สำหรับช่องค้นหา
         const productSearch = new Choices('#choices-search', { 
             searchEnabled: true, 
@@ -223,9 +291,13 @@
         // ระบบบันทึกข้อมูลโดยไม่รีเฟรชหน้า (AJAX)
         stockForm.addEventListener('submit', function(e) {
             e.preventDefault();
+
+            if (stockForm.dataset.submitting === '1') return;
+            stockForm.dataset.submitting = '1';
             
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> กำลังบันทึกข้อมูล...';
+            showGlobalLoading('กำลังบันทึก Lot ใหม่...');
 
             const formData = new FormData(this);
             
@@ -238,6 +310,7 @@
             .then(data => {
                 if(data.success) {
                     // เมื่อสำเร็จ ให้รีโหลดหน้าเพื่อให้ตาราง Lot ด้านล่างอัปเดต
+                    showGlobalLoading('บันทึกสำเร็จ กำลังรีโหลดข้อมูล...');
                     window.location.reload();
                 } else {
                     const alertHtml = `
@@ -248,13 +321,32 @@
                     document.getElementById('alert-container').innerHTML = alertHtml;
                     submitBtn.disabled = false;
                     submitBtn.innerHTML = 'บันทึกรับเข้าสต็อก (FIFO)';
+                    stockForm.dataset.submitting = '0';
+                    hideGlobalLoading();
                 }
             })
             .catch(error => {
                 alert('เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = 'บันทึกรับเข้าสต็อก (FIFO)';
+                stockForm.dataset.submitting = '0';
+                hideGlobalLoading();
             });
+        });
+
+        // ป้องกันกดซ้ำฟอร์มอื่น ๆ (เช่น ลงทะเบียนสินค้าใหม่)
+        document.addEventListener('submit', function(event) {
+            const form = event.target;
+            if (!(form instanceof HTMLFormElement)) return;
+            if (form.id === 'stockUpdateForm') return;
+            if (form.dataset.submitting === '1') {
+                event.preventDefault();
+                return;
+            }
+            form.dataset.submitting = '1';
+            const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+            if (submitBtn) submitBtn.disabled = true;
+            showGlobalLoading('กำลังบันทึกข้อมูลสินค้าใหม่...');
         });
     });
 </script>

@@ -299,10 +299,38 @@
                 transform: translateY(0) scale(1);
             }
         }
+
+        .global-loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .global-loading-overlay.is-active {
+            display: flex;
+        }
+
+        .global-loading-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 14px 16px;
+            min-width: 260px;
+            box-shadow: 0 16px 36px rgba(16, 24, 40, 0.2);
+        }
     </style>
 </head>
 
 <body>
+    <div id="globalLoadingOverlay" class="global-loading-overlay" aria-hidden="true">
+        <div class="global-loading-card">
+            <div id="globalLoadingText" class="fw-medium">กำลังเข้าสู่ระบบ...</div>
+            <div class="small text-muted mt-1">กรุณารอสักครู่และอย่ากดซ้ำ</div>
+        </div>
+    </div>
 
     <div class="auth-container" id="authContainer">
 
@@ -369,7 +397,7 @@
                 <h3 class="fw-medium">PCM SYSTEM</h3>
                 <p class="small opacity-75 px-3 mb-3">ศูนย์รวมทุกระบบภายในโรงงาน</p>
                 <div class="d-flex flex-column gap-2 mb-4" style="font-size:0.82rem;">
-                    <span><i class="fas fa-screwdriver-wrench me-2 opacity-75"></i>GA Request แจ้งซ่อม / แจ้งปัญหา</span>
+                    <span><i class="fas fa-screwdriver-wrench me-2 opacity-75"></i>GA Request แจ้งซ่อม / แจ้งปัญหา / SAFETY</span>
                     <span><i class="fas fa-boxes-stacked me-2 opacity-75"></i>Stock เบิกจ่ายพัสดุอุปกรณ์</span>
                     <span><i class="fas fa-car-side me-2 opacity-75"></i>ระบบจองรถภายใน</span>
                 </div>
@@ -387,6 +415,16 @@
     </div>
 
     <script>
+        function showGlobalLoading(text) {
+            const overlay = document.getElementById('globalLoadingOverlay');
+            const label = document.getElementById('globalLoadingText');
+            if (label) label.textContent = text || 'กำลังประมวลผล...';
+            if (overlay) {
+                overlay.classList.add('is-active');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+        }
+
         function toggleMode(isAdmin) {
             const container = document.getElementById('authContainer');
             const sideUser = document.getElementById('sideContentUser');
@@ -417,6 +455,22 @@
             toggleMode(true);
         }
         }
+
+        document.addEventListener('submit', function(event) {
+            const form = event.target;
+            if (!(form instanceof HTMLFormElement)) return;
+            if (form.dataset.submitting === '1') {
+                event.preventDefault();
+                return;
+            }
+            form.dataset.submitting = '1';
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'กำลังเข้าสู่ระบบ...';
+            }
+            showGlobalLoading(form.id === 'loginFormAdmin' ? 'กำลังตรวจสอบสิทธิ์แอดมิน...' : 'กำลังเข้าสู่ระบบ...');
+        });
     </script>
 </body>
 
