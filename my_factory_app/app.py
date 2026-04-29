@@ -6130,6 +6130,138 @@ def change_password():
     finally:
         conn.close()
 
+# ─── Superadmin: Admin Account Management ───────────────────────────────────
+
+ALLOWED_ADMIN_ROLES = ('admin_pc1', 'admin_cc', 'admin_all')
+
+@app.route('/admin/list_admins_ajax')
+def list_admins_ajax():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+    if session.get('admin_role') != 'superadmin':
+        return jsonify({'success': False, 'message': 'เฉพาะ Superadmin เท่านั้น'}), 403
+    conn = get_db_connection()
+    try:
+        rows = conn.execute("SELECT id, username, name, role FROM admins ORDER BY id").fetchall()
+        return jsonify({'success': True, 'admins': [dict(r) for r in rows]})
+    finally:
+        conn.close()
+
+
+@app.route('/admin/add_admin_ajax', methods=['POST'])
+def add_admin_ajax():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+    if session.get('admin_role') != 'superadmin':
+        return jsonify({'success': False, 'message': 'เฉพาะ Superadmin เท่านั้น'}), 403
+
+    data = request.get_json(silent=True) or {}
+    username = clean_input_text(data.get('username', ''), 50).lower()
+    name = clean_input_text(data.get('name', ''), 100)
+    role = (data.get('role', '') or '').strip()
+    password = data.get('password', '')
+
+    if not username or not name or not password:
+        return jsonify({'success': False, 'message': 'กรุณากรอกข้อมูลให้ครบ'}), 400
+    if role not in ALLOWED_ADMIN_ROLES:
+        return jsonify({'success': False, 'message': 'Role ไม่ถูกต้อง'}), 400
+    if len(password) < 8 or len(password) > 128:
+        return jsonify({'success': False, 'message': 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร'}), 400
+
+    conn = get_db_connection()
+    try:
+        existing = conn.execute('SELECT id FROM admins WHERE username = ?', (username,)).fetchone()
+        if existing:
+            return jsonify({'success': False, 'message': f'Username "{username}" ถูกใช้แล้ว'}), 409
+        hashed = generate_password_hash(password)
+        conn.execute('INSERT INTO admins (username, password, name, role) VALUES (?, ?, ?, ?)',
+                     (username, hashed, name, role))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/admin/edit_admin_ajax', methods=['POST'])
+def edit_admin_ajax():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+    if session.get('admin_role') != 'superadmin':
+        return jsonify({'success': False, 'message': 'เฉพาะ Superadmin เท่านั้น'}), 403
+
+    data = request.get_json(silent=True) or {}
+    admin_id = data.get('id')
+    name = clean_input_text(data.get('name', ''), 100)
+    role = (data.get('role', '') or '').strip()
+    password = data.get('password', '')  # optional — blank = no change
+
+    if not admin_id or not name:
+        return jsonify({'success': False, 'message': 'ข้อมูลไม่ครบ'}), 400
+    if role not in ALLOWED_ADMIN_ROLES:
+        return jsonify({'success': False, 'message': 'Role ไม่ถูกต้อง'}), 400
+    if password and (len(password) < 8 or len(password) > 128):
+        return jsonify({'success': False, 'message': 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร'}), 400
+
+    conn = get_db_connection()
+    try:
+        target = conn.execute('SELECT * FROM admins WHERE id = ?', (admin_id,)).fetchone()
+        if not target:
+            return jsonify({'success': False, 'message': 'ไม่พบ Admin'}), 404
+        # ห้ามเปลี่ยน role ของ superadmin
+        if target['role'] == 'superadmin':
+            return jsonify({'success': False, 'message': 'ไม่สามารถแก้ไขบัญชี Superadmin ได้'}), 403
+
+        if password:
+            hashed = generate_password_hash(password)
+            conn.execute('UPDATE admins SET name=?, role=?, password=? WHERE id=?',
+                         (name, role, hashed, admin_id))
+        else:
+            conn.execute('UPDATE admins SET name=?, role=? WHERE id=?',
+                         (name, role, admin_id))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/admin/delete_admin_ajax', methods=['POST'])
+def delete_admin_ajax():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+    if session.get('admin_role') != 'superadmin':
+        return jsonify({'success': False, 'message': 'เฉพาะ Superadmin เท่านั้น'}), 403
+
+    data = request.get_json(silent=True) or {}
+    admin_id = data.get('id')
+    if not admin_id:
+        return jsonify({'success': False, 'message': 'ไม่ระบุ Admin'}), 400
+
+    conn = get_db_connection()
+    try:
+        target = conn.execute('SELECT * FROM admins WHERE id = ?', (admin_id,)).fetchone()
+        if not target:
+            return jsonify({'success': False, 'message': 'ไม่พบ Admin'}), 404
+        if target['role'] == 'superadmin':
+            return jsonify({'success': False, 'message': 'ไม่สามารถลบบัญชี Superadmin ได้'}), 403
+        if target['username'] == session.get('admin_username'):
+            return jsonify({'success': False, 'message': 'ไม่สามารถลบบัญชีตัวเองได้'}), 403
+        conn.execute('DELETE FROM admins WHERE id = ?', (admin_id,))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+# ─── End Admin Account Management ────────────────────────────────────────────
+
 # --- ฟังก์ชันเบิกของแบบ FIFO ---
 def withdraw_fifo_logic(product_id, qty_to_withdraw, emp_id):
     conn = get_db_connection()

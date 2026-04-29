@@ -1072,6 +1072,9 @@
 
                 {% if role == 'superadmin' %}
                 <div class="nav-category text-white-50">ระบบจัดการขั้นสูง</div>
+                <a href="javascript:void(0)" class="nav-link" onclick="openAdminAccountsModal()">
+                    <i class="fas fa-user-shield me-2 text-warning"></i> จัดการบัญชี Admin
+                </a>
                 <a href="javascript:void(0)" class="nav-link" onclick="openAdminPopup('email-settings')">
                     <i class="fas fa-envelope me-2 text-success"></i> ⚙️ Email Notifications
                 </a>
@@ -4663,6 +4666,233 @@
             });
         }
     </script>
+
+    <!-- ═══════════════════════════════════════════════════
+         Admin Account Management Modal (superadmin only)
+    ═══════════════════════════════════════════════════ -->
+    {% if role == 'superadmin' %}
+    <div class="modal fade" id="adminAccountsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-dark text-white border-0">
+                    <h5 class="modal-title fw-medium">
+                        <i class="fas fa-user-shield text-warning me-2"></i>จัดการบัญชี Admin
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body bg-light p-4">
+                    <div class="d-flex justify-content-end mb-3">
+                        <button class="btn btn-success btn-sm rounded-pill px-3" onclick="openAddAdminForm()">
+                            <i class="fas fa-plus me-1"></i> เพิ่ม Admin ใหม่
+                        </button>
+                    </div>
+                    <!-- Add/Edit inline form -->
+                    <div id="adminFormBox" class="card border-0 shadow-sm mb-3 d-none">
+                        <div class="card-body">
+                            <h6 id="adminFormTitle" class="fw-semibold mb-3">เพิ่ม Admin ใหม่</h6>
+                            <input type="hidden" id="adminEditId">
+                            <div class="row g-2">
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-medium">Username</label>
+                                    <input id="adminUsername" class="form-control form-control-sm" placeholder="เช่น pc1_staff" maxlength="50">
+                                    <div class="form-text text-muted" id="adminUsernameNote">ใช้ตัวเล็ก ไม่มีช่องว่าง</div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-medium">ชื่อ-นามสกุล</label>
+                                    <input id="adminName" class="form-control form-control-sm" placeholder="ชื่อผู้ดูแลระบบ" maxlength="100">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-medium">รหัสผ่าน <span id="adminPwNote" class="text-muted">(อย่างน้อย 8 ตัว)</span></label>
+                                    <input id="adminPassword" type="password" class="form-control form-control-sm" placeholder="รหัสผ่าน" maxlength="128" autocomplete="new-password">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-medium">บทบาท (Role)</label>
+                                    <select id="adminRole" class="form-select form-select-sm">
+                                        <option value="admin_pc1">Admin PC1 (เห็นเฉพาะ PC1)</option>
+                                        <option value="admin_cc">Admin CC (เห็นเฉพาะ CC)</option>
+                                        <option value="admin_all">Admin All (เห็นทั้ง 2 ฝั่ง)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="adminFormAlert" class="alert d-none mt-2 py-2 small"></div>
+                            <div class="d-flex gap-2 mt-3">
+                                <button class="btn btn-primary btn-sm rounded-pill px-4" onclick="submitAdminForm()">
+                                    <i class="fas fa-save me-1"></i> บันทึก
+                                </button>
+                                <button class="btn btn-secondary btn-sm rounded-pill px-3" onclick="cancelAdminForm()">ยกเลิก</button>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Admin table -->
+                    <div class="table-responsive">
+                        <table class="table table-hover table-sm align-middle mb-0 bg-white rounded shadow-sm overflow-hidden">
+                            <thead class="table-dark small">
+                                <tr>
+                                    <th>Username</th>
+                                    <th>ชื่อ</th>
+                                    <th>Role</th>
+                                    <th class="text-center">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminTableBody">
+                                <tr><td colspan="4" class="text-center text-muted py-3">กำลังโหลด…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer bg-white border-0">
+                    <button class="btn btn-secondary rounded-pill px-4" data-bs-dismiss="modal">ปิด</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ── Admin Account Management ────────────────────────────────────────
+    const ROLE_LABELS = {
+        'superadmin': '<span class="badge bg-danger">Superadmin</span>',
+        'admin_pc1':  '<span class="badge bg-primary">Admin PC1</span>',
+        'admin_cc':   '<span class="badge bg-info text-dark">Admin CC</span>',
+        'admin_all':  '<span class="badge bg-success">Admin All</span>',
+    };
+
+    function openAdminAccountsModal() {
+        loadAdminList();
+        cancelAdminForm();
+        new bootstrap.Modal(document.getElementById('adminAccountsModal')).show();
+    }
+
+    function loadAdminList() {
+        fetch('/admin/list_admins_ajax').then(checkAuth).then(r => r.json()).then(data => {
+            const tbody = document.getElementById('adminTableBody');
+            if (!data.success || !data.admins.length) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">ไม่มีข้อมูล</td></tr>';
+                return;
+            }
+            tbody.innerHTML = data.admins.map(a => {
+                const isSuperadmin = a.role === 'superadmin';
+                const uSafe = a.username.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+                const nSafe = a.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+                const actions = isSuperadmin
+                    ? '<td class="text-center"><span class="text-muted small">—</span></td>'
+                    : `<td class="text-center">
+                           <button class="btn btn-outline-primary btn-xs py-0 px-2 me-1" onclick="openEditAdminForm(${a.id},'${uSafe}','${nSafe}','${a.role}')">
+                               <i class="fas fa-pen fa-xs"></i>
+                           </button>
+                           <button class="btn btn-outline-danger btn-xs py-0 px-2" onclick="deleteAdmin(${a.id},'${uSafe}')">
+                               <i class="fas fa-trash fa-xs"></i>
+                           </button>
+                       </td>`;
+                return `<tr>
+                    <td class="fw-medium">${a.username}</td>
+                    <td>${a.name}</td>
+                    <td>${ROLE_LABELS[a.role] || a.role}</td>
+                    ${actions}
+                </tr>`;
+            }).join('');
+        }).catch(() => {
+            document.getElementById('adminTableBody').innerHTML = '<tr><td colspan="4" class="text-center text-danger py-3">โหลดข้อมูลไม่ได้</td></tr>';
+        });
+    }
+
+    function openAddAdminForm() {
+        document.getElementById('adminEditId').value = '';
+        document.getElementById('adminFormTitle').textContent = 'เพิ่ม Admin ใหม่';
+        document.getElementById('adminUsername').value = '';
+        document.getElementById('adminUsername').disabled = false;
+        document.getElementById('adminUsernameNote').textContent = 'ใช้ตัวเล็ก ไม่มีช่องว่าง';
+        document.getElementById('adminName').value = '';
+        document.getElementById('adminPassword').value = '';
+        document.getElementById('adminPwNote').textContent = '(อย่างน้อย 8 ตัว)';
+        document.getElementById('adminRole').value = 'admin_pc1';
+        setAdminFormAlert('', '');
+        document.getElementById('adminFormBox').classList.remove('d-none');
+    }
+
+    function openEditAdminForm(id, username, name, role) {
+        document.getElementById('adminEditId').value = id;
+        document.getElementById('adminFormTitle').textContent = 'แก้ไข Admin: ' + username;
+        document.getElementById('adminUsername').value = username;
+        document.getElementById('adminUsername').disabled = true;
+        document.getElementById('adminUsernameNote').textContent = 'ไม่สามารถเปลี่ยน username ได้';
+        document.getElementById('adminName').value = name;
+        document.getElementById('adminPassword').value = '';
+        document.getElementById('adminPwNote').textContent = '(เว้นว่างถ้าไม่เปลี่ยน)';
+        document.getElementById('adminRole').value = role;
+        setAdminFormAlert('', '');
+        document.getElementById('adminFormBox').classList.remove('d-none');
+    }
+
+    function cancelAdminForm() {
+        document.getElementById('adminFormBox').classList.add('d-none');
+    }
+
+    function setAdminFormAlert(msg, type) {
+        const el = document.getElementById('adminFormAlert');
+        if (!msg) { el.className = 'alert d-none mt-2 py-2 small'; return; }
+        el.className = 'alert alert-' + type + ' mt-2 py-2 small';
+        el.textContent = msg;
+    }
+
+    function submitAdminForm() {
+        const editId = document.getElementById('adminEditId').value;
+        const isEdit = !!editId;
+        const username = document.getElementById('adminUsername').value.trim().toLowerCase();
+        const name = document.getElementById('adminName').value.trim();
+        const password = document.getElementById('adminPassword').value;
+        const role = document.getElementById('adminRole').value;
+
+        if (!name) { setAdminFormAlert('กรุณากรอกชื่อ', 'warning'); return; }
+        if (!isEdit && !username) { setAdminFormAlert('กรุณาระบุ Username', 'warning'); return; }
+        if (!isEdit && password.length < 8) { setAdminFormAlert('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร', 'warning'); return; }
+        if (isEdit && password && password.length < 8) { setAdminFormAlert('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร', 'warning'); return; }
+
+        const url = isEdit ? '/admin/edit_admin_ajax' : '/admin/add_admin_ajax';
+        const payload = isEdit
+            ? { id: parseInt(editId), name, role, password }
+            : { username, name, role, password };
+
+        fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
+            body: JSON.stringify(payload)
+        }).then(checkAuth).then(r => r.json()).then(data => {
+            if (data.success) {
+                cancelAdminForm();
+                loadAdminList();
+            } else {
+                setAdminFormAlert(data.message || 'เกิดข้อผิดพลาด', 'danger');
+            }
+        }).catch(() => setAdminFormAlert('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้', 'danger'));
+    }
+
+    function deleteAdmin(id, username) {
+        Swal.fire({
+            title: 'ลบบัญชี Admin?',
+            html: 'ต้องการลบ <strong>' + username + '</strong> ออกจากระบบ?<br><small class="text-muted">การดำเนินการนี้ไม่สามารถย้อนกลับได้</small>',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#dc3545',
+            cancelButtonText: 'ยกเลิก',
+            confirmButtonText: 'ลบเลย'
+        }).then(result => {
+            if (!result.isConfirmed) return;
+            fetch('/admin/delete_admin_ajax', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token() }}' },
+                body: JSON.stringify({ id })
+            }).then(checkAuth).then(r => r.json()).then(data => {
+                if (data.success) {
+                    loadAdminList();
+                } else {
+                    Swal.fire('ผิดพลาด', data.message || 'ไม่สามารถลบได้', 'error');
+                }
+            }).catch(() => Swal.fire('ผิดพลาด', 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้', 'error'));
+        });
+    }
+    </script>
+    {% endif %}
+
 </body>
 
 </html>
