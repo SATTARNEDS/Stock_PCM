@@ -692,6 +692,30 @@
             padding-bottom: 0.78rem;
         }
 
+        /* Fix code column width and font */
+        .code-column {
+            width: 150px;
+            min-width: 150px;
+            max-width: 150px;
+            padding: 0.75rem 0.5rem !important;
+            vertical-align: middle;
+        }
+
+        .code-column code {
+            font-family: 'Courier New', 'Courier', monospace;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            display: inline-block;
+            white-space: nowrap;
+            background-color: #e3f2fd;
+            border: 1.5px solid #90caf9;
+            border-radius: 6px;
+            padding: 5px 8px;
+            color: #1565c0;
+            margin-right: 0;
+        }
+
         .content-wrapper .btn.rounded-circle {
             transition: transform calc(0.2s * var(--motion-multiplier)) ease, box-shadow calc(0.2s * var(--motion-multiplier)) ease;
         }

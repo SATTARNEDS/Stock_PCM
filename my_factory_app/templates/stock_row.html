@@ -1,6 +1,6 @@
 {% for item in items %}
 <tr class="align-middle {% if item['stock'] <= 0 %}table-danger{% elif item['is_active'] == 0 %}table-secondary opacity-75 text-muted{% endif %}">
-    <td class="ps-4"><code>{{ item['code'] }}</code></td>
+    <td class="ps-4 code-column"><code>{{ item['code'] }}</code></td>
     <td class="fw-medium {% if item['is_active'] == 0 %}text-muted{% endif %}">
         {{ item['name'] }}
         {% if item['split_unit_hint_label'] %}

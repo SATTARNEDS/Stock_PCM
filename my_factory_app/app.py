@@ -272,7 +272,9 @@ def handle_before_request():
     app.permanent_session_lifetime = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
 
     # 1.5 ป้องกัน CSRF สำหรับคำขอแก้ไขข้อมูลที่สำคัญ
-    if request.method == 'POST' and request.endpoint in SENSITIVE_POST_ENDPOINTS:
+    # ⚠️ ข้ามการตรวจ CSRF สำหรับ login routes (session ยังไม่มี/หมดอายุ)
+    skip_csrf_endpoints = {'index', 'admin_login'}
+    if request.method == 'POST' and request.endpoint in SENSITIVE_POST_ENDPOINTS and request.endpoint not in skip_csrf_endpoints:
         if not validate_csrf_token():
             if request.path.startswith('/api/') or request.endpoint == 'update_cart_qty':
                 return jsonify({'success': False, 'message': 'คำขอไม่ปลอดภัยหรือ session หมดอายุ'}), 400
