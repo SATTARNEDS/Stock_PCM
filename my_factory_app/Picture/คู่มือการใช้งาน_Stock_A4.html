@@ -1,0 +1,112 @@
+﻿<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <title>คู่มือการใช้งานระบบเบิกพัสดุ PCM – MAX IMAGE</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --brand:#1767df; --brand2:#0e4dac; --gold:#ffc339; --ok:#1f9d5a; --no:#d93547; --ink:#1c2840; --muted:#5b6880; --line:#cdd6ea; }
+    @page { size:A4 portrait; margin:6mm; }
+    *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+    html,body { width:210mm; height:297mm; overflow:hidden; font-family:'Mitr','Segoe UI',Tahoma,sans-serif; color:var(--ink); background:linear-gradient(145deg,#d8eaff 0%,#ecf2fb 50%,#f5f0e8 100%); }
+    .sheet { width:100%; height:100%; padding:5.5mm; display:grid; grid-template-rows:auto 1fr auto; gap:3mm; }
+    /* HEADER */
+    .header { position:relative; overflow:hidden; background:linear-gradient(130deg,#2176e8 0%,#0d50bf 55%,#0a3fa0 100%); color:#fff; border-radius:14px; padding:3.5mm 5mm; display:flex; align-items:center; gap:3.5mm; box-shadow:0 8px 26px rgba(14,60,140,.35),0 2px 6px rgba(14,60,140,.18); }
+    .header::before { content:''; position:absolute; right:-12mm; top:-10mm; width:40mm; height:40mm; border-radius:50%; background:rgba(255,255,255,.09); pointer-events:none; }
+    .header::after  { content:''; position:absolute; right:8mm; top:-6mm; width:22mm; height:22mm; border-radius:50%; background:rgba(255,255,255,.06); pointer-events:none; }
+    .header-icon { font-size:28px; line-height:1; background:rgba(255,255,255,.18); border-radius:10px; padding:4px 7px; flex-shrink:0; }
+    .header h1 { font-size:20px; font-weight:600; line-height:1.15; letter-spacing:.4px; }
+    .header p  { font-size:10.5px; opacity:.88; margin-top:2px; font-weight:300; letter-spacing:.2px; }
+    /* MAIN */
+    .main { display:grid; grid-template-columns:23% 77%; gap:3mm; min-height:0; }
+    /* STEPS */
+    .steps { position:relative; overflow:hidden; background:rgba(255,255,255,.97); border:1px solid var(--line); border-radius:13px; padding:3.5mm 3mm; box-shadow:0 6px 18px rgba(30,50,90,.12),0 1px 4px rgba(30,50,90,.06); display:flex; flex-direction:column; gap:2.8mm; }
+    .steps::before { content:''; position:absolute; top:0; left:0; right:0; height:3.5px; background:linear-gradient(90deg,var(--brand),#6cb0ff,var(--gold)); border-radius:13px 13px 0 0; }
+    .steps h2 { font-size:12.5px; font-weight:600; color:var(--brand2); margin-bottom:1mm; letter-spacing:.3px; }
+    .step { display:grid; grid-template-columns:22px 1fr; gap:5px; align-items:start; }
+    .num { width:22px; height:22px; border-radius:50%; background:linear-gradient(145deg,#2e87f0,var(--brand2)); color:#fff; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; flex-shrink:0; box-shadow:0 2px 6px rgba(14,60,140,.35); }
+    .step-body { font-size:10.8px; line-height:1.28; font-weight:400; }
+    .step-body .sub { color:var(--muted); font-size:9.5px; display:block; margin-top:1.5px; font-weight:300; }
+    /* VISUAL */
+    .visual { background:rgba(255,255,255,.97); border:1px solid var(--line); border-radius:13px; padding:2.8mm; box-shadow:0 6px 18px rgba(30,50,90,.12),0 1px 4px rgba(30,50,90,.06); display:grid; grid-template-rows:28% 26% 46%; grid-template-columns:45% 55%; gap:2.2mm; min-height:0; }
+    .wide { grid-column:1/span 2; }
+    .shot { position:relative; border:1.5px solid #bfcde5; border-radius:9px; overflow:hidden; background:linear-gradient(160deg,#f5f8ff,#edf1fa); min-height:0; box-shadow:inset 0 2px 4px rgba(0,0,0,.05); }
+    .shot img { width:100%; height:100%; object-fit:contain; display:block; }
+    .cap { position:absolute; bottom:5px; left:6px; background:linear-gradient(110deg,rgba(14,72,167,.92),rgba(10,58,140,.86)); color:#fff; font-size:9px; line-height:1; padding:3px 8px; border-radius:999px; font-weight:500; letter-spacing:.2px; white-space:nowrap; }
+    /* FOOTER */
+    .footer { background:rgba(255,255,255,.97); border:1px solid var(--line); border-radius:12px; padding:2mm 3mm; box-shadow:0 5px 14px rgba(30,50,90,.1); display:grid; grid-template-columns:auto 1fr 1fr; gap:3mm; align-items:stretch; min-height:0; }
+    .footer-label { display:flex; flex-direction:column; justify-content:center; }
+    .footer-label h3 { font-size:12px; font-weight:600; white-space:nowrap; }
+    .footer-label p  { font-size:9px; color:var(--muted); margin-top:2px; font-weight:300; line-height:1.3; }
+    .alert-shot { display:flex; flex-direction:column; border:1.5px solid #bfcde5; border-radius:9px; overflow:hidden; background:linear-gradient(160deg,#f5f8ff,#edf1fa); min-height:0; }
+    .alert-bar { display:flex; align-items:center; gap:5px; padding:3.5px 9px; font-size:10px; font-weight:600; color:#fff; flex-shrink:0; letter-spacing:.3px; }
+    .alert-bar.ok { background:linear-gradient(90deg,#158c5c,var(--ok)); }
+    .alert-bar.no { background:linear-gradient(90deg,#b5182b,var(--no)); }
+    .alert-shot img { flex:1; min-height:0; width:100%; object-fit:contain; display:block; }
+  </style>
+</head>
+<body>
+<div class="sheet">
+  <header class="header">
+    <div class="header-icon">&#x1F4CB;</div>
+    <div>
+      <h1>&#x0E04;&#x0E39;&#x0E48;&#x0E21;&#x0E37;&#x0E2D;&#x0E43;&#x0E0A;&#x0E49;&#x0E07;&#x0E32;&#x0E19;&#x0E23;&#x0E30;&#x0E1A;&#x0E1A;&#x0E40;&#x0E1A;&#x0E34;&#x0E01;&#x0E1E;&#x0E31;&#x0E2A;&#x0E14;&#x0E38; PCM</h1>
+      <p>Quick Guide (Internal) &#x00B7; &#x0E23;&#x0E30;&#x0E1A;&#x0E1A;&#x0E08;&#x0E31;&#x0E14;&#x0E01;&#x0E32;&#x0E23;&#x0E2A;&#x0E15;&#x0E47;&#x0E2D;&#x0E01; &#x0E40;&#x0E1A;&#x0E34;&#x0E01;&#x0E1E;&#x0E31;&#x0E2A;&#x0E14;&#x0E38; GA / IT / SAFETY</p>
+    </div>
+  </header>
+  <section class="main">
+    <aside class="steps">
+      <h2>&#x0E02;&#x0E31;&#x0E49;&#x0E19;&#x0E15;&#x0E2D;&#x0E19;&#x0E43;&#x0E0A;&#x0E49;&#x0E07;&#x0E32;&#x0E19;</h2>
+      <div class="step"><div class="num">1</div><div class="step-body">&#x0E43;&#x0E2A;&#x0E48; Employee ID &#x0E41;&#x0E25;&#x0E49;&#x0E27;&#x0E01;&#x0E14; <b>&#x0E40;&#x0E02;&#x0E49;&#x0E32;&#x0E2A;&#x0E39;&#x0E48;&#x0E23;&#x0E30;&#x0E1A;&#x0E1A;</b></div></div>
+      <div class="step"><div class="num">2</div><div class="step-body">&#x0E01;&#x0E14;&#x0E1B;&#x0E38;&#x0E48;&#x0E21; <b>&#x0E40;&#x0E02;&#x0E49;&#x0E32;&#x0E43;&#x0E0A;&#x0E49;&#x0E07;&#x0E32;&#x0E19; Stock</b> &#x0E17;&#x0E35;&#x0E48;&#x0E2B;&#x0E19;&#x0E49;&#x0E32;&#x0E40;&#x0E21;&#x0E19;&#x0E39;</div></div>
+      <div class="step"><div class="num">3</div><div class="step-body">&#x0E04;&#x0E49;&#x0E19;&#x0E2B;&#x0E32;&#x0E02;&#x0E2D;&#x0E07; &#x0E41;&#x0E25;&#x0E49;&#x0E27;&#x0E01;&#x0E14; <b>+</b> &#x0E43;&#x0E2A;&#x0E48;&#x0E15;&#x0E30;&#x0E01;&#x0E23;&#x0E49;&#x0E32;<br><span class="sub">&#x0E40;&#x0E25;&#x0E37;&#x0E2D;&#x0E01;&#x0E2B;&#x0E21;&#x0E27;&#x0E14; All / &#x0E41;&#x0E21;&#x0E48;&#x0E1A;&#x0E49;&#x0E32;&#x0E19; / &#x0E22;&#x0E32; / Safety</span></div></div>
+      <div class="step"><div class="num">4</div><div class="step-body">&#x0E01;&#x0E14;&#x0E44;&#x0E2D;&#x0E04;&#x0E2D;&#x0E19; &#x1F6D2; &#x0E21;&#x0E38;&#x0E21;&#x0E02;&#x0E27;&#x0E32;&#x0E25;&#x0E48;&#x0E32;&#x0E07;&#x0E40;&#x0E1E;&#x0E37;&#x0E48;&#x0E2D;&#x0E40;&#x0E1B;&#x0E34;&#x0E14;&#x0E15;&#x0E30;&#x0E01;&#x0E23;&#x0E49;&#x0E32;</div></div>
+      <div class="step"><div class="num">5</div><div class="step-body">&#x0E40;&#x0E25;&#x0E37;&#x0E2D;&#x0E01; <b>&#x0E23;&#x0E31;&#x0E1A;&#x0E02;&#x0E2D;&#x0E07;&#x0E17;&#x0E31;&#x0E19;&#x0E17;&#x0E35;</b> &#x0E2B;&#x0E23;&#x0E37;&#x0E2D; <b>&#x0E40;&#x0E1A;&#x0E34;&#x0E01;&#x0E25;&#x0E48;&#x0E27;&#x0E07;&#x0E2B;&#x0E19;&#x0E49;&#x0E32;</b><br><span class="sub">&#x0E16;&#x0E49;&#x0E32;&#x0E25;&#x0E48;&#x0E27;&#x0E07;&#x0E2B;&#x0E19;&#x0E49;&#x0E32; &#x0E43;&#x0E2B;&#x0E49;&#x0E23;&#x0E30;&#x0E1A;&#x0E38;&#x0E27;&#x0E31;&#x0E19;-&#x0E40;&#x0E27;&#x0E25;&#x0E32;&#x0E14;&#x0E49;&#x0E27;&#x0E22;</span></div></div>
+      <div class="step"><div class="num">6</div><div class="step-body">&#x0E01;&#x0E14; <b>&#x0E22;&#x0E37;&#x0E19;&#x0E22;&#x0E31;&#x0E19;&#x0E01;&#x0E32;&#x0E23;&#x0E40;&#x0E1A;&#x0E34;&#x0E01;&#x0E1E;&#x0E31;&#x0E2A;&#x0E14;&#x0E38;</b> &#x0E41;&#x0E25;&#x0E30;&#x0E22;&#x0E37;&#x0E19;&#x0E22;&#x0E31;&#x0E19;&#x0E2D;&#x0E35;&#x0E01;&#x0E04;&#x0E23;&#x0E31;&#x0E49;&#x0E07;</div></div>
+    </aside>
+    <article class="visual">
+      <!-- Step 1: Employee ID field (~22% left in left-panel) + เข้าสู่ระบบ button -->
+      <figure class="shot">
+        <img src="หน้าจอเข้าสู่ระบบ.png" alt="Login">
+        <span class="cap">Step 1 &#x00B7; Login</span>
+      </figure>
+      <!-- Step 2: เข้าใช้งาน Stock button (2nd card center ~41%) -->
+      <figure class="shot">
+        <img src="หน้าเลือกเมนู.png" alt="เลือกเมนู">
+        <span class="cap">Step 2 &#x00B7; &#x0E40;&#x0E25;&#x0E37;&#x0E2D;&#x0E01;&#x0E40;&#x0E21;&#x0E19;&#x0E39; Stock</span>
+      </figure>
+      <!-- Step 3: + button first card left col, Step 4: cart icon bottom-right -->
+      <figure class="shot wide">
+        <img src="หน้าต่างเมนูเบิก.png" alt="เมนูเบิก">
+        <span class="cap">Step 3-4 &#x00B7; &#x0E01;&#x0E14; + &#x0E43;&#x0E2A;&#x0E48;&#x0E15;&#x0E30;&#x0E01;&#x0E23;&#x0E49;&#x0E32; &#x2192; &#x0E01;&#x0E14;&#x0E44;&#x0E2D;&#x0E04;&#x0E2D;&#x0E19;&#x0E15;&#x0E30;&#x0E01;&#x0E23;&#x0E49;&#x0E32;&#x0E21;&#x0E38;&#x0E21;&#x0E02;&#x0E27;&#x0E32;&#x0E25;&#x0E48;&#x0E32;&#x0E07;</span>
+      </figure>
+      <!-- Step 5: เบิกล่วงหน้า radio button -->
+      <figure class="shot">
+        <img src="หน้าต่างตะกร้า_แบบเบิกล่วงหน้า.png" alt="ตะกร้า">
+        <span class="cap">Step 5 &#x00B7; &#x0E40;&#x0E25;&#x0E37;&#x0E2D;&#x0E01;&#x0E27;&#x0E34;&#x0E18;&#x0E35;&#x0E23;&#x0E31;&#x0E1A;&#x0E02;&#x0E2D;&#x0E07;</span>
+      </figure>
+      <!-- Step 6: ยืนยัน button -->
+      <figure class="shot">
+        <img src="หน้าต่างยืนยันการขอเบิก.png" alt="ยืนยัน">
+        <span class="cap">Step 6 &#x00B7; &#x0E22;&#x0E37;&#x0E19;&#x0E22;&#x0E31;&#x0E19;&#x0E01;&#x0E32;&#x0E23;&#x0E40;&#x0E1A;&#x0E34;&#x0E01;</span>
+      </figure>
+    </article>
+  </section>
+  <footer class="footer">
+    <div class="footer-label">
+      <h3>&#x0E1C;&#x0E25;&#x0E25;&#x0E31;&#x0E1E;&#x0E18;&#x0E4C;</h3>
+      <p>&#x0E2B;&#x0E25;&#x0E31;&#x0E07;&#x0E22;&#x0E37;&#x0E19;&#x0E22;&#x0E31;&#x0E19;<br>&#x0E04;&#x0E33;&#x0E02;&#x0E2D;</p>
+    </div>
+    <figure class="alert-shot">
+      <div class="alert-bar ok">&#x2713; &#x0E04;&#x0E33;&#x0E02;&#x0E2D;&#x0E16;&#x0E39;&#x0E01;&#x0E2A;&#x0E48;&#x0E07; &middot; SUCCESS</div>
+      <img src="ข้อความแจ้งเมื่อคำขอถูกส่ง.png" alt="SUCCESS">
+    </figure>
+    <figure class="alert-shot">
+      <div class="alert-bar no">&#x2715; &#x0E16;&#x0E39;&#x0E01;&#x0E1B;&#x0E0F;&#x0E34;&#x0E40;&#x0E2A;&#x0E18; &middot; REJECTED</div>
+      <img src="ข้อความแจ้งเมื่อคำขอถูกปฏิเสธการเบิก.png" alt="REJECTED">
+    </figure>
+  </footer>
+</div>
+</body>
+</html>

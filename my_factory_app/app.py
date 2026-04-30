@@ -3833,7 +3833,15 @@ def admin_dashboard(module):
     total_logs = conn.execute(count_query).fetchone()[0]
     total_pages = math.ceil(total_logs / log_per_page)
 
-    low_stock_query = f"SELECT * FROM products WHERE stock < safety_stock {product_loc_filter}"
+    product_columns = {row[1] for row in conn.execute("PRAGMA table_info(products)").fetchall()}
+    if 'is_active' in product_columns:
+        product_active_filter = " AND COALESCE(is_active, 1) = 1"
+    elif 'status' in product_columns:
+        product_active_filter = " AND status = 'Active'"
+    else:
+        product_active_filter = ""
+
+    low_stock_query = f"SELECT * FROM products WHERE stock < safety_stock {product_active_filter} {product_loc_filter}"
     low_stock = conn.execute(low_stock_query).fetchall()
     low_stock = enrich_products_for_display(conn, low_stock)
 
@@ -5709,8 +5717,16 @@ def filter_low_stock():
     elif role == 'admin_cc':
         loc_filter = " AND (location LIKE '%Coil Center%' OR location LIKE '%CC%')"
 
-    # Query หาของที่ต่ำกว่าเกณฑ์
-    sql = f"SELECT * FROM products WHERE stock <= safety_stock {loc_filter}"
+    product_columns = {row[1] for row in conn.execute("PRAGMA table_info(products)").fetchall()}
+    if 'is_active' in product_columns:
+        active_filter = " AND COALESCE(is_active, 1) = 1"
+    elif 'status' in product_columns:
+        active_filter = " AND status = 'Active'"
+    else:
+        active_filter = ""
+
+    # Query หาของที่ต่ำกว่าเกณฑ์ (ตัดรายการที่ปิดใช้งานออก)
+    sql = f"SELECT * FROM products WHERE stock <= safety_stock {active_filter} {loc_filter}"
     params = []
     
     if cat:
