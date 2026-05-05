@@ -113,6 +113,14 @@ if (-not $SkipTasks) {
     Write-Host "สร้าง Scheduled Tasks เรียบร้อย" -ForegroundColor Green
 }
 
+Write-Step "สร้าง Desktop Shortcut"
+$desktopPath = [Environment]::GetFolderPath("CommonDesktopDirectory")
+$shortcutUrl = Join-Path $desktopPath "PCM Stock.url"
+$urlContent = "[InternetShortcut]`r`nURL=http://localhost:$ListenPort`r`n"
+Set-Content -Path $shortcutUrl -Value $urlContent -Encoding ASCII
+Write-Host "สร้าง shortcut บน Desktop แล้ว: $shortcutUrl" -ForegroundColor Green
+
 Write-Step "เสร็จสิ้น"
 Write-Host "เริ่มรันทันที: powershell -ExecutionPolicy Bypass -File `"$startScript`"" -ForegroundColor Cyan
 Write-Host "ทดสอบเข้าเว็บ: http://127.0.0.1:$ListenPort" -ForegroundColor Cyan
+Write-Host "ดับเบิลคลิก shortcut `"PCM Stock`" บน Desktop เพื่อเข้าระบบ" -ForegroundColor Cyan

@@ -3365,7 +3365,7 @@ def confirm_withdrawal():
         admin_id='superadmin'
     )
     
-    flash('✅ ส่งคำขอเรียบร้อย! ระบบบันทึกรอบการเบิกหมวกเซฟตี้ให้คุณแล้ว', 'success')
+    flash('✅ ส่งคำขอเบิกเรียบร้อย! รอการอนุมัติจากผู้ดูแลระบบ', 'success')
     return redirect(url_for('menu', emp_id=emp_id))
  
  # --- เพิ่ม Route สำหรับอัปเดตจำนวนในตะกร้า (AJAX) ---
