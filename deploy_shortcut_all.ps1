@@ -1,143 +1,100 @@
 #Requires -RunAsAdministrator
-<#
-.SYNOPSIS
-    กระจาย shortcut PCM Stock ไปยัง Desktop ของทุกเครื่องบน LAN
-    รันจากเครื่อง Server โดยไม่รบกวน user ที่กำลังทำงาน
-
-.USAGE
-    powershell -ExecutionPolicy Bypass -File .\deploy_shortcut_all.ps1
-
-    # ระบุ subnet เอง
-    powershell -ExecutionPolicy Bypass -File .\deploy_shortcut_all.ps1 -Subnet "192.168.1"
-
-    # ระบุ IP เฉพาะเครื่อง
-    powershell -ExecutionPolicy Bypass -File .\deploy_shortcut_all.ps1 -TargetIPs "192.168.2.10","192.168.2.11"
-#>
 
 param(
-    [string]$Subnet       = "192.168.2",
-    [string[]]$TargetIPs  = @(),
-    [string]$TargetUrl    = "http://192.168.2.102:5000",
-    [string]$ShortcutName = "PCM Stock"
+    [string]$Subnet = '192.168.2',
+    [string[]]$TargetIPs = @(),
+    [string]$TargetUrl = 'http://192.168.2.102:5000',
+    [string]$ShortcutName = 'PCM Stock'
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-# ============================================================
-# สร้าง shortcut content (.lnk) เป็น base64 เพื่อ copy ข้ามเครื่อง
-# ใช้วิธี copy ไฟล์ .url ไปวางที่ Desktop แทน (ง่ายและน่าเชื่อถือกว่า)
-# ============================================================
-
-function Write-Step($msg) {
-    Write-Host "`n==> $msg" -ForegroundColor Cyan
+function Write-Step([string]$Message) {
+    Write-Host "`n==> $Message" -ForegroundColor Cyan
 }
 
-function New-UrlShortcutContent {
-    param($Url, $IconPath, $IconIndex)
-    return "[InternetShortcut]`r`nURL=$Url`r`nIconFile=$IconPath`r`nIconIndex=$IconIndex`r`n"
+function New-ShortcutText([string]$Url) {
+    return "[InternetShortcut]`r`nURL=$Url`r`nIconFile=%SystemRoot%\system32\shell32.dll`r`nIconIndex=14`r`n"
 }
 
-# สร้าง .url content
-$iconPath  = "%SystemRoot%\system32\shell32.dll"
-$iconIndex = 14
-$urlContent = New-UrlShortcutContent -Url $TargetUrl -IconPath $iconPath -IconIndex $iconIndex
+Write-Step 'Prepare shortcut file'
+$tempUrl = Join-Path $env:TEMP ($ShortcutName + '.url')
+Set-Content -Path $tempUrl -Value (New-ShortcutText -Url $TargetUrl) -Encoding ASCII
 
-# สร้างไฟล์ temp ที่จะ copy ไป
-$tempUrl = Join-Path $env:TEMP "$ShortcutName.url"
-Set-Content -Path $tempUrl -Value $urlContent -Encoding ASCII
-
-# ============================================================
-# หาเป้าหมาย
-# ============================================================
-Write-Step "เตรียมรายการเครื่องเป้าหมาย"
-
-if ($TargetIPs.Count -gt 0) {
-    $targets = $TargetIPs
-    Write-Host "  ใช้ IP ที่ระบุ: $($targets -join ', ')" -ForegroundColor Yellow
-} else {
-    Write-Host "  สแกนหาเครื่องออนไลน์ใน $Subnet.1 - $Subnet.254 ..." -ForegroundColor Yellow
-    $targets = 1..254 | ForEach-Object -Parallel {
-        $ip = "$using:Subnet.$_"
-        if (Test-Connection -ComputerName $ip -Count 1 -TimeoutSeconds 1 -Quiet) { $ip }
-    } -ThrottleLimit 50
-    Write-Host "  พบ $($targets.Count) เครื่องออนไลน์" -ForegroundColor Green
+Write-Step 'Resolve target IPs'
+if ($TargetIPs -and $TargetIPs.Count -gt 0) {
+    $targets = @($TargetIPs)
+}
+else {
+    $targets = @()
+    foreach ($i in 1..254) {
+        $ip = '{0}.{1}' -f $Subnet, $i
+        if (Test-Connection -ComputerName $ip -Count 1 -Quiet) {
+            $targets += $ip
+        }
+    }
 }
 
-# ข้าม server ตัวเอง
-$serverIPs = (Get-NetIPAddress -AddressFamily IPv4).IPAddress
-$targets = $targets | Where-Object { $_ -notin $serverIPs }
+$serverIps = @((Get-NetIPAddress -AddressFamily IPv4).IPAddress)
+$targets = @($targets | Where-Object { $_ -and ($_ -notin $serverIps) } | Select-Object -Unique)
 
-if ($targets.Count -eq 0) {
-    Write-Host "  ไม่พบเครื่องเป้าหมาย" -ForegroundColor Red
-    exit
+if (-not $targets -or $targets.Count -eq 0) {
+    Write-Host 'No target machines found.' -ForegroundColor Yellow
+    Remove-Item $tempUrl -Force
+    exit 0
 }
 
-# ============================================================
-# กระจาย shortcut ไปแต่ละเครื่อง
-# ============================================================
-Write-Step "กระจาย shortcut ไปยัง $($targets.Count) เครื่อง"
-
+Write-Step ('Deploy shortcut to {0} machine(s)' -f $targets.Count)
 $success = 0
-$failed  = 0
+$failed = 0
 $skipped = 0
 
 foreach ($ip in $targets) {
-    $adminShare = "\\$ip\C$"
-
-    # ตรวจว่า admin share เข้าถึงได้ไหม
-    if (-not (Test-Path $adminShare)) {
-        Write-Host "  [$ip] SKIP - เข้า Admin Share ไม่ได้" -ForegroundColor DarkGray
-        $skipped++
-        continue
-    }
-
-    # หา Desktop ของ user ทุกคนบนเครื่องนั้น
-    $usersRoot = "\\$ip\C$\Users"
+    $usersRoot = '\\' + $ip + '\C$\Users'
     if (-not (Test-Path $usersRoot)) {
-        Write-Host "  [$ip] SKIP - ไม่พบ C:\Users" -ForegroundColor DarkGray
-        $skipped++
+        Write-Host ('  [{0}] FAIL - Cannot access admin share' -f $ip) -ForegroundColor Red
+        $failed++
         continue
     }
 
     $deployed = 0
+
+    $publicDesktop = '\\' + $ip + '\C$\Users\Public\Desktop'
+    if (Test-Path $publicDesktop) {
+        Copy-Item -Path $tempUrl -Destination (Join-Path $publicDesktop ($ShortcutName + '.url')) -Force
+        $deployed++
+    }
+
     Get-ChildItem -Path $usersRoot -Directory | Where-Object {
         $_.Name -notin @('Public', 'Default', 'Default User', 'All Users')
     } | ForEach-Object {
-        $desktopPath = Join-Path $_.FullName "Desktop"
+        $desktopPath = Join-Path $_.FullName 'Desktop'
         if (Test-Path $desktopPath) {
-            $dest = Join-Path $desktopPath "$ShortcutName.url"
-            Copy-Item -Path $tempUrl -Destination $dest -Force
+            Copy-Item -Path $tempUrl -Destination (Join-Path $desktopPath ($ShortcutName + '.url')) -Force
             $deployed++
         }
     }
 
-    # Desktop ของ Public (ทุก user เห็น)
-    $publicDesktop = "\\$ip\C$\Users\Public\Desktop"
-    if (Test-Path $publicDesktop) {
-        $dest = Join-Path $publicDesktop "$ShortcutName.url"
-        Copy-Item -Path $tempUrl -Destination $dest -Force
-        $deployed++
-    }
-
     if ($deployed -gt 0) {
-        Write-Host "  [$ip] OK - วาง shortcut ใน $deployed Desktop" -ForegroundColor Green
+        Write-Host ('  [{0}] OK - deployed to {1} desktop location(s)' -f $ip, $deployed) -ForegroundColor Green
         $success++
-    } else {
-        Write-Host "  [$ip] SKIP - ไม่พบ Desktop folder" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host ('  [{0}] SKIP - no desktop folder found' -f $ip) -ForegroundColor DarkGray
         $skipped++
     }
 }
 
-# ============================================================
-# สรุปผล
-# ============================================================
-Write-Step "สรุปผล"
-Write-Host "  สำเร็จ  : $success เครื่อง" -ForegroundColor Green
-Write-Host "  ข้าม    : $skipped เครื่อง" -ForegroundColor DarkGray
-Write-Host "  ล้มเหลว : $failed เครื่อง" -ForegroundColor $(if ($failed -gt 0) { 'Red' } else { 'DarkGray' })
-Write-Host ""
-Write-Host "  Shortcut '$ShortcutName' -> $TargetUrl" -ForegroundColor Cyan
-Write-Host "  Icon: globe (shell32.dll #$iconIndex)" -ForegroundColor Cyan
+Write-Step 'Summary'
+Write-Host ('  Success: {0}' -f $success) -ForegroundColor Green
+Write-Host ('  Skipped: {0}' -f $skipped) -ForegroundColor DarkGray
+if ($failed -gt 0) {
+    Write-Host ('  Failed : {0}' -f $failed) -ForegroundColor Red
+}
+else {
+    Write-Host ('  Failed : {0}' -f $failed) -ForegroundColor DarkGray
+}
 
-# ลบ temp file
+Write-Host ('  Shortcut: {0} -> {1}' -f $ShortcutName, $TargetUrl) -ForegroundColor Cyan
+
 Remove-Item $tempUrl -Force
