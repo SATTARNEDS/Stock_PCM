@@ -5,7 +5,8 @@ param(
     [string[]]$TargetIPs = @(),
     [string]$TargetUrl = 'http://192.168.2.102:5000',
     [string]$ShortcutName = 'PCM Stock',
-    [int]$PingTimeoutMs = 150
+    [int]$PingTimeoutMs = 150,
+    [switch]$PromptCredential
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -18,9 +19,48 @@ function New-ShortcutText([string]$Url) {
     return "[InternetShortcut]`r`nURL=$Url`r`nIconFile=%SystemRoot%\system32\shell32.dll`r`nIconIndex=14`r`n"
 }
 
+function New-DriveName([int]$Index) {
+    return ('PCM{0}' -f $Index)
+}
+
+function Remove-DriveIfExists([string]$Name) {
+    $existing = Get-PSDrive -Name $Name -ErrorAction SilentlyContinue
+    if ($existing) {
+        Remove-PSDrive -Name $Name -Force
+    }
+}
+
+function Deploy-ToUsersRoot([string]$UsersRootPath, [string]$TempShortcut, [string]$Name) {
+    $deployedCount = 0
+
+    $publicDesktop = Join-Path $UsersRootPath 'Public\Desktop'
+    if (Test-Path $publicDesktop) {
+        Copy-Item -Path $TempShortcut -Destination (Join-Path $publicDesktop ($Name + '.url')) -Force
+        $deployedCount++
+    }
+
+    Get-ChildItem -Path $UsersRootPath -Directory | Where-Object {
+        $_.Name -notin @('Public', 'Default', 'Default User', 'All Users')
+    } | ForEach-Object {
+        $desktopPath = Join-Path $_.FullName 'Desktop'
+        if (Test-Path $desktopPath) {
+            Copy-Item -Path $TempShortcut -Destination (Join-Path $desktopPath ($Name + '.url')) -Force
+            $deployedCount++
+        }
+    }
+
+    return $deployedCount
+}
+
 Write-Step 'Prepare shortcut file'
 $tempUrl = Join-Path $env:TEMP ($ShortcutName + '.url')
 Set-Content -Path $tempUrl -Value (New-ShortcutText -Url $TargetUrl) -Encoding ASCII
+
+$credential = $null
+if ($PromptCredential) {
+    Write-Step 'Prompt for remote admin credential'
+    $credential = Get-Credential -Message 'Enter admin credential for client machines (DOMAIN\\user or MACHINE\\user)'
+}
 
 Write-Step 'Resolve target IPs'
 if ($TargetIPs -and $TargetIPs.Count -gt 0) {
@@ -59,28 +99,38 @@ $failed = 0
 $skipped = 0
 
 foreach ($ip in $targets) {
+    $deployed = 0
     $usersRoot = '\\' + $ip + '\C$\Users'
+
+    if ($credential) {
+        $driveName = New-DriveName -Index ($success + $failed + $skipped + 1)
+        Remove-DriveIfExists -Name $driveName
+        try {
+            $null = New-PSDrive -Name $driveName -PSProvider FileSystem -Root ('\\' + $ip + '\C$') -Credential $credential -Scope Script
+            $usersRoot = $driveName + ':\Users'
+        }
+        catch {
+            Write-Host ('  [{0}] FAIL - Cannot access admin share with provided credential' -f $ip) -ForegroundColor Red
+            $failed++
+            continue
+        }
+    }
+
     if (-not (Test-Path $usersRoot)) {
         Write-Host ('  [{0}] FAIL - Cannot access admin share' -f $ip) -ForegroundColor Red
         $failed++
+        if ($credential) {
+            Remove-DriveIfExists -Name $driveName
+        }
         continue
     }
 
-    $deployed = 0
-
-    $publicDesktop = '\\' + $ip + '\C$\Users\Public\Desktop'
-    if (Test-Path $publicDesktop) {
-        Copy-Item -Path $tempUrl -Destination (Join-Path $publicDesktop ($ShortcutName + '.url')) -Force
-        $deployed++
+    try {
+        $deployed = Deploy-ToUsersRoot -UsersRootPath $usersRoot -TempShortcut $tempUrl -Name $ShortcutName
     }
-
-    Get-ChildItem -Path $usersRoot -Directory | Where-Object {
-        $_.Name -notin @('Public', 'Default', 'Default User', 'All Users')
-    } | ForEach-Object {
-        $desktopPath = Join-Path $_.FullName 'Desktop'
-        if (Test-Path $desktopPath) {
-            Copy-Item -Path $tempUrl -Destination (Join-Path $desktopPath ($ShortcutName + '.url')) -Force
-            $deployed++
+    finally {
+        if ($credential) {
+            Remove-DriveIfExists -Name $driveName
         }
     }
 
