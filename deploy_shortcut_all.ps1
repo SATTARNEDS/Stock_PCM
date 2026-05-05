@@ -4,7 +4,8 @@ param(
     [string]$Subnet = '192.168.2',
     [string[]]$TargetIPs = @(),
     [string]$TargetUrl = 'http://192.168.2.102:5000',
-    [string]$ShortcutName = 'PCM Stock'
+    [string]$ShortcutName = 'PCM Stock',
+    [int]$PingTimeoutMs = 150
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -27,12 +28,20 @@ if ($TargetIPs -and $TargetIPs.Count -gt 0) {
 }
 else {
     $targets = @()
-    foreach ($i in 1..254) {
+    $scanTotal = 254
+    foreach ($i in 1..$scanTotal) {
         $ip = '{0}.{1}' -f $Subnet, $i
-        if (Test-Connection -ComputerName $ip -Count 1 -Quiet) {
+
+        $percent = [int](($i / $scanTotal) * 100)
+        Write-Progress -Activity 'Resolve target IPs' -Status ("Scanning {0} ({1}/{2})" -f $ip, $i, $scanTotal) -PercentComplete $percent
+
+        # ping.exe with explicit timeout is much faster and more predictable on PS 5.1 than Test-Connection.
+        $null = & ping.exe -n 1 -w $PingTimeoutMs $ip
+        if ($LASTEXITCODE -eq 0) {
             $targets += $ip
         }
     }
+    Write-Progress -Activity 'Resolve target IPs' -Completed
 }
 
 $serverIps = @((Get-NetIPAddress -AddressFamily IPv4).IPAddress)
