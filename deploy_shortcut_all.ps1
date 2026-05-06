@@ -1,159 +1,99 @@
 #Requires -RunAsAdministrator
+# Deploy PCM Stock shortcut via net use (SMB) + Copy-Item.
+# Usage: .\deploy_shortcut_all.ps1 -TargetIPs "192.168.2.103"
+#        .\deploy_shortcut_all.ps1 -Subnet "192.168.2"
 
 param(
-    [string]$Subnet = '192.168.2',
-    [string[]]$TargetIPs = @(),
-    [string]$TargetUrl = 'http://192.168.2.102:5000',
+    [string]$Subnet       = '192.168.2',
+    [string[]]$TargetIPs  = @(),
+    [string]$TargetUrl    = 'http://192.168.2.102:5000',
     [string]$ShortcutName = 'PCM Stock',
-    [int]$PingTimeoutMs = 150,
-    [switch]$PromptCredential
+    [int]$PingTimeoutMs   = 300,
+    [string]$AdminUser    = '',
+    [string]$AdminPass    = ''
 )
 
-$ErrorActionPreference = 'SilentlyContinue'
-
-function Write-Step([string]$Message) {
-    Write-Host "`n==> $Message" -ForegroundColor Cyan
+# -- Credential --
+if (-not $AdminUser) {
+    $cred      = Get-Credential -Message 'Enter admin credential for client machines (e.g. .\Administrator)'
+    $AdminUser = $cred.UserName
+    $AdminPass = $cred.GetNetworkCredential().Password
 }
 
-function New-ShortcutText([string]$Url) {
-    return "[InternetShortcut]`r`nURL=$Url`r`nIconFile=%SystemRoot%\system32\shell32.dll`r`nIconIndex=14`r`n"
-}
+# -- Create shortcut file locally --
+$tempFile = Join-Path $env:TEMP ($ShortcutName + '.url')
+$content  = "[InternetShortcut]`r`nURL=$TargetUrl`r`nIconFile=%SystemRoot%\system32\shell32.dll`r`nIconIndex=14`r`n"
+[System.IO.File]::WriteAllText($tempFile, $content, [System.Text.Encoding]::ASCII)
 
-function New-DriveName([int]$Index) {
-    return ('PCM{0}' -f $Index)
-}
-
-function Remove-DriveIfExists([string]$Name) {
-    $existing = Get-PSDrive -Name $Name -ErrorAction SilentlyContinue
-    if ($existing) {
-        Remove-PSDrive -Name $Name -Force
-    }
-}
-
-function Deploy-ToUsersRoot([string]$UsersRootPath, [string]$TempShortcut, [string]$Name) {
-    $deployedCount = 0
-
-    $publicDesktop = Join-Path $UsersRootPath 'Public\Desktop'
-    if (Test-Path $publicDesktop) {
-        Copy-Item -Path $TempShortcut -Destination (Join-Path $publicDesktop ($Name + '.url')) -Force
-        $deployedCount++
-    }
-
-    Get-ChildItem -Path $UsersRootPath -Directory | Where-Object {
-        $_.Name -notin @('Public', 'Default', 'Default User', 'All Users')
-    } | ForEach-Object {
-        $desktopPath = Join-Path $_.FullName 'Desktop'
-        if (Test-Path $desktopPath) {
-            Copy-Item -Path $TempShortcut -Destination (Join-Path $desktopPath ($Name + '.url')) -Force
-            $deployedCount++
-        }
-    }
-
-    return $deployedCount
-}
-
-Write-Step 'Prepare shortcut file'
-$tempUrl = Join-Path $env:TEMP ($ShortcutName + '.url')
-Set-Content -Path $tempUrl -Value (New-ShortcutText -Url $TargetUrl) -Encoding ASCII
-
-$credential = $null
-if ($PromptCredential) {
-    Write-Step 'Prompt for remote admin credential'
-    $credential = Get-Credential -Message 'Enter admin credential for client machines (DOMAIN\\user or MACHINE\\user)'
-}
-
-Write-Step 'Resolve target IPs'
+# -- Resolve targets --
 if ($TargetIPs -and $TargetIPs.Count -gt 0) {
     $targets = @($TargetIPs)
-}
-else {
+} else {
+    Write-Host ("`n==> Scanning {0}.1-254 ..." -f $Subnet) -ForegroundColor Cyan
     $targets = @()
-    $scanTotal = 254
-    foreach ($i in 1..$scanTotal) {
-        $ip = '{0}.{1}' -f $Subnet, $i
-
-        $percent = [int](($i / $scanTotal) * 100)
-        Write-Progress -Activity 'Resolve target IPs' -Status ("Scanning {0} ({1}/{2})" -f $ip, $i, $scanTotal) -PercentComplete $percent
-
-        # ping.exe with explicit timeout is much faster and more predictable on PS 5.1 than Test-Connection.
+    for ($i = 1; $i -le 254; $i++) {
+        $ip   = ('{0}.{1}' -f $Subnet, $i)
+        $perc = [int](($i / 254) * 100)
+        Write-Progress -Activity 'Ping scan' -Status ('{0} ({1}/254)' -f $ip, $i) -PercentComplete $perc
         $null = & ping.exe -n 1 -w $PingTimeoutMs $ip
-        if ($LASTEXITCODE -eq 0) {
-            $targets += $ip
-        }
+        if ($LASTEXITCODE -eq 0) { $targets += $ip }
     }
-    Write-Progress -Activity 'Resolve target IPs' -Completed
+    Write-Progress -Activity 'Ping scan' -Completed
 }
 
-$serverIps = @((Get-NetIPAddress -AddressFamily IPv4).IPAddress)
-$targets = @($targets | Where-Object { $_ -and ($_ -notin $serverIps) } | Select-Object -Unique)
+$serverIps = @((Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress)
+$targets   = @($targets | Where-Object { $_ -and ($_ -notin $serverIps) } | Select-Object -Unique)
 
-if (-not $targets -or $targets.Count -eq 0) {
-    Write-Host 'No target machines found.' -ForegroundColor Yellow
-    Remove-Item $tempUrl -Force
+if ($targets.Count -eq 0) {
+    Write-Host 'No responsive machines found.' -ForegroundColor Yellow
+    Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
     exit 0
 }
 
-Write-Step ('Deploy shortcut to {0} machine(s)' -f $targets.Count)
+# -- Deploy --
+Write-Host ("`n==> Deploying to {0} machine(s)" -f $targets.Count) -ForegroundColor Cyan
 $success = 0
-$failed = 0
-$skipped = 0
+$failed  = 0
+$idx     = 0
 
 foreach ($ip in $targets) {
-    $deployed = 0
-    $usersRoot = '\\' + $ip + '\C$\Users'
+    $idx++
+    Write-Progress -Activity 'Deploy' -Status ('{0} ({1}/{2})' -f $ip, $idx, $targets.Count) -PercentComplete ([int]($idx / $targets.Count * 100))
+    Write-Host ('  [{0}] ' -f $ip) -NoNewline
 
-    if ($credential) {
-        $driveName = New-DriveName -Index ($success + $failed + $skipped + 1)
-        Remove-DriveIfExists -Name $driveName
-        try {
-            $null = New-PSDrive -Name $driveName -PSProvider FileSystem -Root ('\\' + $ip + '\C$') -Credential $credential -Scope Script
-            $usersRoot = $driveName + ':\Users'
-        }
-        catch {
-            Write-Host ('  [{0}] FAIL - Cannot access admin share with provided credential' -f $ip) -ForegroundColor Red
-            $failed++
-            continue
-        }
-    }
+    $share = '\\' + $ip + '\C$'
 
-    if (-not (Test-Path $usersRoot)) {
-        Write-Host ('  [{0}] FAIL - Cannot access admin share' -f $ip) -ForegroundColor Red
+    # 1) Connect via net use with explicit credential
+    $null = & net.exe use $share /delete /y 2>&1   # clear stale session first
+    $connectOut = & net.exe use $share $AdminPass /user:$AdminUser 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ('FAIL (connect) - ' + ($connectOut -join ' ')) -ForegroundColor Red
         $failed++
-        if ($credential) {
-            Remove-DriveIfExists -Name $driveName
-        }
         continue
     }
 
+    # 2) Copy shortcut to Public Desktop
+    $dest = $share + '\Users\Public\Desktop\' + $ShortcutName + '.url'
     try {
-        $deployed = Deploy-ToUsersRoot -UsersRootPath $usersRoot -TempShortcut $tempUrl -Name $ShortcutName
-    }
-    finally {
-        if ($credential) {
-            Remove-DriveIfExists -Name $driveName
-        }
-    }
-
-    if ($deployed -gt 0) {
-        Write-Host ('  [{0}] OK - deployed to {1} desktop location(s)' -f $ip, $deployed) -ForegroundColor Green
+        Copy-Item -Path $tempFile -Destination $dest -Force -ErrorAction Stop
+        Write-Host 'OK - shortcut placed on Public Desktop' -ForegroundColor Green
         $success++
+    } catch {
+        Write-Host ('FAIL (copy) - ' + $_.Exception.Message) -ForegroundColor Red
+        $failed++
     }
-    else {
-        Write-Host ('  [{0}] SKIP - no desktop folder found' -f $ip) -ForegroundColor DarkGray
-        $skipped++
-    }
+
+    # 3) Disconnect
+    $null = & net.exe use $share /delete /y 2>&1
 }
 
-Write-Step 'Summary'
+Write-Progress -Activity 'Deploy' -Completed
+Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+
+# -- Summary --
+Write-Host "`n==> Summary"
 Write-Host ('  Success: {0}' -f $success) -ForegroundColor Green
-Write-Host ('  Skipped: {0}' -f $skipped) -ForegroundColor DarkGray
-if ($failed -gt 0) {
-    Write-Host ('  Failed : {0}' -f $failed) -ForegroundColor Red
-}
-else {
-    Write-Host ('  Failed : {0}' -f $failed) -ForegroundColor DarkGray
-}
+$fc = if ($failed -gt 0) { 'Red' } else { 'DarkGray' }
+Write-Host ('  Failed : {0}' -f $failed) -ForegroundColor $fc
+Write-Host ('  URL    : {0}' -f $TargetUrl) -ForegroundColor Cyan
 
-Write-Host ('  Shortcut: {0} -> {1}' -f $ShortcutName, $TargetUrl) -ForegroundColor Cyan
-
-Remove-Item $tempUrl -Force
