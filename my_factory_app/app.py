@@ -61,6 +61,16 @@ class Config:
 app = Flask(__name__)
 app.config.from_object(Config())
 scheduler = APScheduler()
+
+# ==================== Logging Configuration ====================
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+app.logger.setLevel(logging.INFO)
+
 # -------------------------
 
 configured_secret = os.environ.get('FLASK_SECRET_KEY') or os.environ.get('SECRET_KEY')
@@ -81,6 +91,8 @@ BACKUP_DIR = os.path.join(BASE_DIR, 'backups')
 THAILAND_TZ = 'Asia/Bangkok'
 SESSION_TIMEOUT_MINUTES = 15
 USER_LOCK_TIMEOUT_MINUTES = 5
+ACTIVE_CLIENT_WINDOW_MINUTES = int(os.environ.get('ACTIVE_CLIENT_WINDOW_MINUTES', '5'))
+ACTIVE_LOG_THROTTLE_SECONDS = int(os.environ.get('ACTIVE_LOG_THROTTLE_SECONDS', '20'))
 ALLOWED_IMPORT_EXTENSIONS = {'xlsx', 'xlsm', 'xls'}
 ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 _default_ga_upload_root = os.path.join(os.environ.get('LOCALAPPDATA', BASE_DIR), 'PCM', 'ga_uploads')
@@ -105,6 +117,7 @@ NO_CACHE_HEADERS = {
 MAX_LOGIN_ATTEMPTS = int(os.environ.get('MAX_LOGIN_ATTEMPTS', '5'))
 LOGIN_BLOCK_MINUTES = int(os.environ.get('LOGIN_BLOCK_MINUTES', '5'))
 FAILED_LOGIN_ATTEMPTS = {}
+ACTIVITY_WRITE_THROTTLE = {}
 
 def utc_now_naive():
     """UTC time แบบ naive เพื่อเข้ากับข้อมูลเดิมในระบบ rate-limit."""
@@ -113,6 +126,9 @@ def utc_now_naive():
 def get_client_ip():
     forwarded_for = (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
     return forwarded_for or (request.remote_addr or 'unknown')
+
+def get_client_user_agent():
+    return clean_input_text(request.headers.get('User-Agent', ''), 255)
 
 def is_auth_rate_limited(scope):
     key = f"{scope}:{get_client_ip()}"
@@ -281,14 +297,18 @@ def handle_before_request():
             flash('❌ คำขอไม่ปลอดภัยหรือ session หมดอายุ กรุณาลองใหม่', 'danger')
             return redirect(request.referrer or url_for('index'))
 
+    try:
+        track_current_session_activity()
+    except Exception as e:
+        app.logger.error(f"Error tracking request activity: {e}", exc_info=True)
+
     # 2. อัปเดตเวลาใช้งานล่าสุดของพนักงานเฉพาะ session ของตนเอง
     emp_id = request.args.get('emp_id') or request.form.get('emp_id')
-    if not emp_id or session.get('user_id') != emp_id:
-        return
-    try:
-        update_user_last_seen(emp_id)
-    except Exception:
-        pass
+    if emp_id and session.get('user_id') == emp_id:
+        try:
+            update_user_last_seen(emp_id)
+        except Exception:
+            pass
 
 @app.after_request
 def add_header(response):
@@ -766,6 +786,27 @@ def ensure_application_schema():
             )
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_notification_delivery_logs_created_at ON notification_delivery_logs(created_at DESC)')
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS active_client_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_type TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                actor_name TEXT,
+                role TEXT,
+                department TEXT,
+                location TEXT,
+                ip_address TEXT,
+                user_agent TEXT,
+                endpoint TEXT,
+                is_logged_in INTEGER NOT NULL DEFAULT 1,
+                first_seen TEXT NOT NULL DEFAULT (datetime('now', '+7 hours')),
+                last_seen TEXT NOT NULL DEFAULT (datetime('now', '+7 hours')),
+                UNIQUE(actor_type, actor_id, ip_address)
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_active_client_logs_last_seen ON active_client_logs(last_seen DESC)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_active_client_logs_identity ON active_client_logs(actor_type, actor_id)')
         conn.commit()
     finally:
         conn.close()
@@ -796,6 +837,118 @@ def update_user_last_seen(emp_id):
         conn.execute(
             "UPDATE users SET last_seen = datetime('now', '+7 hours') WHERE emp_id = ?",
             (emp_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def _resolve_current_actor():
+    if session.get('admin_logged_in'):
+        actor = {
+            'actor_type': 'admin',
+            'actor_id': clean_input_text(session.get('admin_username', ''), 50),
+            'actor_name': clean_input_text(session.get('admin_name', ''), 120),
+            'role': clean_input_text(session.get('admin_role', ''), 50),
+            'department': '',
+            'location': '',
+        }
+        app.logger.debug(f"Admin actor resolved: {actor['actor_id']}")
+        return actor
+
+    user_id = clean_input_text(session.get('user_id', ''), 20)
+    if user_id:
+        actor = {
+            'actor_type': 'user',
+            'actor_id': user_id,
+            'actor_name': clean_input_text(session.get('user_name', user_id), 120),
+            'role': 'user',
+            'department': clean_input_text(session.get('user_department', ''), 100),
+            'location': clean_input_text(session.get('user_location', ''), 100),
+        }
+        app.logger.debug(f"User actor resolved: {actor['actor_id']}")
+        return actor
+
+    app.logger.debug("No actor found in session")
+    return None
+
+def track_current_session_activity():
+    try:
+        if not has_request_context():
+            return
+
+        if request.endpoint == 'static':
+            return
+
+        if request.endpoint in {'index', 'admin_login'} and request.method == 'GET':
+            return
+
+        actor = _resolve_current_actor()
+        if not actor or not actor['actor_id']:
+            return
+
+        ip_address = get_client_ip()
+
+        throttle_key = f"{actor['actor_type']}:{actor['actor_id']}:{ip_address}"
+        now_ts = time.time()
+        last_ts = ACTIVITY_WRITE_THROTTLE.get(throttle_key, 0)
+        if now_ts - last_ts < ACTIVE_LOG_THROTTLE_SECONDS:
+            return
+
+        ACTIVITY_WRITE_THROTTLE[throttle_key] = now_ts
+        if len(ACTIVITY_WRITE_THROTTLE) > 5000:
+            expire_before = now_ts - (ACTIVE_LOG_THROTTLE_SECONDS * 5)
+            for key, value in list(ACTIVITY_WRITE_THROTTLE.items()):
+                if value < expire_before:
+                    ACTIVITY_WRITE_THROTTLE.pop(key, None)
+
+        conn = get_db_connection()
+        try:
+            conn.execute(
+                '''
+                INSERT INTO active_client_logs (
+                    actor_type, actor_id, actor_name, role, department, location,
+                    ip_address, user_agent, endpoint, is_logged_in, first_seen, last_seen
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now', '+7 hours'), datetime('now', '+7 hours'))
+                ON CONFLICT(actor_type, actor_id, ip_address) DO UPDATE SET
+                    actor_name = excluded.actor_name,
+                    role = excluded.role,
+                    department = excluded.department,
+                    location = excluded.location,
+                    user_agent = excluded.user_agent,
+                    endpoint = excluded.endpoint,
+                    is_logged_in = 1,
+                    last_seen = datetime('now', '+7 hours')
+                ''',
+                (
+                    actor['actor_type'], actor['actor_id'], actor['actor_name'], actor['role'],
+                    actor['department'], actor['location'], ip_address,
+                    get_client_user_agent(), clean_input_text(request.path, 120)
+                )
+            )
+            conn.commit()
+        except Exception as e:
+            app.logger.error(f"Error tracking activity: {e}", exc_info=True)
+        finally:
+            conn.close()
+    except Exception as e:
+        app.logger.error(f"Error in track_current_session_activity wrapper: {e}", exc_info=True)
+
+def mark_actor_logged_out(actor_type, actor_id):
+    if not actor_id:
+        return
+
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            '''
+            UPDATE active_client_logs
+            SET is_logged_in = 0,
+                endpoint = ?,
+                last_seen = datetime('now', '+7 hours')
+            WHERE actor_type = ? AND actor_id = ? AND ip_address = ?
+            ''',
+            (clean_input_text(request.path, 120), actor_type, clean_input_text(actor_id, 50), get_client_ip())
         )
         conn.commit()
     finally:
@@ -1724,6 +1877,76 @@ def build_approval_email_html(payload):
 </html>
 """
 
+def build_rejection_email_body(payload):
+    return "\n".join([
+        'มีการปฏิเสธรายการเบิกจากระบบ PCM',
+        '',
+        f"ผู้เบิก: {payload.get('requester_name', '-')}",
+        f"แผนก/พื้นที่: {payload.get('department', '-')} ({payload.get('location', '-')})",
+        f"รายการ: {payload.get('product_name', '-')}",
+        f"จำนวน: {payload.get('qty', '-')} {payload.get('unit', '')}".strip(),
+        f"ผู้ดำเนินการ: {payload.get('approver', '-')}",
+        f"เวลาปฏิเสธ: {payload.get('rejected_at', '-')}",
+    ])
+
+def build_rejection_email_html(payload):
+    requester_name = escape(str(payload.get('requester_name') or '-'))
+    department = escape(str(payload.get('department') or '-'))
+    location = escape(str(payload.get('location') or '-'))
+    product_name = escape(str(payload.get('product_name') or '-'))
+    qty = escape(str(payload.get('qty') or '-'))
+    unit = escape(str(payload.get('unit') or ''))
+    approver = escape(str(payload.get('approver') or '-'))
+    rejected_at = escape(str(payload.get('rejected_at') or '-'))
+    action_link = build_email_link('admin_dashboard', module='stock')
+    action_section = ''
+    if action_link:
+        action_section = (
+            '<tr>'
+            '<td style="padding:4px 22px 18px 22px;">'
+            f'<a href="{escape(action_link)}" style="display:inline-block;background:#b42318;color:#ffffff;text-decoration:none;padding:11px 16px;border-radius:9px;font-size:13px;font-weight:700;">เปิดหน้ารายการคำขอ</a>'
+            '</td>'
+            '</tr>'
+        )
+
+    return f"""<!doctype html>
+<html lang=\"th\">
+<head>
+    <meta charset=\"utf-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+    <title>แจ้งเตือนปฏิเสธรายการ</title>
+</head>
+<body style=\"margin:0;padding:0;background:#f4f6fb;font-family:'Segoe UI',Tahoma,sans-serif;color:#243040;\">
+    <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#f4f6fb;padding:20px 10px;\">
+        <tr><td align=\"center\">
+            <table role=\"presentation\" width=\"640\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:640px;width:100%;background:#ffffff;border:1px solid #dde3ef;border-radius:14px;overflow:hidden;\">
+                <tr>
+                    <td style=\"padding:18px 22px;background:linear-gradient(135deg,#b42318,#d92d20);color:#ffffff;\">
+                        <div style=\"font-size:13px;opacity:.92;\">PCM Notification</div>
+                        <div style=\"margin-top:4px;font-size:22px;font-weight:700;\">ปฏิเสธรายการเบิก</div>
+                        <div style=\"margin-top:8px;font-size:13px;opacity:.95;\">เวลาปฏิเสธ: {rejected_at}</div>
+                    </td>
+                </tr>
+                <tr><td style=\"padding:20px 22px 10px 22px;\"><div style=\"font-size:16px;font-weight:700;color:#0f1f3a;\">ผู้เบิก: {requester_name}</div></td></tr>
+                <tr>
+                    <td style=\"padding:0 22px 12px 22px;\">
+                        <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;\">
+                            <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;width:36%;\">แผนก/พื้นที่</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{department} ({location})</td></tr>
+                            <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">รายการ</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{product_name}</td></tr>
+                            <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">จำนวน</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{qty} {unit}</td></tr>
+                            <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">ผู้ดำเนินการ</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{approver}</td></tr>
+                        </table>
+                    </td>
+                </tr>
+                {action_section}
+                <tr><td style=\"padding:12px 22px 22px 22px;background:#fafcff;color:#7a879e;font-size:12px;border-top:1px solid #edf1f7;\">อีเมลนี้ถูกส่งอัตโนมัติจากระบบ PCM</td></tr>
+            </table>
+        </td></tr>
+    </table>
+</body>
+</html>
+"""
+
 def build_low_stock_email_body(payload):
     return "\n".join([
         'แจ้งเตือนสต็อกต่ำกว่าเกณฑ์',
@@ -2113,6 +2336,8 @@ def get_stock_audit_data(product_id=None):
             AND status = 'Approved'
             AND (
                 action = 'Withdrawn'
+                OR action = 'withdraw'
+                OR action = 'ขอเบิกยา'
                 OR action = 'ขอเบิกอุปกรณ์'
                 OR action LIKE 'เบิกหมวกเซฟตี้%'
             )
@@ -2145,7 +2370,7 @@ def get_stock_audit_data(product_id=None):
                         WHERE product_id = p.id {withdrawal_filter}
                     ), 0) AS withdraw_count,
                     (
-                        SELECT MAX(timestamp)
+                        SELECT MAX(datetime({transaction_timestamp_expr('')}))
                         FROM transaction_logs
                         WHERE product_id = p.id {withdrawal_filter}
                     ) AS last_withdraw_at,
@@ -2186,7 +2411,7 @@ def get_stock_audit_data(product_id=None):
                         WHERE product_id = p.id {withdrawal_filter}
                     ), 0) AS withdraw_count,
                     (
-                        SELECT MAX(timestamp)
+                        SELECT MAX(datetime({transaction_timestamp_expr('')}))
                         FROM transaction_logs
                         WHERE product_id = p.id {withdrawal_filter}
                     ) AS last_withdraw_at,
@@ -2313,6 +2538,8 @@ def get_stock_audit_monthly_snapshot(selected_year, selected_month=None):
                         l.status = 'Approved'
                         AND (
                             l.action = 'Withdrawn'
+                            OR l.action = 'withdraw'
+                            OR l.action = 'ขอเบิกยา'
                             OR l.action = 'ขอเบิกอุปกรณ์'
                             OR l.action LIKE 'เบิกหมวกเซฟตี้%'
                         )
@@ -2597,6 +2824,9 @@ def index():
             clear_failed_attempts('user_login')
             session.clear()
             session['user_id'] = emp_id
+            session['user_name'] = user['name']
+            session['user_department'] = user['department']
+            session['user_location'] = user['location']
             session.permanent = True
             conn.execute("UPDATE users SET is_locked = 1, last_seen = datetime('now', '+7 hours') WHERE emp_id = ?", (emp_id,))
             conn.commit()
@@ -2620,6 +2850,11 @@ def logout_user(emp_id):
     conn.execute('UPDATE users SET is_locked = 0 WHERE emp_id = ?', (emp_id,))
     conn.commit()
     conn.close()
+
+    try:
+        mark_actor_logged_out('user', emp_id)
+    except Exception:
+        pass
 
     session.clear()
     return redirect(url_for('index'))
@@ -3684,7 +3919,7 @@ def admin_dashboard(module):
     if role == 'admin_pc1':
         role_log_filter = " AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')"
     elif role == 'admin_cc':
-        role_log_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')"
+        role_log_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')"
 
     selected_loc = request.args.get('log_loc', '') 
     selected_pending_receive = request.args.get('pending_receive', '').strip().lower()
@@ -3695,7 +3930,7 @@ def admin_dashboard(module):
         if selected_loc == 'PC1':
             super_admin_filter = " AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')"
         elif selected_loc == 'CC':
-            super_admin_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')"
+            super_admin_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')"
     
     final_log_filter = role_log_filter + super_admin_filter
     pending_receive_filter = ""
@@ -3748,7 +3983,7 @@ def admin_dashboard(module):
         WHERE l.status = 'Approved'
           AND l.emp_id NOT LIKE 'ADMIN:%'
           AND TRIM(COALESCE(u.department, '')) <> ''
-          AND l.action <> 'withdraw'
+                    AND l.action NOT IN ('withdraw', 'ขอเบิกยา')
           AND datetime({transaction_timestamp_expr('l')}) >= datetime('now', 'localtime', '-30 days')
         GROUP BY u.department
         HAVING total_qty > 0
@@ -3765,7 +4000,9 @@ def admin_dashboard(module):
         FROM transaction_logs l
         JOIN products p ON l.product_id = p.id
         JOIN users u ON l.emp_id = u.emp_id
-        WHERE l.status = 'Approved' {final_log_filter}
+        WHERE l.status = 'Approved' 
+          AND datetime({transaction_timestamp_expr('l')}) >= datetime('now', 'localtime', '-30 days')
+          {final_log_filter}
         GROUP BY p.id 
         ORDER BY total_qty DESC LIMIT 5
     '''
@@ -3822,7 +4059,7 @@ def admin_dashboard(module):
         LEFT JOIN users u ON l.emp_id = u.emp_id
         LEFT JOIN products p ON l.product_id = p.id
         WHERE 1=1 {final_log_filter}
-        ORDER BY l.timestamp DESC LIMIT ? OFFSET ?
+        ORDER BY datetime({transaction_timestamp_expr('l')}) DESC, l.id DESC LIMIT ? OFFSET ?
     ''', (log_per_page, log_offset)).fetchall()
 
     count_query = f'''
@@ -3867,8 +4104,48 @@ def admin_dashboard(module):
 
     stock_pending_count = len(pending_logs)
 
+    active_scope_filter = ''
+    if role == 'admin_pc1':
+        active_scope_filter = " AND ((actor_type = 'user' AND location LIKE '%PC1%') OR (actor_type = 'admin' AND role = 'admin_pc1'))"
+    elif role == 'admin_cc':
+        active_scope_filter = " AND ((actor_type = 'user' AND (location LIKE '%Coil Center%' OR location LIKE '%CC%')) OR (actor_type = 'admin' AND role = 'admin_cc'))"
+
+    active_clients_rows = conn.execute(
+        f'''
+        SELECT actor_type, actor_id, actor_name, role, department, location, ip_address, endpoint, first_seen, last_seen
+        FROM active_client_logs
+        WHERE is_logged_in = 1
+          AND datetime(last_seen) >= datetime('now', '+7 hours', ?)
+          {active_scope_filter}
+        ORDER BY datetime(last_seen) DESC
+        LIMIT 100
+        ''',
+        (f'-{ACTIVE_CLIENT_WINDOW_MINUTES} minutes',)
+    ).fetchall()
+
+    active_clients = [dict(row) for row in active_clients_rows]
+    if role == 'superadmin':
+        current_admin_id = clean_input_text(session.get('admin_username', ''), 50)
+        if current_admin_id and not any(
+            client.get('actor_type') == 'admin' and client.get('actor_id') == current_admin_id
+            for client in active_clients
+        ):
+            active_clients.insert(0, {
+                'actor_type': 'admin',
+                'actor_id': current_admin_id,
+                'actor_name': clean_input_text(session.get('admin_name', current_admin_id), 120),
+                'role': clean_input_text(session.get('admin_role', 'superadmin'), 50),
+                'department': '',
+                'location': '',
+                'ip_address': get_client_ip(),
+                'endpoint': clean_input_text(request.path, 120),
+                'first_seen': datetime.now(pytz.timezone('Asia/Bangkok')).strftime('%Y-%m-%d %H:%M:%S'),
+                'last_seen': datetime.now(pytz.timezone('Asia/Bangkok')).strftime('%Y-%m-%d %H:%M:%S'),
+            })
+
     conn.close()
     
+    # For non-superadmin roles, active_clients will be empty (hidden in template anyway)
     return render_template('admin_dashboard.html',
                            pending_logs=pending_logs,
                            stock_pending_count=stock_pending_count,
@@ -3881,6 +4158,8 @@ def admin_dashboard(module):
                            dept_labels=dept_labels, dept_values=dept_values, dept_summary=dept_summary, # ข้อมูลสำหรับกราฟ
                            top_items=top_items, # ข้อมูลของเบิกสูงสุด
                            role=role,
+                           active_clients=active_clients,
+                           active_window_minutes=ACTIVE_CLIENT_WINDOW_MINUTES,
                            admin_module=admin_module,
                            selected_loc=selected_loc,
                            selected_pending_receive=selected_pending_receive,
@@ -4045,14 +4324,15 @@ def daily_alert():
     expiring_items = conn.execute(expiry_query).fetchall()
 
     # --- ส่วนที่ 2: เช็คหมวกเซฟตี้ครบ 2 ปี (ย้อนหลัง 23 เดือนขึ้นไป) ---
-    helmet_query = '''
-        SELECT u.name as emp_name, u.department, u.location, p.name as product_name, l.timestamp
+    helmet_query = f'''
+        SELECT u.name as emp_name, u.department, u.location, p.name as product_name,
+               datetime({transaction_timestamp_expr('l')}) as timestamp
         FROM transaction_logs l
         JOIN users u ON l.emp_id = u.emp_id
         JOIN products p ON l.product_id = p.id
         WHERE (p.name LIKE '%หมวก%' OR p.name LIKE '%Helmet%' OR l.action LIKE '%หมวก%')
         AND l.status = 'Approved'
-        AND l.timestamp <= datetime('now', '+7 hours', '-23 months')
+        AND datetime({transaction_timestamp_expr('l')}) <= datetime('now', '+7 hours', '-23 months')
     '''
     helmet_alerts = conn.execute(helmet_query).fetchall()
     conn.close()
@@ -4145,7 +4425,7 @@ def get_pending_requests():
     if role == 'admin_pc1':
         role_log_filter = " AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')"
     elif role == 'admin_cc':
-        role_log_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')"
+        role_log_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')"
 
     receive_filter = ""
     if receive_mode == 'immediate':
@@ -4193,7 +4473,7 @@ def approve_request(log_id):
             permission_check = conn.execute('''
                 SELECT l.id FROM transaction_logs l
                 LEFT JOIN users u ON l.emp_id = u.emp_id
-                WHERE l.id = ? AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')
+                WHERE l.id = ? AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')
             ''', (log_id,)).fetchone()
             if not permission_check:
                 flash('❌ คุณไม่มีสิทธิ์อนุมัติรายการนี้', 'danger')
@@ -4405,7 +4685,7 @@ def reject_request(log_id):
             permission_check = conn.execute('''
                 SELECT l.id FROM transaction_logs l
                 LEFT JOIN users u ON l.emp_id = u.emp_id
-                WHERE l.id = ? AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')
+                WHERE l.id = ? AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')
             ''', (log_id,)).fetchone()
             if not permission_check:
                 flash('❌ คุณไม่มีสิทธิ์ปฏิเสธรายการนี้', 'danger')
@@ -4431,7 +4711,54 @@ def reject_request(log_id):
             flash('⚠️ รายการนี้ถูกดำเนินการไปแล้ว', 'warning')
             return redirect(url_for('admin_dashboard', module='stock'))
 
+        user_info = conn.execute('SELECT name, department, location FROM users WHERE emp_id = ?', (log['emp_id'],)).fetchone()
+        product_info = conn.execute('SELECT name, unit, base_unit, category FROM products WHERE id = ?', (log['product_id'],)).fetchone()
+        admin_label = 'Admin CC' if role == 'admin_cc' else ('Admin PC1' if role == 'admin_pc1' else 'Super Admin')
+        is_split_medicine_log = is_split_tablet_medicine(product_info) and log['qty_base_unit']
+        rejected_qty = log['qty_base_unit'] if is_split_medicine_log else int(log['qty'] or 0)
+        rejected_unit = (product_info['base_unit'] if is_split_medicine_log else (product_info['unit'] if product_info else 'หน่วย'))
+        rejected_at = get_thailand_time().strftime('%d/%m/%Y %H:%M:%S')
+
+        rejection_message = (
+            f"❌ Admin ได้ปฏิเสธรายการเบิกแล้ว\n"
+            f"👤 ผู้เบิก: {user_info['name'] if user_info else log['emp_id']}\n"
+            f"📍 แผนก: {user_info['department'] if user_info else '-'} ({user_info['location'] if user_info else '-'})\n"
+            f"📦 รายการ: {product_info['name'] if product_info else log['product_id']}\n"
+            f"🔢 จำนวน: {rejected_qty} {rejected_unit}\n"
+            f"🧾 ผู้ดำเนินการ: {admin_label}\n"
+            f"🕒 เวลาปฏิเสธ: {rejected_at}"
+        )
+
         conn.commit()
+
+        send_smart_notification(
+            notification_type='rejection',
+            message=rejection_message,
+            location=(user_info['location'] if user_info else ''),
+            role=role,
+            email_body=build_rejection_email_body({
+                'requester_name': user_info['name'] if user_info else log['emp_id'],
+                'department': user_info['department'] if user_info else '-',
+                'location': user_info['location'] if user_info else '-',
+                'product_name': product_info['name'] if product_info else log['product_id'],
+                'qty': rejected_qty,
+                'unit': rejected_unit,
+                'approver': admin_label,
+                'rejected_at': rejected_at,
+            }),
+            html_body=build_rejection_email_html({
+                'requester_name': user_info['name'] if user_info else log['emp_id'],
+                'department': user_info['department'] if user_info else '-',
+                'location': user_info['location'] if user_info else '-',
+                'product_name': product_info['name'] if product_info else log['product_id'],
+                'qty': rejected_qty,
+                'unit': rejected_unit,
+                'approver': admin_label,
+                'rejected_at': rejected_at,
+            }),
+            admin_id='superadmin'
+        )
+
         flash('❌ ปฏิเสธรายการเรียบร้อยแล้ว', 'warning')
         return redirect(url_for('admin_dashboard', module='stock'))
 
@@ -5798,14 +6125,14 @@ def filter_logs():
     if role == 'admin_pc1':
         role_log_filter = " AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')"
     elif role == 'admin_cc':
-        role_log_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')"
+        role_log_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')"
 
     super_admin_filter = ""
     if role == 'superadmin':
         if log_loc == 'PC1':
             super_admin_filter = " AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')"
         elif log_loc == 'CC':
-            super_admin_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%' OR u.department LIKE '%CC%')"
+            super_admin_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')"
     
     final_log_filter = role_log_filter + super_admin_filter
 
@@ -5838,7 +6165,7 @@ def filter_logs():
         )
         LEFT JOIN products p ON l.product_id = p.id
         WHERE 1=1 {final_log_filter}
-        ORDER BY l.timestamp DESC LIMIT ? OFFSET ?
+        ORDER BY datetime({transaction_timestamp_expr('l')}) DESC, l.id DESC LIMIT ? OFFSET ?
     '''
     
     logs = conn.execute(query, (per_page, offset)).fetchall()
@@ -5848,6 +6175,36 @@ def filter_logs():
     response = make_response(render_template('admin_log_row.html', logs=logs))
     response.headers['X-Total-Pages'] = total_pages # ส่งเลขหน้าใหม่ไปให้ JS
     return response
+
+@app.route('/get_active_clients_json')
+@app.route('/admin/get_active_clients_json')
+@app.route('/api/admin/get_active_clients_json')
+def get_active_clients_json():
+    """Return active clients visible to the current admin role."""
+    if not session.get('admin_logged_in') or session.get('admin_role') != 'superadmin':
+        return jsonify({'clients': []}), 401
+
+    try:
+        conn = get_db_connection()
+        try:
+            rows = conn.execute(
+                '''
+                SELECT actor_type, actor_id, actor_name, role, department, location, ip_address, endpoint, last_seen
+                FROM active_client_logs
+                WHERE is_logged_in = 1
+                  AND datetime(last_seen) >= datetime('now', '+7 hours', ?)
+                ORDER BY datetime(last_seen) DESC
+                LIMIT 100
+                ''',
+                (f'-{ACTIVE_CLIENT_WINDOW_MINUTES} minutes',)
+            ).fetchall()
+        finally:
+            conn.close()
+
+        clients = [dict(row) for row in rows]
+        return jsonify({'clients': clients})
+    except Exception as e:
+        return jsonify({'clients': [], 'error': str(e)}), 500
 
 # ==================== 📬 Email Notification Settings ====================
 
@@ -6113,6 +6470,11 @@ def email_settings_test():
 
 @app.route('/admin/logout', methods=['POST'])
 def admin_logout():
+    admin_username = session.get('admin_username', '')
+    try:
+        mark_actor_logged_out('admin', admin_username)
+    except Exception:
+        pass
     session.clear()
     return redirect(url_for('index'))
 
@@ -7034,27 +7396,22 @@ def scheduled_daily_alert():
         # ==========================================
         # 2. เช็คหมวกเซฟตี้ (แยกตามพนักงาน, ของ และ Lot)
         # ==========================================
-        helmet_query = '''
+        helmet_query = f'''
             SELECT 
                 u.name AS emp_name, 
                 u.department, 
                 u.location, 
                 p.name AS product_name,
                 l.lot_id,
-                MAX(
-                    CASE 
-                        WHEN l.timestamp LIKE '%/%/%' THEN 
-                            substr(l.timestamp, 7, 4) || '-' || substr(l.timestamp, 4, 2) || '-' || substr(l.timestamp, 1, 2) || substr(l.timestamp, 11)
-                        ELSE l.timestamp 
-                    END
-                ) AS last_timestamp
+                MAX(datetime({transaction_timestamp_expr('l')})) AS last_timestamp
             FROM transaction_logs l
             JOIN users u ON l.emp_id = u.emp_id
             JOIN products p ON l.product_id = p.id
             WHERE (p.name LIKE '%หมวก%' OR p.name LIKE '%Helmet%' OR l.action LIKE '%หมวก%')
             AND l.status = 'Approved'
             GROUP BY u.emp_id, p.id, l.lot_id
-            HAVING last_timestamp <= datetime('now', '+7 hours', '-23 months')
+            HAVING last_timestamp IS NOT NULL
+               AND last_timestamp <= datetime('now', '+7 hours', '-23 months')
         '''
         helmet_alerts = conn.execute(helmet_query).fetchall()
 

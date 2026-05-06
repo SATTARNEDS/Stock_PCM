@@ -453,7 +453,7 @@ class UnitConversionManager:
             self.cursor.execute('''
                 INSERT INTO transaction_logs 
                 (emp_id, product_id, lot_id, action, qty, qty_base_unit, qty_package_unit, note, status, timestamp)
-                VALUES (?, ?, ?, 'withdraw', ?, ?, ?, ?, 'Approved', datetime('now'))
+                VALUES (?, ?, ?, 'ขอเบิกยา', ?, ?, ?, ?, 'Approved', datetime('now'))
             ''', (
                 emp_id, 
                 product_id, 

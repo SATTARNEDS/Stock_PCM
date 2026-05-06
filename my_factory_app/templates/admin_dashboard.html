@@ -851,23 +851,27 @@
         .history-log-table {
             table-layout: fixed;
             width: 100%;
+            min-width: 980px;
         }
 
         .history-log-col-time {
-            width: 17%;
+            width: 165px;
         }
 
         .history-log-col-user {
-            width: 23%;
+            width: 250px;
         }
 
         .history-log-col-detail {
-            width: 36%;
+            width: 345px;
         }
 
-        .history-log-col-qty,
+        .history-log-col-qty {
+            width: 90px;
+        }
+
         .history-log-col-status {
-            width: 12%;
+            width: 130px;
         }
 
         .history-log-table th,
@@ -878,6 +882,7 @@
         .history-log-table td:nth-child(1),
         .history-log-table th:nth-child(1) {
             white-space: nowrap;
+            font-variant-numeric: tabular-nums;
         }
 
         .history-log-table td:nth-child(3) {
@@ -890,6 +895,7 @@
 
         .card-body.table-responsive {
             overflow-y: scroll;
+            overflow-anchor: none;
         }
 
         .history-pagination {
@@ -905,7 +911,7 @@
 
         @media (max-width: 991.98px) {
             .history-log-table {
-                min-width: 820px;
+                min-width: 980px;
             }
         }
 
@@ -1772,11 +1778,11 @@
                     <div class="d-flex align-items-center gap-3">
                         {% if role == 'superadmin' %}
                         <div class="btn-group btn-group-sm bg-white rounded-pill p-1 shadow-sm">
-                            <button onclick="filterLogs('')" id="btn-log-all"
+                            <button type="button" onclick="filterLogs('')" id="btn-log-all"
                                 class="btn btn-sm rounded-pill px-3 btn-primary fw-medium">รวม</button>
-                            <button onclick="filterLogs('PC1')" id="btn-log-pc1"
+                            <button type="button" onclick="filterLogs('PC1')" id="btn-log-pc1"
                                 class="btn btn-sm rounded-pill px-3 btn-light text-muted border-0 fw-medium">PC1</button>
-                            <button onclick="filterLogs('CC')" id="btn-log-cc"
+                            <button type="button" onclick="filterLogs('CC')" id="btn-log-cc"
                                 class="btn btn-sm rounded-pill px-3 btn-light text-muted border-0 fw-medium">CC</button>
                         </div>
                         {% endif %}                       
@@ -1811,7 +1817,7 @@
                         <ul
                             class="pagination pagination-sm justify-content-center mb-0 shadow-sm rounded-pill overflow-hidden w-auto d-inline-flex mx-auto history-pagination">
                             <li class="page-item" id="prevPageItem">
-                                <button class="page-link px-3" id="prevPageBtn"
+                                <button type="button" class="page-link px-3" id="prevPageBtn"
                                     onclick="prevLogPage()">ก่อนหน้า</button>
                             </li>
 
@@ -1821,7 +1827,7 @@
                             </li>
 
                             <li class="page-item" id="nextPageItem">
-                                <button class="page-link px-3" id="nextPageBtn" onclick="nextLogPage()">ถัดไป</button>
+                                <button type="button" class="page-link px-3" id="nextPageBtn" onclick="nextLogPage()">ถัดไป</button>
                             </li>
                         </ul>
                     </nav>
@@ -1829,8 +1835,100 @@
                 {% endif %}
             </div>
 
+            {% if role == 'superadmin' %}
+            <style>
+                #activeClientsContainer .table {
+                    table-layout: fixed;
+                    width: 100%;
+                    min-width: 980px;
+                }
+                #activeClientsContainer th:nth-child(1),
+                #activeClientsContainer td:nth-child(1) {
+                    width: 150px;
+                    min-width: 150px;
+                    white-space: nowrap;
+                }
+                #activeClientsContainer th:nth-child(2),
+                #activeClientsContainer td:nth-child(2) { width: 220px; }
+                #activeClientsContainer th:nth-child(3),
+                #activeClientsContainer td:nth-child(3) { width: 90px; }
+                #activeClientsContainer th:nth-child(4),
+                #activeClientsContainer td:nth-child(4) { width: 130px; }
+                #activeClientsContainer th:nth-child(5),
+                #activeClientsContainer td:nth-child(5) { width: 170px; }
+                #activeClientsContainer th:nth-child(6),
+                #activeClientsContainer td:nth-child(6) {
+                    width: 220px;
+                    overflow-wrap: break-word;
+                }
+                #activeClientsContainer th,
+                #activeClientsContainer td {
+                    white-space: normal;
+                    vertical-align: top;
+                }
+                #activeClientsContainer td:nth-child(1) {
+                    font-variant-numeric: tabular-nums;
+                }
+            </style>
+            <div class="card border-0 shadow-sm mb-4 dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}">
+                <div class="card-header bg-dark text-white fw-medium py-3 d-flex flex-wrap justify-content-between align-items-center gap-2 border-0">
+                    <span><i class="fas fa-network-wired me-2"></i>ผู้ใช้งานปัจจุบัน ({{ active_window_minutes }} นาทีล่าสุด)</span>
+                    <span class="badge bg-white text-dark rounded-pill px-3" id="activeClientsCountBadge">{{ active_clients|length }} session</span>
+                </div>
+                <div class="card-body p-0 table-responsive" id="activeClientsContainer">
+                    <table class="table table-striped table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-4">ล่าสุด</th>
+                                <th>ผู้ใช้งาน</th>
+                                <th>ประเภท</th>
+                                <th>IP</th>
+                                <th>แผนก/พื้นที่</th>
+                                <th>หน้าล่าสุด</th>
+                            </tr>
+                        </thead>
+                        <tbody id="activeClientsTableBody">
+                            {% for client in active_clients %}
+                            <tr>
+                                <td class="ps-4 small text-muted">{{ client['last_seen'] }}</td>
+                                <td>
+                                    <div class="fw-medium">{{ client['actor_name'] or client['actor_id'] }}</div>
+                                    <small class="text-muted">{{ client['actor_id'] }}</small>
+                                </td>
+                                <td>
+                                    {% if client['actor_type'] == 'admin' %}
+                                    <span class="badge bg-primary">Admin</span>
+                                    {% else %}
+                                    <span class="badge bg-success">User</span>
+                                    {% endif %}
+                                </td>
+                                <td><span class="font-monospace small">{{ client['ip_address'] or '-' }}</span></td>
+                                <td class="small text-muted">
+                                    {% if client['actor_type'] == 'admin' %}
+                                    {{ client['role'] or '-' }}
+                                    {% else %}
+                                    {{ client['department'] or '-' }}
+                                    {% if client['location'] %}
+                                    <span class="text-primary">({{ client['location'] }})</span>
+                                    {% endif %}
+                                    {% endif %}
+                                </td>
+                                <td class="small"><code>{{ client['endpoint'] or '-' }}</code></td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center py-4 text-muted">ยังไม่มี session ที่ใช้งานอยู่ในช่วงเวลาที่กำหนด</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+
         </div>
     </main>
+
 
     <datalist id="medicineSplitUnitOptions">
         <option value="เม็ด"></option>
@@ -4072,7 +4170,14 @@
         // ==========================================
         // 4. ระบบประวัติการเบิก (Logs & Pagination)
         // ==========================================
-        function updateLogTable(shouldScroll = true) {
+        function updateLogTable(shouldScroll = false) {
+            const logTableBody = document.getElementById('logTableBody');
+            const logContainer = logTableBody ? logTableBody.closest('.card-body.table-responsive') : null;
+            const containerTopBefore = logContainer ? logContainer.getBoundingClientRect().top : null;
+            if (logContainer && logContainer.offsetHeight > 0) {
+                logContainer.style.minHeight = `${logContainer.offsetHeight}px`;
+            }
+
             fetch(`/admin/filter_logs?page=${currentLogPage}&log_loc=${encodeURIComponent(currentLogLoc)}`)
                 .then(checkAuth)
                 .then(response => {
@@ -4087,13 +4192,23 @@
                     document.getElementById('prevPageItem').classList.toggle('disabled', currentLogPage <= 1);
                     document.getElementById('nextPageItem').classList.toggle('disabled', currentLogPage >= totalPages);
                     if (shouldScroll) document.querySelector('.card-header.bg-primary').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    else if (logContainer && containerTopBefore !== null) {
+                        const containerTopAfter = logContainer.getBoundingClientRect().top;
+                        const delta = containerTopAfter - containerTopBefore;
+                        if (Math.abs(delta) > 0.5) {
+                            window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
+                        }
+                    }
+                })
+                .finally(() => {
+                    if (logContainer) logContainer.style.minHeight = '';
                 });
         }
 
         function filterLogs(loc) {
             currentLogLoc = loc;
             currentLogPage = 1;
-            updateLogTable();
+            updateLogTable(false);
             const btnMap = { '': 'btn-log-all', 'PC1': 'btn-log-pc1', 'CC': 'btn-log-cc' };
             Object.keys(btnMap).forEach(key => {
                 const btn = document.getElementById(btnMap[key]);
@@ -4101,10 +4216,10 @@
             });
         }
 
-        function prevLogPage() { if (currentLogPage > 1) { currentLogPage--; updateLogTable(); } }
+        function prevLogPage() { if (currentLogPage > 1) { currentLogPage--; updateLogTable(false); } }
         function nextLogPage() {
             const totalPages = parseInt(document.getElementById('totalPageNum').innerText);
-            if (currentLogPage < totalPages) { currentLogPage++; updateLogTable(); }
+            if (currentLogPage < totalPages) { currentLogPage++; updateLogTable(false); }
         }
 
         // ==========================================
