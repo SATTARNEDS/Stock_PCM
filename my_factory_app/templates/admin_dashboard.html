@@ -220,6 +220,145 @@
             max-width: 360px;
         }
 
+        .ga-chat-row { display: flex; margin-bottom: 10px; }
+        .ga-chat-row.self { justify-content: flex-end; }
+        .ga-chat-row.other { justify-content: flex-start; }
+        .ga-chat-bubble {
+            position: relative;
+            max-width: 82%;
+            padding: 10px 14px;
+            word-break: break-word;
+            box-shadow: 0 2px 8px rgba(0,0,0,.08);
+        }
+        .ga-chat-bubble.admin {
+            background: linear-gradient(135deg, #0b6cc7, #1a84e8);
+            color: #fff;
+            border-radius: 16px 16px 4px 16px;
+        }
+        .ga-chat-bubble.user {
+            background: #f3f5f8;
+            color: #243040;
+            border-radius: 16px 16px 16px 4px;
+        }
+        .ga-chat-bubble.admin::after,
+        .ga-chat-bubble.user::after {
+            content: "";
+            position: absolute;
+            bottom: 0;
+            width: 0;
+            height: 0;
+            border: 8px solid transparent;
+        }
+        .ga-chat-bubble.admin::after {
+            right: -6px;
+            border-left-color: #1a84e8;
+            border-right: 0;
+            border-bottom: 0;
+        }
+        .ga-chat-bubble.user::after {
+            left: -6px;
+            border-right-color: #f3f5f8;
+            border-left: 0;
+            border-bottom: 0;
+        }
+        .ga-chat-sender {
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            opacity: .85;
+        }
+        .ga-chat-message {
+            white-space: pre-wrap;
+            line-height: 1.45;
+        }
+        .ga-chat-time {
+            font-size: 11px;
+            margin-top: 4px;
+            text-align: right;
+            opacity: .7;
+        }
+        .admin-chat-notify-container {
+            position: fixed;
+            right: 14px;
+            bottom: 16px;
+            z-index: 1400;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-width: min(92vw, 380px);
+        }
+        .admin-chat-notify-toast {
+            background: #0b1b34;
+            color: #fff;
+            border-radius: 12px;
+            padding: 10px 12px;
+            box-shadow: 0 10px 24px rgba(0,0,0,.22);
+            border-left: 4px solid #2a83ff;
+            cursor: pointer;
+            animation: adminChatToastIn .2s ease-out;
+        }
+        .admin-chat-notify-toast .title { font-size: 12px; opacity: .86; }
+        .admin-chat-notify-toast .body { font-size: 13px; font-weight: 600; margin-top: 2px; }
+        .admin-floating-chat-btn {
+            position: fixed;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 1330;
+            border: none;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #0d6efd, #1d7df0);
+            color: #fff;
+            box-shadow: 0 12px 24px rgba(13, 110, 253, 0.28);
+            min-width: 54px;
+            height: 54px;
+            padding: 0 14px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-weight: 600;
+        }
+        .admin-floating-chat-btn .count {
+            font-size: 12px;
+            font-weight: 700;
+            background: #fff;
+            color: #0d6efd;
+            border-radius: 999px;
+            padding: 2px 8px;
+            display: inline-block;
+        }
+        .admin-floating-chat-btn.has-unread { display: inline-flex; }
+        .admin-floating-chat-btn.has-unread {
+            background: linear-gradient(135deg, #d90429, #ff4d6d);
+            box-shadow: 0 14px 28px rgba(217, 4, 41, 0.35);
+            animation: adminUnreadBlinkRed 0.95s infinite ease-in-out;
+        }
+        .admin-chat-unread-badge {
+            margin-left: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            border-radius: 999px;
+            background: #dc3545;
+            color: #fff;
+            padding: 1px 7px;
+            display: none;
+        }
+        .admin-chat-unread-badge.show {
+            display: inline-block;
+            animation: adminUnreadBlinkRed 0.95s infinite ease-in-out;
+        }
+        @keyframes adminUnreadBlinkRed {
+            0% { filter: brightness(1); }
+            50% { filter: brightness(1.34); }
+            100% { filter: brightness(1); }
+        }
+        @keyframes adminChatToastIn {
+            from { transform: translateY(10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .ga-chat-box { height:340px; overflow-y:auto; scroll-behavior:smooth; }
+        .ga-keyword-filter-input { max-width: 220px; }
         .ga-request-action-cell {
             min-width: 250px;
         }
@@ -1033,7 +1172,7 @@
             display: none;
             align-items: center;
             justify-content: center;
-            z-index: 3000;
+            z-index: 1035;
         }
 
         .global-loading-overlay.is-active {
@@ -1415,6 +1554,40 @@
             </div>
             {% endif %}
 
+            <button id="adminFloatingChatBtn" class="admin-floating-chat-btn" type="button" onclick="openAdminFloatingChat()" aria-label="เปิดแชท GA Request">
+                <i class="fas fa-comments"></i>
+                <span class="count" id="adminFloatingChatCount">0</span>
+            </button>
+
+            {# ===== Modal แชท GA Request ===== #}
+            <div class="modal" id="gaChatModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="false" data-bs-keyboard="true">
+                <div class="modal-dialog modal-dialog-centered modal-lg">
+                    <div class="modal-content border-0 shadow">
+                        <div class="modal-header bg-dark text-white border-0">
+                            <div>
+                                <h6 class="modal-title fw-bold mb-0"><i class="fas fa-comments me-2 text-warning"></i>แชทกับผู้แจ้ง</h6>
+                                <div class="small text-white-50" id="gaChatTitle"></div>
+                            </div>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body p-0">
+                            <div class="ga-chat-box p-3" id="gaChatBox">
+                                <div class="text-center text-muted py-4 small" id="gaChatLoading">
+                                    <i class="fas fa-spinner fa-spin me-1"></i>กำลังโหลด...
+                                </div>
+                            </div>
+                            <div class="border-top p-3 d-flex gap-2">
+                                <textarea id="gaChatInput" class="form-control form-control-sm shadow-none"
+                                    rows="2" placeholder="พิมพ์ข้อความ..."></textarea>
+                                <button class="btn btn-primary rounded-pill px-3" onclick="sendGaChat()">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {# ===== Modal เปลี่ยนวันรับของ ===== #}
             <div class="modal" id="rescheduleModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="false" data-bs-keyboard="true">
                 <div class="modal-dialog modal-dialog-centered">
@@ -1470,9 +1643,9 @@
                         <option value="{{ status }}">{{ status }}</option>
                         {% endfor %}
                     </select>
-                    <input type="text" id="gaKeywordFilter" class="form-control form-control-sm shadow-none"
+                    <input type="text" id="gaKeywordFilter" class="form-control form-control-sm shadow-none ga-keyword-filter-input"
                         placeholder="ค้นหาชื่อ / หัวข้อ / รายละเอียด..."
-                        oninput="filterGaRequests()" style="max-width:220px;">
+                        oninput="filterGaRequests()">
                     <button class="btn btn-sm btn-outline-secondary rounded-pill" onclick="clearGaFilters()">
                         <i class="fas fa-times me-1"></i>ล้าง
                     </button>
@@ -1497,6 +1670,7 @@
                                 <td class="ps-4 small text-muted text-nowrap">{{ req['created_at'] | format_ts }}</td>
                                 <td>
                                     <div class="fw-medium text-dark">{{ req['requester_name'] }}</div>
+                                    <div class="small mt-1"><span class="badge bg-light text-dark border">GA-{{ '%05d'|format(req['id']) }}</span></div>
                                     <div class="small text-muted">{{ req['emp_id'] }} | {{ req['department'] or '-' }}</div>
                                     <div class="small text-muted">{{ req['location'] or '-' }}</div>
                                     <div class="small text-muted">{{ req['requester_email'] or '-' }}</div>
@@ -1546,6 +1720,13 @@
                                         </div>
                                         <button type="submit" class="btn btn-sm btn-dark rounded-pill w-100">บันทึกสถานะ</button>
                                     </form>
+                                    <button class="btn btn-sm btn-outline-primary rounded-pill w-100 mt-2"
+                                        data-admin-chat-request-id="{{ req['id'] }}"
+                                        data-admin-chat-title="{{ req['title']|e }}"
+                                        onclick="openGaChat({{ req['id'] }}, '{{ req['title']|e }}')">
+                                        <i class="fas fa-comments me-1"></i>แชท
+                                        <span class="admin-chat-unread-badge d-none" data-admin-chat-unread>ใหม่</span>
+                                    </button>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -2941,8 +3122,12 @@
         let gaDragScrollLeft = 0;
         let gaDragScrollTop = 0;
         let globalLoadingCount = 0;
+        let suppressGlobalLoading = false;
 
         function showGlobalLoading(text) {
+            if (suppressGlobalLoading) {
+                return;
+            }
             globalLoadingCount += 1;
             const overlay = document.getElementById('globalLoadingOverlay');
             const label = document.getElementById('globalLoadingText');
@@ -2968,20 +3153,26 @@
         }
 
         function isBackgroundFetch(url, method) {
+            const text = String(url || '');
+            // Chat polling/post should never trigger full-screen loader.
+            if (text.includes('/admin/ga_request/')) {
+                return true;
+            }
             const methodUpper = String(method || 'GET').toUpperCase();
             if (methodUpper !== 'GET') return false;
-            const text = String(url || '');
             return text.includes('/api/admin/online_count') ||
                    text.includes('/api/admin/pending_requests') ||
                    text.includes('/admin/filter_stock') ||
-                   text.includes('/admin/filter_logs');
+                   text.includes('/admin/filter_logs') ||
+                     text.includes('/admin/filter_ga_requests') ||
+                     text.includes('/admin/ga_chat_notifications');
         }
 
         const nativeFetch = window.fetch.bind(window);
         window.fetch = function(input, init = {}) {
             const url = typeof input === 'string' ? input : (input?.url || '');
             const method = (init && init.method) || (typeof input !== 'string' && input?.method) || 'GET';
-            const shouldShow = !isBackgroundFetch(url, method);
+            const shouldShow = !suppressGlobalLoading && !isBackgroundFetch(url, method);
             if (shouldShow) {
                 showGlobalLoading('กำลังโหลดข้อมูล...');
             }
@@ -3257,6 +3448,9 @@
                     resetGaImageZoom();
                 });
             }
+
+            // Prime current state without popup, then poll for new requester messages.
+            startAdminChatNotifier(true);
 
             const adminPopupModalEl = document.getElementById('adminPopupModal');
             if (adminPopupModalEl) {
@@ -4816,6 +5010,11 @@
 
         document.getElementById('rescheduleModal')?.addEventListener('hidden.bs.modal', clearStaleModalBackdrop);
         document.getElementById('rescheduleModal')?.addEventListener('shown.bs.modal', clearStaleModalBackdrop);
+        document.getElementById('gaChatModal')?.addEventListener('hidden.bs.modal', clearStaleModalBackdrop);
+        document.getElementById('gaChatModal')?.addEventListener('shown.bs.modal', () => {
+            hideGlobalLoading(true);
+            clearStaleModalBackdrop();
+        });
         document.getElementById('rescheduleForm')?.addEventListener('submit', () => {
             forceResetRescheduleModalState();
         });
@@ -4854,6 +5053,339 @@
                 }
             });
         }
+
+        // ===== GA Request Chat (Admin) =====
+        let gaChatRequestId = null;
+        let gaChatLastId = 0;
+        let gaChatPollTimer = null;
+        let adminChatNotifyTimer = null;
+        let adminChatNotifyStarted = false;
+        let adminUnreadSummarySnapshot = [];
+        const adminChatActor = '{{ session.get("admin_username", "admin")|e }}';
+        const adminSeenUserGlobalKey = 'ga_chat_seen_user_global:' + adminChatActor;
+        let adminSeenUserGlobalId = Number(localStorage.getItem(adminSeenUserGlobalKey) || 0);
+        const adminReadUserByReqKey = 'ga_chat_read_user_by_req:' + adminChatActor;
+        const adminReadUserByReqMap = (() => {
+            try {
+                const raw = localStorage.getItem(adminReadUserByReqKey);
+                return raw ? JSON.parse(raw) : {};
+            } catch (_) {
+                return {};
+            }
+        })();
+        const gaChatCsrf = () => document.querySelector('meta[name="csrf-token"]')?.content || adminCsrfToken;
+
+        function persistAdminSeenUserGlobalId() {
+            try {
+                localStorage.setItem(adminSeenUserGlobalKey, String(adminSeenUserGlobalId || 0));
+            } catch (_) {
+                // ignore storage errors
+            }
+        }
+
+        function persistAdminReadUserByReqMap() {
+            try {
+                localStorage.setItem(adminReadUserByReqKey, JSON.stringify(adminReadUserByReqMap));
+            } catch (_) {
+                // ignore storage errors
+            }
+        }
+
+        function setAdminRequestReadUpto(requestId, messageId) {
+            const rid = String(Number(requestId || 0));
+            const mid = Number(messageId || 0);
+            if (!rid || !mid) return;
+            adminReadUserByReqMap[rid] = Math.max(Number(adminReadUserByReqMap[rid] || 0), mid);
+            persistAdminReadUserByReqMap();
+        }
+
+        function getAdminUnreadStats() {
+            let totalUnreadRequests = 0;
+            let firstUnreadRequestId = 0;
+            let firstUnreadTitle = '';
+
+            (adminUnreadSummarySnapshot || []).forEach((s) => {
+                const rid = Number(s.request_id || 0);
+                if (!rid) return;
+                const maxUserMsgId = Number(s.max_user_msg_id || 0);
+                const readUpto = Number(adminReadUserByReqMap[String(rid)] || 0);
+                if (maxUserMsgId > readUpto) {
+                    totalUnreadRequests += 1;
+                    if (!firstUnreadRequestId) {
+                        firstUnreadRequestId = rid;
+                        firstUnreadTitle = s.title || '';
+                    }
+                }
+            });
+
+            return { totalUnreadRequests, firstUnreadRequestId, firstUnreadTitle };
+        }
+
+        function updateAdminFloatingChatButton() {
+            const btn = document.getElementById('adminFloatingChatBtn');
+            const count = document.getElementById('adminFloatingChatCount');
+            if (!btn || !count) return;
+            const stats = getAdminUnreadStats();
+            count.textContent = stats.totalUnreadRequests > 0 ? String(stats.totalUnreadRequests) : '';
+            btn.classList.toggle('has-unread', stats.totalUnreadRequests > 0);
+        }
+
+        function openAdminFloatingChat() {
+            const stats = getAdminUnreadStats();
+            const targetId = stats.firstUnreadRequestId;
+            if (!targetId) return;  // no unread — button should be hidden anyway
+            const rowBtn = document.querySelector('[data-admin-chat-request-id="' + targetId + '"]');
+            const title = rowBtn ? (rowBtn.getAttribute('data-admin-chat-title') || stats.firstUnreadTitle || '') : (stats.firstUnreadTitle || '');
+            openGaChat(targetId, title);
+        }
+
+        function applyAdminUnreadBadges(summaries) {
+            const sourceSummaries = Array.isArray(summaries) ? summaries : adminUnreadSummarySnapshot;
+            const summaryMap = new Map();
+            (sourceSummaries || []).forEach((s) => {
+                const rid = Number(s.request_id || 0);
+                if (!rid) return;
+                summaryMap.set(rid, Number(s.max_user_msg_id || 0));
+            });
+
+            document.querySelectorAll('[data-admin-chat-request-id]').forEach((btn) => {
+                const rid = Number(btn.getAttribute('data-admin-chat-request-id') || 0);
+                const badge = btn.querySelector('[data-admin-chat-unread]');
+                if (!rid || !badge) return;
+                const maxUserMsgId = Number(summaryMap.get(rid) || 0);
+                const readUpto = Number(adminReadUserByReqMap[String(rid)] || 0);
+                if (maxUserMsgId > readUpto) {
+                    badge.textContent = 'ใหม่';
+                    badge.classList.remove('d-none');
+                    badge.classList.add('show');
+                } else {
+                    badge.classList.add('d-none');
+                    badge.classList.remove('show');
+                }
+            });
+
+            updateAdminFloatingChatButton();
+        }
+
+        function showAdminChatToast(requestId, title, count) {
+            let host = document.getElementById('adminChatNotifyContainer');
+            if (!host) {
+                host = document.createElement('div');
+                host.id = 'adminChatNotifyContainer';
+                host.className = 'admin-chat-notify-container';
+                document.body.appendChild(host);
+            }
+            const toast = document.createElement('div');
+            toast.className = 'admin-chat-notify-toast';
+            toast.innerHTML =
+                '<div class="title">มีข้อความใหม่จากผู้แจ้ง</div>' +
+                '<div class="body">GA-' + String(requestId).padStart(5, '0') + ' ' + _escHtml(title || '') + (count > 1 ? (' (+' + count + ')') : '') + '</div>';
+            toast.addEventListener('click', () => {
+                openGaChat(requestId, title || '');
+                toast.remove();
+            });
+            host.appendChild(toast);
+            setTimeout(() => {
+                toast.remove();
+                if (host && !host.children.length) host.remove();
+            }, 5000);
+        }
+
+        let _adminNotifyScanInFlight = false;
+        function scanAdminChatNotifications(silentInit = false) {
+            if (_adminNotifyScanInFlight) return;
+            _adminNotifyScanInFlight = true;
+            nativeFetch('/admin/ga_chat_notifications?since_id=' + encodeURIComponent(String(adminSeenUserGlobalId || 0)))
+                .then(checkAuth)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) return;
+
+                    if (Number(data.max_visible_id || 0) < adminSeenUserGlobalId) {
+                        adminSeenUserGlobalId = Number(data.max_visible_id || 0);
+                        persistAdminSeenUserGlobalId();
+                    }
+
+                    if (Array.isArray(data.summaries)) {
+                        adminUnreadSummarySnapshot = data.summaries;
+                        applyAdminUnreadBadges(data.summaries);
+                    }
+
+                    if (silentInit) {
+                        const serverMax = Number(data.max_visible_id || 0);
+                        if (serverMax > adminSeenUserGlobalId) {
+                            adminSeenUserGlobalId = serverMax;
+                            persistAdminSeenUserGlobalId();
+                        }
+                        return;
+                    }
+
+                    if (!Array.isArray(data.items) || !data.items.length) return;
+
+                    let maxId = adminSeenUserGlobalId;
+                    const grouped = new Map();
+
+                    data.items.forEach((item) => {
+                        const mid = Number(item.id || 0);
+                        if (mid > maxId) maxId = mid;
+                        const rid = Number(item.request_id || 0);
+                        if (!rid) return;
+                        if (!grouped.has(rid)) {
+                            grouped.set(rid, {
+                                requestId: rid,
+                                title: item.title || '',
+                                count: 0,
+                            });
+                        }
+                        grouped.get(rid).count += 1;
+                    });
+
+                    adminSeenUserGlobalId = maxId;
+                    persistAdminSeenUserGlobalId();
+
+                    grouped.forEach((info) => {
+                        const isCurrentOpen = gaChatRequestId === info.requestId && !!gaChatPollTimer;
+                        if (!isCurrentOpen) {
+                            showAdminChatToast(info.requestId, info.title, info.count);
+                        }
+                    });
+                })
+                .catch(() => {
+                    // ignore polling errors
+                })
+                .finally(() => { _adminNotifyScanInFlight = false; });
+        }
+
+        function startAdminChatNotifier(silentInit = true) {
+            if (adminChatNotifyStarted) return;
+            adminChatNotifyStarted = true;
+            scanAdminChatNotifications(silentInit);
+            clearInterval(adminChatNotifyTimer);
+            adminChatNotifyTimer = setInterval(() => scanAdminChatNotifications(false), 15000);
+        }
+
+        function openGaChat(requestId, title) {
+            gaChatRequestId = requestId;
+            gaChatLastId = 0;
+            suppressGlobalLoading = true;
+            hideGlobalLoading(true);
+            clearStaleModalBackdrop();
+            document.getElementById('gaChatTitle').textContent = 'GA-' + String(requestId).padStart(5, '0') + ' · ' + title;
+            document.getElementById('gaChatBox').innerHTML = '<div class="text-center text-muted py-4 small"><i class="fas fa-spinner fa-spin me-1"></i>กำลังโหลด...</div>';
+            document.getElementById('gaChatInput').value = '';
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('gaChatModal')).show();
+            _loadGaChat();
+            clearInterval(gaChatPollTimer);
+            gaChatPollTimer = setInterval(_loadGaChat, 5000);
+            document.getElementById('gaChatModal').addEventListener('hidden.bs.modal', () => {
+                clearInterval(gaChatPollTimer);
+                gaChatPollTimer = null;
+                suppressGlobalLoading = false;
+                hideGlobalLoading(true);
+                clearStaleModalBackdrop();
+            }, { once: true });
+        }
+
+        let _gaChatLoading = false;
+        function _loadGaChat() {
+            if (!gaChatRequestId || _gaChatLoading) return;
+            _gaChatLoading = true;
+            nativeFetch('/admin/ga_request/' + gaChatRequestId + '/chat?since_id=' + gaChatLastId)
+                .then(checkAuth).then(r => r.json()).then(data => {
+                    const box = document.getElementById('gaChatBox');
+                    if (!data.success) {
+                        if (gaChatLastId === 0 && box) {
+                            box.innerHTML = '<div class="text-center text-danger py-4 small">โหลดข้อความไม่สำเร็จ</div>';
+                        }
+                        return;
+                    }
+                    if (!data.messages.length) {
+                        if (gaChatLastId === 0 && box) {
+                            box.innerHTML = '<div class="text-center text-muted py-4 small">ยังไม่มีข้อความ เริ่มคุยได้เลย</div>';
+                        }
+                        return;
+                    }
+                    if (gaChatLastId === 0) box.innerHTML = '';
+                    data.messages.forEach(msg => {
+                        gaChatLastId = Math.max(gaChatLastId, msg.id);
+                        if (msg.sender_type === 'user') {
+                            adminSeenUserGlobalId = Math.max(adminSeenUserGlobalId, Number(msg.id || 0));
+                            setAdminRequestReadUpto(gaChatRequestId, Number(msg.id || 0));
+                        }
+                        const isAdmin = msg.sender_type === 'admin';
+                        const div = document.createElement('div');
+                        div.className = 'ga-chat-row ' + (isAdmin ? 'self' : 'other');
+                        div.innerHTML = (
+                            '<div class="ga-chat-bubble ' + (isAdmin ? 'admin' : 'user') + '">' +
+                            '<div class="ga-chat-sender">' + _escHtml(msg.sender_name) + '</div>' +
+                            '<div class="ga-chat-message">' + _escHtml(msg.message) + '</div>' +
+                            '<div class="ga-chat-time">' + _escHtml(msg.created_at) + '</div>' +
+                            '</div>'
+                        );
+                        box.appendChild(div);
+                    });
+                    persistAdminSeenUserGlobalId();
+                    applyAdminUnreadBadges();
+                    box.scrollTop = box.scrollHeight;
+                })
+                .catch(() => {
+                    const box = document.getElementById('gaChatBox');
+                    if (gaChatLastId === 0 && box) {
+                        box.innerHTML = '<div class="text-center text-danger py-4 small">โหลดข้อความไม่สำเร็จ</div>';
+                    }
+                })
+                .finally(() => { _gaChatLoading = false; });
+        }
+
+        let _gaChatSending = false;
+        function sendGaChat() {
+            if (!gaChatRequestId || _gaChatSending) return;
+            const input = document.getElementById('gaChatInput');
+            const sendBtn = document.querySelector('#gaChatModal .btn-primary');
+            const message = input.value.trim();
+            if (!message) return;
+            _gaChatSending = true;
+            if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+            const fd = new FormData();
+            fd.append('message', message);
+            fd.append('csrf_token', adminCsrfToken);
+            nativeFetch('/admin/ga_request/' + gaChatRequestId + '/chat', {
+                method: 'POST', body: fd, headers: { 'X-CSRF-Token': adminCsrfToken }
+            }).then(checkAuth).then(r => r.json()).then(data => {
+                if (data.success) { input.value = ''; _loadGaChat(); }
+                else Swal.fire('ผิดพลาด', data.message || 'ส่งไม่สำเร็จ', 'error');
+            })
+            .catch(() => Swal.fire('ผิดพลาด', 'ส่งไม่สำเร็จ กรุณาลองใหม่', 'error'))
+            .finally(() => {
+                _gaChatSending = false;
+                if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i>'; }
+            });
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey && document.activeElement?.id === 'gaChatInput') {
+                e.preventDefault(); sendGaChat();
+            }
+        });
+
+        function _escHtml(t) {
+            return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+        // ===== End GA Chat =====
+
+        // Fallback notifier bootstrap in case DOMContentLoaded flow breaks before initialization.
+        setTimeout(() => startAdminChatNotifier(true), 1200);
+        let _focusDebounceTimer = null;
+        window.addEventListener('focus', () => {
+            clearTimeout(_focusDebounceTimer);
+            _focusDebounceTimer = setTimeout(() => scanAdminChatNotifications(false), 2000);
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                clearTimeout(_focusDebounceTimer);
+                _focusDebounceTimer = setTimeout(() => scanAdminChatNotifications(false), 2000);
+            }
+        });
 
         // ===== GA Request AJAX Filter =====
         let currentGaLoc = '{{ ga_selected_loc }}';
@@ -4902,6 +5434,7 @@
                         const hasEmpty = tbody && tbody.querySelector('td[colspan]');
                         countEl.textContent = hasEmpty ? '' : (rows.length + ' รายการ');
                     }
+                    scanAdminChatNotifications(true);
                 }).catch(() => {
                     if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-danger">โหลดข้อมูลไม่สำเร็จ</td></tr>';
                 });

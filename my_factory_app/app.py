@@ -110,7 +110,7 @@ SENSITIVE_POST_ENDPOINTS = {
     'write_off_ajax', 'unlock_user_ajax', 'unlock_user', 'add_user_ajax', 'delete_user',
     'update_user_ajax', 'save_alert_time', 'daily_alert', 'reset_lock',
     'email_settings', 'email_settings_test',
-    'ga_request_portal', 'update_ga_request'
+    'ga_request_portal', 'update_ga_request', 'admin_ga_chat', 'user_ga_chat', 'ga_chat_presence'
 }
 NO_CACHE_HEADERS = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -121,6 +121,48 @@ MAX_LOGIN_ATTEMPTS = int(os.environ.get('MAX_LOGIN_ATTEMPTS', '5'))
 LOGIN_BLOCK_MINUTES = int(os.environ.get('LOGIN_BLOCK_MINUTES', '5'))
 FAILED_LOGIN_ATTEMPTS = {}
 ACTIVITY_WRITE_THROTTLE = {}
+GA_CHAT_PRESENCE_SECONDS = int(os.environ.get('GA_CHAT_PRESENCE_SECONDS', '90'))
+GA_CHAT_PRESENCE_CLEANUP_SECONDS = int(os.environ.get('GA_CHAT_PRESENCE_CLEANUP_SECONDS', '900'))
+GA_CHAT_USER_PRESENCE = {}
+GA_CHAT_USER_PRESENCE_LOCK = threading.Lock()
+
+
+def _cleanup_ga_chat_presence(now_ts):
+    cutoff = now_ts - GA_CHAT_PRESENCE_CLEANUP_SECONDS
+    stale_keys = [k for k, ts in GA_CHAT_USER_PRESENCE.items() if ts < cutoff]
+    for key in stale_keys:
+        GA_CHAT_USER_PRESENCE.pop(key, None)
+
+
+def mark_ga_chat_presence(emp_id, request_id):
+    now_ts = time.time()
+    key = (str(emp_id or '').strip(), int(request_id or 0))
+    if not key[0] or key[1] <= 0:
+        return
+    with GA_CHAT_USER_PRESENCE_LOCK:
+        GA_CHAT_USER_PRESENCE[key] = now_ts
+        if len(GA_CHAT_USER_PRESENCE) > 300:
+            _cleanup_ga_chat_presence(now_ts)
+
+
+def clear_ga_chat_presence(emp_id, request_id):
+    key = (str(emp_id or '').strip(), int(request_id or 0))
+    if not key[0] or key[1] <= 0:
+        return
+    with GA_CHAT_USER_PRESENCE_LOCK:
+        GA_CHAT_USER_PRESENCE.pop(key, None)
+
+
+def is_user_actively_viewing_ga_chat(emp_id, request_id):
+    now_ts = time.time()
+    key = (str(emp_id or '').strip(), int(request_id or 0))
+    if not key[0] or key[1] <= 0:
+        return False
+    with GA_CHAT_USER_PRESENCE_LOCK:
+        last_seen = float(GA_CHAT_USER_PRESENCE.get(key, 0))
+        if len(GA_CHAT_USER_PRESENCE) > 300:
+            _cleanup_ga_chat_presence(now_ts)
+    return (now_ts - last_seen) <= GA_CHAT_PRESENCE_SECONDS
 
 def utc_now_naive():
     """UTC time แบบ naive เพื่อเข้ากับข้อมูลเดิมในระบบ rate-limit."""
@@ -4633,6 +4675,387 @@ def stock_audit():
                           selected_month_name=monthly_payload['month_name'],
                           active_day_count=active_day_count)
 
+# ─── GA Request Chat ──────────────────────────────────────────────────────────
+
+def _build_ga_chat_json(rows):
+    """Convert ga_request_messages rows → JSON-serialisable list."""
+    result = []
+    tz = pytz.timezone(THAILAND_TZ)
+    for r in rows:
+        created_ts = r['created_at'] or ''
+        try:
+            dt_obj = datetime.strptime(created_ts, '%Y-%m-%d %H:%M:%S')
+            # created_at is persisted in Thailand local time; localize directly to avoid +7h shift.
+            display = tz.localize(dt_obj).strftime('%d/%m/%Y %H:%M')
+        except Exception:
+            display = created_ts
+        result.append({
+            'id': r['id'],
+            'sender_type': r['sender_type'],
+            'sender_name': r['sender_name'],
+            'message': r['message'],
+            'created_at': display,
+        })
+    return result
+
+
+@app.route('/ga/chat_presence', methods=['POST'])
+def ga_chat_presence():
+    emp_id = (request.form.get('emp_id') or '').strip()
+    if not is_valid_user_session(emp_id):
+        return jsonify({'success': False, 'message': 'กรุณาเข้าสู่ระบบใหม่'}), 401
+
+    request_id = request.form.get('request_id', type=int)
+    if not request_id or request_id <= 0:
+        return jsonify({'success': False, 'message': 'request_id ไม่ถูกต้อง'}), 400
+
+    is_open = str(request.form.get('is_open', '1')).strip().lower() not in {'0', 'false', 'no'}
+    if is_open:
+        mark_ga_chat_presence(emp_id, request_id)
+    else:
+        clear_ga_chat_presence(emp_id, request_id)
+
+    return jsonify({'success': True})
+
+
+@app.route('/admin/ga_request/<int:request_id>/chat', methods=['GET', 'POST'])
+def admin_ga_chat(request_id):
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    conn = get_db_connection()
+    ga_req = conn.execute('SELECT id, emp_id, title FROM ga_requests WHERE id = ?', (request_id,)).fetchone()
+    if not ga_req:
+        conn.close()
+        return jsonify({'success': False, 'message': 'ไม่พบคำร้อง'}), 404
+
+    if request.method == 'POST':
+        message = clean_multiline_text(request.form.get('message', ''), 1000).strip()
+        if not message:
+            conn.close()
+            return jsonify({'success': False, 'message': 'กรุณาพิมพ์ข้อความ'}), 400
+        sender_name = session.get('admin_name') or session.get('admin_username') or 'Admin'
+        created_at = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
+        conn.execute(
+            'INSERT INTO ga_request_messages (request_id, sender_type, sender_name, message, created_at) VALUES (?, ?, ?, ?, ?)',
+            (request_id, 'admin', clean_input_text(sender_name, 120), message, created_at)
+        )
+        conn.commit()
+
+        # notify requester via email (non-blocking best-effort)
+        requester_email = normalize_email_value(ga_req['requester_email_snapshot'] if 'requester_email_snapshot' in ga_req.keys() else '')
+        if not requester_email:
+            u = conn.execute('SELECT email FROM users WHERE emp_id = ?', (ga_req['emp_id'],)).fetchone()
+            requester_email = normalize_email_value(u['email']) if u and u['email'] else ''
+        conn.close()
+        user_is_viewing_chat = is_user_actively_viewing_ga_chat(ga_req['emp_id'], request_id)
+        app.logger.info(
+            "GA chat admin reply request_id=%s emp_id=%s presence_active=%s",
+            request_id,
+            str(ga_req['emp_id']).strip(),
+            bool(user_is_viewing_chat),
+        )
+        if requester_email and is_valid_email_address(requester_email) and not user_is_viewing_chat:
+            _req_no   = f'GA-{request_id:05d}'
+            _title_e  = escape(str(ga_req['title']))
+            _name_e   = escape(sender_name)
+            _msg_e    = escape(message).replace('\n', '<br>')
+            _link     = build_email_link('ga_request_portal', emp_id=str(ga_req['emp_id']))
+            _html_body = f'''<!DOCTYPE html>
+<html lang="th">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f0f4f8;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:32px 0;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:linear-gradient(135deg,#0b5ccb,#1a84e8);border-radius:12px 12px 0 0;padding:28px 32px;text-align:center;">
+            <div style="font-size:22px;font-weight:700;color:#fff;letter-spacing:.5px;">💬 ข้อความจากแอดมิน PCM</div>
+            <div style="margin-top:6px;font-size:13px;color:rgba(255,255,255,.75);">PCM Stock Management System</div>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="background:#fff;padding:28px 32px;">
+
+            <!-- Request badge -->
+            <table cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+              <tr>
+                <td style="background:#e8f1fb;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:600;color:#0b5ccb;">
+                  {_req_no}
+                </td>
+                <td style="padding-left:10px;font-size:14px;color:#243040;font-weight:600;">{_title_e}</td>
+              </tr>
+            </table>
+
+            <!-- Sender line -->
+            <p style="margin:0 0 12px;font-size:14px;color:#5a6a7a;">
+              ข้อความจาก <strong style="color:#0b1e38;">{_name_e}</strong>
+            </p>
+
+            <!-- Message bubble -->
+            <div style="background:#f4f8ff;border-left:4px solid #1a84e8;border-radius:0 10px 10px 0;
+                        padding:14px 18px;font-size:15px;line-height:1.65;color:#1c2d40;
+                        white-space:pre-wrap;word-break:break-word;">
+              {_msg_e}
+            </div>
+
+            <!-- CTA button -->
+            <div style="text-align:center;margin-top:28px;">
+              <a href="{_link}"
+                 style="display:inline-block;background:linear-gradient(135deg,#0b5ccb,#1a84e8);color:#fff;
+                        text-decoration:none;font-size:14px;font-weight:600;padding:12px 32px;
+                        border-radius:999px;letter-spacing:.3px;">
+                📋 เปิดหน้าคำร้องของฉัน
+              </a>
+            </div>
+
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#f7f9fc;border-radius:0 0 12px 12px;padding:16px 32px;
+                     text-align:center;font-size:11px;color:#8fa3b8;border-top:1px solid #e2eaf4;">
+            อีเมลนี้ส่งโดยอัตโนมัติจากระบบ PCM Stock &nbsp;·&nbsp; กรุณาอย่าตอบกลับอีเมลนี้โดยตรง
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>'''
+            send_email_message(
+                subject=f"[PCM] 💬 มีข้อความจากแอดมิน – {ga_req['title']} ({_req_no})",
+                body=f"ข้อความจาก {sender_name} เกี่ยวกับ {_req_no} {ga_req['title']}:\n\n{message}\n\nเปิดหน้าคำร้อง: {_link}",
+                html_body=_html_body,
+                recipients=[requester_email]
+            )
+            app.logger.info("GA chat email sent request_id=%s emp_id=%s", request_id, str(ga_req['emp_id']).strip())
+        elif user_is_viewing_chat:
+            app.logger.info("GA chat email skipped (user active in chat) request_id=%s emp_id=%s", request_id, str(ga_req['emp_id']).strip())
+        return jsonify({'success': True})
+    else:
+        since_id = request.args.get('since_id', 0, type=int)
+        rows = conn.execute(
+            'SELECT * FROM ga_request_messages WHERE request_id = ? AND id > ? ORDER BY id ASC LIMIT 200',
+            (request_id, since_id)
+        ).fetchall()
+        conn.close()
+        return jsonify({'success': True, 'messages': _build_ga_chat_json(rows)})
+
+
+@app.route('/admin/ga_chat_notifications')
+def admin_ga_chat_notifications():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    role = session.get('admin_role', 'superadmin')
+    since_id = request.args.get('since_id', 0, type=int)
+    if since_id < 0:
+        since_id = 0
+
+    role_filter = ''
+    if role == 'admin_pc1':
+        role_filter = " AND (g.location LIKE '%PC1%')"
+    elif role == 'admin_cc':
+        role_filter = " AND (g.location LIKE '%Coil Center%' OR g.location LIKE '%CC%')"
+
+    conn = get_db_connection()
+
+    max_visible_row = conn.execute(
+        f'''
+        SELECT COALESCE(MAX(m.id), 0) AS max_visible_id
+        FROM ga_request_messages m
+        JOIN ga_requests g ON g.id = m.request_id
+        WHERE m.sender_type = 'user'
+        {role_filter}
+        '''
+    ).fetchone()
+    max_visible_id = int(max_visible_row['max_visible_id']) if max_visible_row else 0
+    if since_id > max_visible_id:
+        since_id = 0
+    rows = conn.execute(
+        f'''
+        SELECT m.id, m.request_id, m.sender_name, m.message, m.created_at, g.title
+        FROM ga_request_messages m
+        JOIN ga_requests g ON g.id = m.request_id
+        WHERE m.sender_type = 'user'
+          AND m.id > ?
+          {role_filter}
+        ORDER BY m.id ASC
+        LIMIT 200
+        ''',
+        (since_id,)
+    ).fetchall()
+
+    summary_rows = conn.execute(
+        f'''
+        SELECT g.id AS request_id,
+               g.title AS title,
+               COALESCE(MAX(m.id), 0) AS max_user_msg_id
+        FROM ga_requests g
+        LEFT JOIN ga_request_messages m
+          ON m.request_id = g.id
+         AND m.sender_type = 'user'
+        WHERE 1=1
+          {role_filter}
+        GROUP BY g.id, g.title
+        ORDER BY g.id DESC
+        LIMIT 400
+        '''
+    ).fetchall()
+    conn.close()
+
+    items = []
+    for row in rows:
+        items.append({
+            'id': row['id'],
+            'request_id': row['request_id'],
+            'title': row['title'] or '',
+            'sender_name': row['sender_name'] or '',
+            'message': row['message'] or '',
+            'created_at': row['created_at'] or '',
+        })
+
+    summaries = []
+    for row in summary_rows:
+        summaries.append({
+            'request_id': int(row['request_id']),
+            'title': row['title'] or '',
+            'max_user_msg_id': int(row['max_user_msg_id'] or 0),
+        })
+
+    return jsonify({'success': True, 'items': items, 'summaries': summaries, 'max_visible_id': max_visible_id})
+
+
+@app.route('/ga/request/<int:request_id>/chat', methods=['GET', 'POST'])
+def user_ga_chat(request_id):
+    emp_id = (request.args.get('emp_id') or request.form.get('emp_id') or '').strip()
+    if not is_valid_user_session(emp_id):
+        return jsonify({'success': False, 'message': 'กรุณาเข้าสู่ระบบใหม่'}), 401
+
+    conn = get_db_connection()
+    ga_req = conn.execute(
+        'SELECT id, emp_id, title FROM ga_requests WHERE id = ? AND emp_id = ?', (request_id, emp_id)
+    ).fetchone()
+    if not ga_req:
+        conn.close()
+        return jsonify({'success': False, 'message': 'ไม่พบคำร้อง'}), 404
+
+    if request.method == 'POST':
+        mark_ga_chat_presence(emp_id, request_id)
+        message = clean_multiline_text(request.form.get('message', ''), 1000).strip()
+        if not message:
+            conn.close()
+            return jsonify({'success': False, 'message': 'กรุณาพิมพ์ข้อความ'}), 400
+        user_row = conn.execute('SELECT name FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
+        sender_name = user_row['name'] if user_row else emp_id
+        created_at = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
+        conn.execute(
+            'INSERT INTO ga_request_messages (request_id, sender_type, sender_name, message, created_at) VALUES (?, ?, ?, ?, ?)',
+            (request_id, 'user', clean_input_text(sender_name, 120), message, created_at)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    else:
+        mark_ga_chat_presence(emp_id, request_id)
+        since_id = request.args.get('since_id', 0, type=int)
+        rows = conn.execute(
+            'SELECT * FROM ga_request_messages WHERE request_id = ? AND id > ? ORDER BY id ASC LIMIT 200',
+            (request_id, since_id)
+        ).fetchall()
+        conn.close()
+        return jsonify({'success': True, 'messages': _build_ga_chat_json(rows)})
+
+
+@app.route('/ga/chat_notifications')
+def ga_chat_notifications():
+    emp_id = (request.args.get('emp_id') or '').strip()
+    if not is_valid_user_session(emp_id):
+        return jsonify({'success': False, 'message': 'กรุณาเข้าสู่ระบบใหม่'}), 401
+
+    since_id = request.args.get('since_id', 0, type=int)
+    if since_id < 0:
+        since_id = 0
+
+    conn = get_db_connection()
+
+    max_visible_row = conn.execute(
+        '''
+        SELECT COALESCE(MAX(m.id), 0) AS max_visible_id
+        FROM ga_request_messages m
+        JOIN ga_requests g ON g.id = m.request_id
+        WHERE m.sender_type = 'admin'
+          AND g.emp_id = ?
+        ''',
+        (emp_id,)
+    ).fetchone()
+    max_visible_id = int(max_visible_row['max_visible_id']) if max_visible_row else 0
+    if since_id > max_visible_id:
+        since_id = 0
+
+    rows = conn.execute(
+        '''
+        SELECT m.id, m.request_id, m.sender_name, m.message, m.created_at, g.title
+        FROM ga_request_messages m
+        JOIN ga_requests g ON g.id = m.request_id
+        WHERE m.sender_type = 'admin'
+          AND g.emp_id = ?
+          AND m.id > ?
+        ORDER BY m.id ASC
+        LIMIT 200
+        ''',
+        (emp_id, since_id)
+    ).fetchall()
+
+    summary_rows = conn.execute(
+        '''
+        SELECT g.id AS request_id,
+               g.title AS title,
+               COALESCE(MAX(m.id), 0) AS max_admin_msg_id
+        FROM ga_requests g
+        LEFT JOIN ga_request_messages m
+          ON m.request_id = g.id
+         AND m.sender_type = 'admin'
+        WHERE g.emp_id = ?
+        GROUP BY g.id, g.title
+        ORDER BY g.id DESC
+        LIMIT 300
+        ''',
+        (emp_id,)
+    ).fetchall()
+
+    conn.close()
+
+    items = []
+    for row in rows:
+        items.append({
+            'id': row['id'],
+            'request_id': row['request_id'],
+            'title': row['title'] or '',
+            'sender_name': row['sender_name'] or '',
+            'message': row['message'] or '',
+            'created_at': row['created_at'] or '',
+        })
+
+    summaries = []
+    for row in summary_rows:
+        summaries.append({
+            'request_id': int(row['request_id']),
+            'title': row['title'] or '',
+            'max_admin_msg_id': int(row['max_admin_msg_id'] or 0),
+        })
+
+    return jsonify({'success': True, 'items': items, 'summaries': summaries, 'max_visible_id': max_visible_id})
+
+# ─── End GA Request Chat ──────────────────────────────────────────────────────
+
 @app.route('/admin/filter_ga_requests')
 def filter_ga_requests():
     if not session.get('admin_logged_in'):
@@ -4780,6 +5203,7 @@ def filter_ga_requests():
                 f'<td class="ps-4 small text-muted text-nowrap">{created_display}</td>'
                 f'<td>'
                 f'<div class="fw-medium text-dark">{req_name}</div>'
+                f'<div class="small mt-1"><span class="badge bg-light text-dark border">{escape(req_no)}</span></div>'
                 f'<div class="small text-muted">{emp_id_e} | {dept_e}</div>'
                 f'<div class="small text-muted">{loc_e}</div>'
                 f'<div class="small text-muted">{email_e}</div>'
@@ -4806,6 +5230,13 @@ def filter_ga_requests():
                 f' placeholder="หมายเหตุสำหรับผู้แจ้ง...">{admin_note_e}</textarea></div>'
                 f'<button type="submit" class="btn btn-sm btn-dark rounded-pill w-100">บันทึกสถานะ</button>'
                 f'</form>'
+                f'<button class="btn btn-sm btn-outline-primary rounded-pill w-100 mt-2"'
+                f' data-admin-chat-request-id="{req_id}"'
+                f' data-admin-chat-title="{title_e}"'
+                f' onclick="openGaChat({req_id}, \'{title_e}\')">'
+                f'<i class="fas fa-comments me-1"></i>แชท'
+                f'<span class="admin-chat-unread-badge d-none" data-admin-chat-unread>ใหม่</span>'
+                f'</button>'
                 f'</td>'
                 f'</tr>'
             )
