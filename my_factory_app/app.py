@@ -110,7 +110,8 @@ SENSITIVE_POST_ENDPOINTS = {
     'write_off_ajax', 'unlock_user_ajax', 'unlock_user', 'add_user_ajax', 'delete_user',
     'update_user_ajax', 'save_alert_time', 'daily_alert', 'reset_lock',
     'email_settings', 'email_settings_test',
-    'ga_request_portal', 'update_ga_request', 'admin_ga_chat', 'user_ga_chat', 'ga_chat_presence'
+    'ga_request_portal', 'update_ga_request', 'delete_ga_request', 'admin_ga_chat', 'user_ga_chat', 'ga_chat_presence',
+    'support_chat_send', 'support_chat_presence', 'admin_support_chat_reply'
 }
 NO_CACHE_HEADERS = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -125,6 +126,10 @@ GA_CHAT_PRESENCE_SECONDS = int(os.environ.get('GA_CHAT_PRESENCE_SECONDS', '90'))
 GA_CHAT_PRESENCE_CLEANUP_SECONDS = int(os.environ.get('GA_CHAT_PRESENCE_CLEANUP_SECONDS', '900'))
 GA_CHAT_USER_PRESENCE = {}
 GA_CHAT_USER_PRESENCE_LOCK = threading.Lock()
+
+SUPPORT_PRESENCE_SECONDS = int(os.environ.get('SUPPORT_PRESENCE_SECONDS', '90'))
+SUPPORT_CHAT_PRESENCE = {}
+SUPPORT_CHAT_PRESENCE_LOCK = threading.Lock()
 
 
 def _cleanup_ga_chat_presence(now_ts):
@@ -163,6 +168,32 @@ def is_user_actively_viewing_ga_chat(emp_id, request_id):
         if len(GA_CHAT_USER_PRESENCE) > 300:
             _cleanup_ga_chat_presence(now_ts)
     return (now_ts - last_seen) <= GA_CHAT_PRESENCE_SECONDS
+
+
+def mark_support_presence(emp_id):
+    now_ts = time.time()
+    emp_id = str(emp_id or '').strip()
+    if not emp_id:
+        return
+    with SUPPORT_CHAT_PRESENCE_LOCK:
+        SUPPORT_CHAT_PRESENCE[emp_id] = now_ts
+
+
+def clear_support_presence(emp_id):
+    emp_id = str(emp_id or '').strip()
+    with SUPPORT_CHAT_PRESENCE_LOCK:
+        SUPPORT_CHAT_PRESENCE.pop(emp_id, None)
+
+
+def is_user_actively_viewing_support(emp_id):
+    now_ts = time.time()
+    emp_id = str(emp_id or '').strip()
+    if not emp_id:
+        return False
+    with SUPPORT_CHAT_PRESENCE_LOCK:
+        last_seen = float(SUPPORT_CHAT_PRESENCE.get(emp_id, 0))
+    return (now_ts - last_seen) <= SUPPORT_PRESENCE_SECONDS
+
 
 def utc_now_naive():
     """UTC time แบบ naive เพื่อเข้ากับข้อมูลเดิมในระบบ rate-limit."""
@@ -884,7 +915,42 @@ def ensure_application_schema():
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_ga_msg_request ON ga_request_messages(request_id, created_at)')
 
-        # 📬 Notification Settings Table
+        # � Support Chat Table (แจ้งปัญหาการใช้งาน)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS support_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                emp_id TEXT NOT NULL,
+                emp_name TEXT NOT NULL,
+                sender_type TEXT NOT NULL,
+                sender_name TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                read_by_admin INTEGER DEFAULT 0,
+                read_by_user INTEGER DEFAULT 0
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_support_msg_emp ON support_messages(emp_id, created_at)')
+        
+        # Ensure read flags exist on legacy instances (migration step)
+        try:
+            sup_columns = {row[1] for row in conn.execute("PRAGMA table_info(support_messages)").fetchall()}
+            if sup_columns and 'read_by_admin' not in sup_columns:
+                conn.execute("ALTER TABLE support_messages ADD COLUMN read_by_admin INTEGER DEFAULT 0")
+                sup_columns.add('read_by_admin')
+            if sup_columns and 'read_by_user' not in sup_columns:
+                conn.execute("ALTER TABLE support_messages ADD COLUMN read_by_user INTEGER DEFAULT 0")
+                sup_columns.add('read_by_user')
+        except sqlite3.OperationalError:
+            pass  # Table doesn't exist yet, will be created by CREATE TABLE IF NOT EXISTS above
+        
+        # legacy-safe: normalize NULL flags to 0 so unread counters work reliably
+        try:
+            conn.execute('UPDATE support_messages SET read_by_admin = 0 WHERE read_by_admin IS NULL')
+            conn.execute('UPDATE support_messages SET read_by_user = 0 WHERE read_by_user IS NULL')
+        except sqlite3.OperationalError:
+            pass  # Table might not have data yet
+
+        # �📬 Notification Settings Table
         conn.execute('''
             CREATE TABLE IF NOT EXISTS notification_settings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4341,7 +4407,7 @@ def admin_dashboard(module):
     
     role = session.get('admin_role', 'superadmin')
     admin_module = (module or 'stock').strip().lower()
-    if admin_module not in ('stock', 'ga', 'vehicle'):
+    if admin_module not in ('stock', 'ga', 'vehicle', 'support'):
         admin_module = 'stock'
     
     # --- Filter ตาม Role และการเลือกสถานที่ (คงเดิม) ---
@@ -5131,6 +5197,7 @@ def filter_ga_requests():
         'IT': 'bg-info-subtle text-info',
         'SAFETY': 'bg-warning-subtle text-warning',
     }
+    can_delete = role == 'superadmin'
     csrf_tok = escape(generate_csrf_token())
     ga_selected_loc_safe = escape(ga_loc)
 
@@ -5197,6 +5264,11 @@ def filter_ga_requests():
                 f'<option value="{escape(s)}" {"selected" if s == status else ""}>{escape(s)}</option>'
                 for s in GA_REQUEST_STATUS_OPTIONS
             )
+            delete_btn = (
+                f'<button type="button" class="btn btn-sm btn-outline-danger rounded-pill w-100 mt-2"'
+                f' onclick="deleteGaRequestAjax({req_id}, this)">'
+                f'<i class="fas fa-trash-alt me-1"></i>ลบคำร้อง</button>'
+            ) if can_delete else ''
 
             parts.append(
                 f'<tr>'
@@ -5237,6 +5309,7 @@ def filter_ga_requests():
                 f'<i class="fas fa-comments me-1"></i>แชท'
                 f'<span class="admin-chat-unread-badge d-none" data-admin-chat-unread>ใหม่</span>'
                 f'</button>'
+                f'{delete_btn}'
                 f'</td>'
                 f'</tr>'
             )
@@ -5318,6 +5391,370 @@ def update_ga_request(request_id):
     conn.close()
     flash('✅ อัปเดตสถานะ GA Request เรียบร้อยแล้ว', 'success')
     return redirect(url_for('admin_dashboard', module='ga', ga_loc=ga_loc))
+
+
+@app.route('/admin/delete_ga_request/<int:request_id>', methods=['POST'])
+def delete_ga_request(request_id):
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.form.get('ajax') == '1'
+
+    if not session.get('admin_logged_in'):
+        if is_ajax:
+            return jsonify({'success': False, 'message': 'กรุณาเข้าสู่ระบบผู้ดูแลก่อน'}), 401
+        flash('❌ กรุณาเข้าสู่ระบบผู้ดูแลก่อน', 'danger')
+        return redirect(url_for('index'))
+
+    role = session.get('admin_role', 'superadmin')
+    ga_loc = clean_input_text(request.form.get('ga_loc'), 10)
+    if role != 'superadmin':
+        if is_ajax:
+            return jsonify({'success': False, 'message': 'เฉพาะ Super Admin เท่านั้นที่สามารถลบคำร้องได้'}), 403
+        flash('❌ เฉพาะ Super Admin เท่านั้นที่สามารถลบคำร้องได้', 'danger')
+        return redirect(url_for('admin_dashboard', module='ga', ga_loc=ga_loc))
+
+    conn = get_db_connection()
+    ga_request = conn.execute(
+        'SELECT id, title, image_path FROM ga_requests WHERE id = ?',
+        (request_id,)
+    ).fetchone()
+    if not ga_request:
+        conn.close()
+        if is_ajax:
+            return jsonify({'success': False, 'message': 'ไม่พบคำร้องที่เลือก'}), 404
+        flash('❌ ไม่พบคำร้องที่เลือก', 'danger')
+        return redirect(url_for('admin_dashboard', module='ga', ga_loc=ga_loc))
+
+    image_path = str(ga_request['image_path'] or '').strip()
+    abs_image_path = resolve_ga_attachment_absolute_path(image_path) if image_path else None
+
+    try:
+        conn.execute('DELETE FROM ga_request_messages WHERE request_id = ?', (request_id,))
+        conn.execute('DELETE FROM ga_request_attachments WHERE request_id = ?', (request_id,))
+        conn.execute('DELETE FROM ga_requests WHERE id = ?', (request_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    if abs_image_path and os.path.exists(abs_image_path):
+        try:
+            os.remove(abs_image_path)
+        except OSError:
+            pass
+
+    if is_ajax:
+        count_sql = "SELECT COUNT(*) FROM ga_requests WHERE status = 'Pending'"
+        count_params = []
+        if ga_loc == 'PC1':
+            count_sql += " AND location LIKE '%PC1%'"
+        elif ga_loc == 'CC':
+            count_sql += " AND (location LIKE '%Coil Center%' OR location LIKE '%CC%')"
+
+        conn = get_db_connection()
+        try:
+            pending_count = conn.execute(count_sql, count_params).fetchone()[0]
+        finally:
+            conn.close()
+        return jsonify({'success': True, 'message': f'ลบคำร้อง GA-{request_id:05d} เรียบร้อยแล้ว', 'pending_count': pending_count})
+
+    flash(f'✅ ลบคำร้อง GA-{request_id:05d} เรียบร้อยแล้ว', 'success')
+    return redirect(url_for('admin_dashboard', module='ga', ga_loc=ga_loc))
+
+
+# ─────────────────────────────────────────────────────────
+#  💬  Support Chat (แจ้งปัญหาการใช้งาน)
+# ─────────────────────────────────────────────────────────
+
+def _build_support_messages_json(rows):
+    """Convert support_messages rows → JSON-serialisable list."""
+    tz = pytz.timezone('Asia/Bangkok')
+    out = []
+    for row in rows:
+        try:
+            naive = datetime.strptime(str(row['created_at']).strip(), '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            naive = datetime.now()
+        local_dt = tz.localize(naive)
+        out.append({
+            'id': row['id'],
+            'sender_type': row['sender_type'],
+            'sender_name': row['sender_name'],
+            'message': row['message'],
+            'created_at': local_dt.strftime('%d/%m/%Y %H:%M'),
+        })
+    return out
+
+
+@app.route('/support/chat', methods=['GET'])
+def support_chat_get():
+    emp_id = session.get('user_id')
+    if not emp_id:
+        return jsonify({'error': 'unauthorized'}), 401
+    since_id = request.args.get('since_id', 0, type=int)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            'SELECT * FROM support_messages WHERE emp_id = ? AND id > ? ORDER BY id ASC LIMIT 200',
+            (emp_id, since_id)
+        ).fetchall()
+        if rows:
+            conn.execute(
+                "UPDATE support_messages SET read_by_user = 1 WHERE emp_id = ? AND sender_type = 'admin' AND COALESCE(read_by_user, 0) = 0",
+                (emp_id,)
+            )
+            conn.commit()
+    finally:
+        conn.close()
+    mark_support_presence(emp_id)
+    return jsonify({'messages': _build_support_messages_json(rows)})
+
+
+@app.route('/support/chat', methods=['POST'])
+def support_chat_send():
+    emp_id = session.get('user_id')
+    emp_name = session.get('user_name', '')
+    if not emp_id:
+        return jsonify({'error': 'unauthorized'}), 401
+    data = request.get_json(silent=True) or {}
+    message = str(data.get('message', '')).strip()
+    if not message or len(message) > 2000:
+        return jsonify({'error': 'invalid'}), 400
+    tz = pytz.timezone('Asia/Bangkok')
+    now_str = datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_db_connection()
+    try:
+        cur = conn.execute(
+            'INSERT INTO support_messages (emp_id, emp_name, sender_type, sender_name, message, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+            (emp_id, emp_name, 'user', emp_name, message, now_str)
+        )
+        inserted_id = int(cur.lastrowid or 0)
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({
+        'ok': True,
+        'message': {
+            'id': inserted_id,
+            'sender_type': 'user',
+            'sender_name': emp_name,
+            'message': message,
+            'created_at': datetime.strptime(now_str, '%Y-%m-%d %H:%M:%S').strftime('%d/%m/%Y %H:%M'),
+        }
+    })
+
+
+@app.route('/support/notifications', methods=['GET'])
+def support_notifications():
+    emp_id = session.get('user_id')
+    if not emp_id:
+        return jsonify({'error': 'unauthorized'}), 401
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt, MAX(id) as max_id FROM support_messages WHERE emp_id = ? AND sender_type = 'admin' AND COALESCE(read_by_user, 0) = 0",
+            (emp_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return jsonify({'unread': row['cnt'] if row else 0, 'max_id': row['max_id'] if row and row['max_id'] else 0})
+
+
+@app.route('/support/presence', methods=['POST'])
+def support_chat_presence():
+    emp_id = session.get('user_id')
+    if not emp_id:
+        return jsonify({'ok': False}), 401
+    data = request.get_json(silent=True) or {}
+    action = data.get('action', 'mark')
+    if action == 'clear':
+        clear_support_presence(emp_id)
+    else:
+        mark_support_presence(emp_id)
+    return jsonify({'ok': True})
+
+
+@app.route('/admin/support_inbox', methods=['GET'])
+def admin_support_inbox():
+    if not session.get('admin_logged_in'):
+        return jsonify({'error': 'unauthorized'}), 401
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('''
+            SELECT emp_id, emp_name,
+                   MAX(created_at) as last_at,
+                   SUM(CASE WHEN sender_type = 'user' AND COALESCE(read_by_admin, 0) = 0 THEN 1 ELSE 0 END) as unread_count,
+                   MAX(CASE WHEN sender_type = "user" THEN message ELSE NULL END) as last_user_msg
+            FROM support_messages
+            GROUP BY emp_id, emp_name
+            ORDER BY last_at DESC
+        ''').fetchall()
+    finally:
+        conn.close()
+    tz = pytz.timezone('Asia/Bangkok')
+    items = []
+    for row in rows:
+        try:
+            naive = datetime.strptime(str(row['last_at']).strip(), '%Y-%m-%d %H:%M:%S')
+            local_dt = tz.localize(naive)
+            time_str = local_dt.strftime('%d/%m/%Y %H:%M')
+        except Exception:
+            time_str = str(row['last_at'])
+        items.append({
+            'emp_id': row['emp_id'],
+            'emp_name': row['emp_name'],
+            'unread': int(row['unread_count'] or 0),
+            'last_time': time_str,
+            'last_msg': str(row['last_user_msg'] or '')[:80],
+        })
+    total_unread = sum(i['unread'] for i in items)
+    return jsonify({'conversations': items, 'total_unread': total_unread})
+
+
+@app.route('/admin/support_chat/<path:emp_id>', methods=['GET', 'POST'])
+def admin_support_chat_reply(emp_id):
+    if not session.get('admin_logged_in'):
+        return jsonify({'error': 'unauthorized'}), 401
+    admin_name = session.get('admin_name', 'Admin')
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        message = str(data.get('message', '')).strip()
+        if not message or len(message) > 2000:
+            return jsonify({'error': 'invalid'}), 400
+        conn = get_db_connection()
+        try:
+            row = conn.execute('SELECT emp_name FROM support_messages WHERE emp_id = ? LIMIT 1', (emp_id,)).fetchone()
+            emp_name = row['emp_name'] if row else emp_id
+            tz = pytz.timezone('Asia/Bangkok')
+            now_str = datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S')
+            conn.execute(
+                'INSERT INTO support_messages (emp_id, emp_name, sender_type, sender_name, message, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                (emp_id, emp_name, 'admin', admin_name, message, now_str)
+            )
+            conn.commit()
+            # send email if user not actively viewing
+            if not is_user_actively_viewing_support(emp_id):
+                try:
+                    conn2 = get_db_connection()
+                    user_row = conn2.execute('SELECT email FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
+                    conn2.close()
+                    if user_row and user_row['email']:
+                        html_body = f'''<div style="font-family:Mitr,sans-serif;max-width:520px;margin:auto;background:#f5f8ff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.10)">
+<div style="background:linear-gradient(135deg,#005fcc,#00a1c9);padding:22px 28px;color:#fff">
+  <div style="font-size:18px;font-weight:600">💬 มีข้อความตอบกลับจากทีม Support</div>
+  <div style="font-size:13px;opacity:.85;margin-top:4px">PCM Stock System</div>
+</div>
+<div style="padding:24px 28px">
+  <div style="background:#fff;border-radius:10px;padding:14px 18px;font-size:15px;color:#1f2d3d;border-left:4px solid #005fcc">{message}</div>
+  <div style="margin-top:16px;font-size:13px;color:#666">โดย: <strong>{admin_name}</strong></div>
+  <div style="margin-top:16px"><a href="#" style="display:inline-block;background:linear-gradient(135deg,#005fcc,#00a1c9);color:#fff;text-decoration:none;padding:10px 22px;border-radius:8px;font-size:14px">เปิดระบบเพื่อดูข้อความ</a></div>
+</div></div>'''
+                        send_email_message(
+                            subject='[PCM Stock] มีข้อความตอบกลับจากทีม Support',
+                            body=f'มีข้อความตอบกลับจากทีม Support: {message}',
+                            recipients=[user_row['email']],
+                            html_body=html_body
+                        )
+                except Exception:
+                    pass
+        finally:
+            conn.close()
+        return jsonify({'ok': True})
+
+    # GET
+    since_id = request.args.get('since_id', 0, type=int)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            'SELECT * FROM support_messages WHERE emp_id = ? AND id > ? ORDER BY id ASC LIMIT 200',
+            (emp_id, since_id)
+        ).fetchall()
+        if rows:
+            conn.execute(
+                "UPDATE support_messages SET read_by_admin = 1 WHERE emp_id = ? AND sender_type = 'user' AND COALESCE(read_by_admin, 0) = 0",
+                (emp_id,)
+            )
+            conn.commit()
+    finally:
+        conn.close()
+    return jsonify({'messages': _build_support_messages_json(rows)})
+
+
+@app.route('/admin/support_notifications', methods=['GET'])
+def admin_support_notifications():
+    if not session.get('admin_logged_in'):
+        return jsonify({'error': 'unauthorized'}), 401
+    conn = get_db_connection()
+    try:
+        total = conn.execute('''
+            SELECT COALESCE(SUM(CASE WHEN sender_type = 'user' AND COALESCE(read_by_admin, 0) = 0 THEN 1 ELSE 0 END), 0)
+            FROM support_messages
+        ''').fetchone()[0]
+        users = conn.execute('''
+            SELECT emp_id, emp_name,
+                   SUM(CASE WHEN sender_type = 'user' AND COALESCE(read_by_admin, 0) = 0 THEN 1 ELSE 0 END) as unread
+            FROM support_messages
+            WHERE sender_type = 'user' AND COALESCE(read_by_admin, 0) = 0
+            GROUP BY emp_id, emp_name
+            HAVING unread > 0
+        ''').fetchall()
+    finally:
+        conn.close()
+    return jsonify({
+        'total': int(total or 0),
+        'users': [{'emp_id': u['emp_id'], 'emp_name': u['emp_name'], 'unread': int(u['unread'] or 0)} for u in users]
+    })
+
+
+@app.route('/admin/support_debug', methods=['GET'])
+def admin_support_debug():
+    """DEBUG ONLY: Returns raw unread count and sample messages to verify data exists in DB"""
+    if not session.get('admin_logged_in'):
+        return jsonify({'error': 'unauthorized'}), 401
+    conn = get_db_connection()
+    try:
+        # Raw unread count
+        raw_unread = conn.execute('''
+            SELECT COUNT(*) as cnt
+            FROM support_messages
+            WHERE sender_type = 'user' AND read_by_admin = 0
+        ''').fetchone()[0]
+        
+        # Any unread at all (to detect NULL issues)
+        null_check = conn.execute('''
+            SELECT COUNT(*) as cnt
+            FROM support_messages
+            WHERE sender_type = 'user' AND (read_by_admin IS NULL OR read_by_admin = 0)
+        ''').fetchone()[0]
+        
+        # Sample recent messages
+        samples = conn.execute('''
+            SELECT id, emp_id, emp_name, sender_type, message, read_by_admin, read_by_user, created_at
+            FROM support_messages
+            ORDER BY created_at DESC
+            LIMIT 5
+        ''').fetchall()
+        
+        # Table schema
+        schema = conn.execute("PRAGMA table_info(support_messages)").fetchall()
+        
+        return jsonify({
+            'raw_unread_count': raw_unread,
+            'unread_with_null_check': null_check,
+            'has_read_by_admin_column': any(col[1] == 'read_by_admin' for col in schema),
+            'schema_columns': [col[1] for col in schema],
+            'sample_messages': [{
+                'id': m['id'],
+                'emp_id': m['emp_id'],
+                'emp_name': m['emp_name'],
+                'sender_type': m['sender_type'],
+                'message': m['message'][:50] + '...' if len(m['message']) > 50 else m['message'],
+                'read_by_admin': m['read_by_admin'],
+                'created_at': m['created_at']
+            } for m in samples]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+    finally:
+        conn.close()
+
 
 @app.route('/cron/daily_alert', methods=['POST'])
 def daily_alert():

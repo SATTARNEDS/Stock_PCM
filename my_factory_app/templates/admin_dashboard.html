@@ -358,6 +358,19 @@
             to { transform: translateY(0); opacity: 1; }
         }
         .ga-chat-box { height:340px; overflow-y:auto; scroll-behavior:smooth; }
+
+        /* ─── Support Section ─── */
+        .support-header-bg { background: linear-gradient(135deg, #005fcc, #00a1c9); }
+        #supportInboxBadge { display: none; }
+        #navSupportBadge { display: none; }
+        .support-inbox-wrap { overflow-y: auto; max-height: 520px; }
+        .support-chat-area-hidden { display: none !important; }
+        .support-chat-header-bg { background: #f5f8ff; }
+        .support-chatbox { background: #f5f8ff; min-height: 280px; max-height: 380px; }
+        .support-row-minheight { min-height: 420px; }
+        .support-placeholder-bg { background: #fafbff; }
+        .sup-send-btn-radius { border-radius: 10px; }
+        .sup-textarea-style { resize: none; border-radius: 10px; }
         .ga-keyword-filter-input { max-width: 220px; }
         .ga-request-action-cell {
             min-width: 250px;
@@ -1268,6 +1281,10 @@
                 <a href="{{ url_for('admin_dashboard', module='vehicle') }}" class="nav-link {% if admin_module == 'vehicle' %}active{% endif %}">
                     <i class="fas fa-car-side me-2"></i> ระบบจองรถ
                 </a>
+                <a href="{{ url_for('admin_dashboard', module='support') }}" class="nav-link with-counter {% if admin_module == 'support' %}active{% endif %}" id="navSupportLink">
+                    <span><i class="fas fa-headset me-2 text-info"></i> Support Chat</span>
+                <span class="badge bg-danger rounded-pill menu-counter-badge" id="navSupportBadge" style="display: none;">0</span>
+                </a>
 
                 {% if admin_module == 'stock' %}
                 <div class="nav-category text-white-50">จัดการ Stock</div>
@@ -1727,6 +1744,12 @@
                                         <i class="fas fa-comments me-1"></i>แชท
                                         <span class="admin-chat-unread-badge d-none" data-admin-chat-unread>ใหม่</span>
                                     </button>
+                                    {% if session.get('admin_role') == 'superadmin' %}
+                                    <button type="button" class="btn btn-sm btn-outline-danger rounded-pill w-100 mt-2"
+                                        onclick="deleteGaRequestAjax({{ req['id'] }}, this)">
+                                        <i class="fas fa-trash-alt me-1"></i>ลบคำร้อง
+                                    </button>
+                                    {% endif %}
                                 </td>
                             </tr>
                             {% endfor %}
@@ -1737,6 +1760,43 @@
                             {% endif %}
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+            <!-- ─── Support Chat Section ─── -->
+            <div class="card border-0 shadow-sm mb-4 dashboard-section {% if admin_module != 'support' %}is-hidden{% endif %}" id="supportSection">
+                <div class="card-header py-3 border-0 support-header-bg">
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="text-white fw-medium"><i class="fas fa-headset me-2"></i>Support Chat — แจ้งปัญหาการใช้งาน</span>
+                        <span class="badge bg-danger rounded-pill px-3 py-2" id="supportInboxBadge">0 ใหม่</span>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <div class="row g-0 support-row-minheight">
+                        <!-- Inbox list -->
+                        <div class="col-md-4 border-end support-inbox-wrap" id="supportInboxList">
+                            <div class="text-center text-muted py-5 small" id="supportInboxEmpty">ยังไม่มีข้อความจากผู้ใช้</div>
+                        </div>
+                        <!-- Chat area -->
+                        <div class="col-md-8 d-flex flex-column support-chat-area-hidden" id="supportChatArea">
+                            <div class="p-3 border-bottom d-flex align-items-center gap-2 support-chat-header-bg" id="supportChatHeader">
+                                <i class="fas fa-user-circle text-secondary fs-5"></i>
+                                <span class="fw-medium" id="supportChatUserName">-</span>
+                                <small class="text-muted" id="supportChatEmpId"></small>
+                            </div>
+                            <div class="flex-grow-1 overflow-auto p-3 d-flex flex-column gap-2 support-chatbox" id="adminSupChatBox"></div>
+                            <div class="d-flex gap-2 p-3 border-top bg-white">
+                                <textarea id="adminSupInput" class="form-control form-control-sm shadow-none sup-textarea-style" rows="2" placeholder="พิมพ์ข้อความตอบกลับ..." onkeydown="adminSupInputKeydown(event)"></textarea>
+                                <button class="btn btn-primary btn-sm px-3 sup-send-btn-radius" id="adminSupSendBtn" onclick="adminSendSupport()"><i class="fas fa-paper-plane"></i></button>
+                            </div>
+                        </div>
+                        <div class="col-md-8 d-flex align-items-center justify-content-center text-muted support-placeholder-bg" id="supportChatPlaceholder">
+                            <div class="text-center">
+                                <i class="fas fa-comments fs-1 text-secondary opacity-50"></i>
+                                <div class="mt-3">เลือกบทสนทนาทางด้านซ้ายเพื่อตอบกลับ</div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -3165,7 +3225,10 @@
                    text.includes('/admin/filter_stock') ||
                    text.includes('/admin/filter_logs') ||
                      text.includes('/admin/filter_ga_requests') ||
-                     text.includes('/admin/ga_chat_notifications');
+                     text.includes('/admin/ga_chat_notifications') ||
+                     text.includes('/admin/support_notifications') ||
+                     text.includes('/admin/support_inbox') ||
+                     text.includes('/admin/support_chat/');
         }
 
         const nativeFetch = window.fetch.bind(window);
@@ -3298,6 +3361,16 @@
         }
 
         function checkAuth(response) {
+            if (response.redirected && String(response.url || '').includes('/admin_login')) {
+                hideGlobalLoading(true);
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Session หมดอายุ',
+                    text: 'กรุณาเข้าสู่ระบบใหม่อีกครั้ง',
+                    confirmButtonText: 'ตกลง'
+                }).then(() => { window.location.href = '/admin_login'; });
+                throw new Error('Unauthorized access');
+            }
             if (response.status === 401 || response.statusText === 'Unauthorized') {
                 hideGlobalLoading(true);
                 Swal.fire({
@@ -3309,6 +3382,22 @@
                 throw new Error("Unauthorized access");
             }
             return response;
+        }
+
+        async function parseJsonResponseStrict(res) {
+            const contentType = (res.headers.get('content-type') || '').toLowerCase();
+            const raw = await res.text();
+            if (!contentType.includes('application/json')) {
+                if (raw.includes('<!DOCTYPE') || raw.includes('<html')) {
+                    throw new Error('Server ส่งหน้า HTML กลับมา (ยังไม่อัปเดต backend หรือ session หมดอายุ)');
+                }
+                throw new Error('รูปแบบข้อมูลตอบกลับไม่ถูกต้อง');
+            }
+            try {
+                return JSON.parse(raw);
+            } catch (_) {
+                throw new Error('อ่านข้อมูลจากเซิร์ฟเวอร์ไม่สำเร็จ');
+            }
         }
 
         function scrollToSection(sectionId) {
@@ -5415,6 +5504,75 @@
             filterGaRequests();
         }
 
+        function deleteGaRequestAjax(requestId, triggerBtn) {
+            if (!requestId) return;
+            Swal.fire({
+                title: 'ลบคำร้องนี้ใช่หรือไม่?\nการกระทำนี้ไม่สามารถย้อนกลับได้',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'ตกลง',
+                cancelButtonText: 'ยกเลิก'
+            }).then((result) => {
+                if (!result.isConfirmed) return;
+
+                if (triggerBtn) {
+                    triggerBtn.disabled = true;
+                    triggerBtn.classList.add('is-submitting');
+                }
+
+                const fd = new FormData();
+                fd.append('csrf_token', adminCsrfToken);
+                fd.append('ga_loc', currentGaLoc || '');
+                fd.append('ajax', '1');
+
+                fetch('/admin/delete_ga_request/' + encodeURIComponent(String(requestId)), {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': adminCsrfToken, 'X-Requested-With': 'XMLHttpRequest' },
+                    body: fd
+                })
+                    .then(checkAuth)
+                    .then(parseJsonResponseStrict)
+                    .then(data => {
+                        if (!data.success) {
+                            throw new Error(data.message || 'ลบคำร้องไม่สำเร็จ');
+                        }
+
+                        const row = triggerBtn ? triggerBtn.closest('tr') : null;
+                        if (row) {
+                            row.remove();
+                        }
+
+                        const badge = document.getElementById('gaPendingBadge');
+                        if (badge && typeof data.pending_count !== 'undefined') {
+                            badge.textContent = 'Pending ' + data.pending_count + ' รายการ';
+                        }
+
+                        const tbody = document.getElementById('gaRequestTbody');
+                        if (tbody && !tbody.querySelector('tr')) {
+                            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">ยังไม่มี GA Request ในเงื่อนไขที่เลือก</td></tr>';
+                        }
+
+                        const countEl = document.getElementById('gaResultCount');
+                        if (countEl) {
+                            const rows = tbody ? tbody.querySelectorAll('tr') : [];
+                            const hasEmpty = tbody && tbody.querySelector('td[colspan]');
+                            countEl.textContent = hasEmpty ? '' : (rows.length + ' รายการ');
+                        }
+
+                        Swal.fire('ลบสำเร็จ', data.message || 'ลบคำร้องเรียบร้อยแล้ว', 'success');
+                    })
+                    .catch((err) => {
+                        Swal.fire('ผิดพลาด', err?.message || 'ลบคำร้องไม่สำเร็จ', 'error');
+                    })
+                    .finally(() => {
+                        if (triggerBtn) {
+                            triggerBtn.disabled = false;
+                            triggerBtn.classList.remove('is-submitting');
+                        }
+                    });
+            });
+        }
+
         function _doFilterGaRequests() {
             const status = document.getElementById('gaStatusFilter').value;
             const keyword = document.getElementById('gaKeywordFilter').value.trim();
@@ -5423,7 +5581,7 @@
             if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>กำลังโหลด...</td></tr>';
 
             fetch('/admin/filter_ga_requests?' + params.toString())
-                .then(checkAuth).then(res => res.json()).then(data => {
+                .then(checkAuth).then(parseJsonResponseStrict).then(data => {
                     if (!data.success) return;
                     if (tbody) tbody.innerHTML = data.html;
                     const badge = document.getElementById('gaPendingBadge');
@@ -5992,6 +6150,217 @@
     }
     </script>
     {% endif %}
+
+    <!-- ─── Admin Support Chat JS ─── -->
+    <script>
+    (function () {
+        let _supCurrentEmpId = null;
+        let _supCurrentName = null;
+        let _supSinceId = 0;
+        let _supPollTimer = null;
+        let _supSending = false;
+        let _supInboxLoading = false;
+        let _supChatLoading = false;
+        let _supInboxSnapshot = '';
+
+        /* ── bubble CSS (inline once) ── */
+        (function injectSupAdminCss() {
+            if (document.getElementById('supAdminCss')) return;
+            const s = document.createElement('style');
+            s.id = 'supAdminCss';
+            s.textContent = `
+                .sup-inbox-item { padding: 12px 16px; border-bottom: 1px solid #eee; cursor: pointer; transition: background .15s; }
+                .sup-inbox-item:hover, .sup-inbox-item.active { background: #e8f0fe; }
+                .sup-inbox-item .sup-uname { font-size: 14px; font-weight: 500; }
+                .sup-inbox-item .sup-ulast { font-size: 12px; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                .sup-inbox-item .sup-unread-dot { display:inline-block; width:8px;height:8px;border-radius:50%;background:#e53935;margin-left:6px;vertical-align:middle; }
+                .adm-sup-bubble { max-width: 82%; padding: 8px 12px; border-radius: 14px; font-size: 13px; line-height: 1.5; word-break: break-word; }
+                .adm-sup-bubble.admin { align-self: flex-end; background: #005fcc; color: #fff; border-bottom-right-radius: 4px; }
+                .adm-sup-bubble.user { align-self: flex-start; background: #fff; color: #1f2d3d; border-bottom-left-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+                .adm-sup-bubble .sup-meta { font-size: 10px; margin-top: 3px; opacity: .65; }
+            `;
+            document.head.appendChild(s);
+        })();
+
+        function escSupHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+        }
+
+        /* ── Load inbox ── */
+        function loadSupportInbox(silent) {
+            if (_supInboxLoading) return;
+            _supInboxLoading = true;
+            fetch('/admin/support_inbox', { headers: { 'X-CSRF-Token': adminCsrfToken } })
+                .then(r => r.json()).then(data => {
+                    _supInboxLoading = false;
+                    const total = data.total_unread || 0;
+                    // update nav badge
+                    const navBadge = document.getElementById('navSupportBadge');
+                    if (navBadge) { navBadge.textContent = total; navBadge.style.display = total > 0 ? '' : 'none'; }
+                    const inboxBadge = document.getElementById('supportInboxBadge');
+                    if (inboxBadge) { inboxBadge.textContent = total + ' ใหม่'; inboxBadge.style.display = total > 0 ? '' : 'none'; }
+                    const nextConvs = data.conversations || [];
+                    const nextSnapshot = JSON.stringify(nextConvs);
+                    if (!silent || nextSnapshot !== _supInboxSnapshot) {
+                        renderInboxList(nextConvs);
+                        _supInboxSnapshot = nextSnapshot;
+                    }
+                }).catch(() => { _supInboxLoading = false; });
+        }
+        window.loadSupportInbox = loadSupportInbox;
+
+        function renderInboxList(convs) {
+            const listEl = document.getElementById('supportInboxList');
+            if (!listEl) return;
+            if (!convs || convs.length === 0) {
+                listEl.innerHTML = '<div class="text-center text-muted py-5 small" id="supportInboxEmpty">ยังไม่มีข้อความจากผู้ใช้</div>';
+                return;
+            }
+            listEl.innerHTML = convs.map(c => `
+                <div class="sup-inbox-item${c.emp_id === _supCurrentEmpId ? ' active' : ''}" onclick="openSupportConv('${c.emp_id}','${escSupHtml(c.emp_name)}')">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="sup-uname">${escSupHtml(c.emp_name)}${c.unread > 0 ? '<span class="sup-unread-dot"></span>' : ''}</span>
+                        <small class="text-muted">${c.last_time}</small>
+                    </div>
+                    <div class="sup-ulast">${escSupHtml(c.last_msg || '')}</div>
+                </div>
+            `).join('');
+        }
+
+        /* ── Open conversation ── */
+        function openSupportConv(empId, empName) {
+            _supCurrentEmpId = empId;
+            _supCurrentName = empName;
+            _supSinceId = 0;
+            // show chat area
+            const area = document.getElementById('supportChatArea');
+            const placeholder = document.getElementById('supportChatPlaceholder');
+            if (area) area.classList.remove('support-chat-area-hidden');
+            if (placeholder) placeholder.style.display = 'none';
+            document.getElementById('supportChatUserName').textContent = empName;
+            document.getElementById('supportChatEmpId').textContent = '(' + empId + ')';
+            document.getElementById('adminSupChatBox').innerHTML = '';
+            loadAdminSupportChat(true);
+            // highlight inbox
+            document.querySelectorAll('.sup-inbox-item').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.sup-inbox-item').forEach(el => {
+                if (el.getAttribute('onclick') && el.getAttribute('onclick').includes("'" + empId + "'")) el.classList.add('active');
+            });
+        }
+        window.openSupportConv = openSupportConv;
+
+        function loadAdminSupportChat(full) {
+            if (_supChatLoading) return;
+            _supChatLoading = true;
+            const since = full ? 0 : _supSinceId;
+            fetch('/admin/support_chat/' + encodeURIComponent(_supCurrentEmpId) + '?since_id=' + since, { headers: { 'X-CSRF-Token': adminCsrfToken } })
+                .then(r => r.json()).then(data => {
+                    _supChatLoading = false;
+                    if (!data.messages) return;
+                    const box = document.getElementById('adminSupChatBox');
+                    if (full) box.innerHTML = '';
+                    data.messages.forEach(m => appendAdminSupMsg(m));
+                    if (data.messages.length > 0) _supSinceId = data.messages[data.messages.length - 1].id;
+                    box.scrollTop = box.scrollHeight;
+                    // refresh inbox unread after first load/mark-read only
+                    if (full) {
+                        loadSupportInbox(true);
+                    }
+                }).catch(() => { _supChatLoading = false; });
+        }
+
+        function appendAdminSupMsg(m) {
+            const box = document.getElementById('adminSupChatBox');
+            if (!box) return;
+            const div = document.createElement('div');
+            div.className = 'adm-sup-bubble ' + m.sender_type;
+            div.innerHTML = '<div>' + escSupHtml(m.message) + '</div><div class="sup-meta">' + (m.sender_type === 'user' ? '👤 ' + escSupHtml(m.sender_name) + ' · ' : '') + m.created_at + '</div>';
+            box.appendChild(div);
+        }
+
+        /* ── Send reply ── */
+        function adminSendSupport() {
+            if (_supSending || !_supCurrentEmpId) return;
+            const inp = document.getElementById('adminSupInput');
+            const msg = inp.value.trim();
+            if (!msg) return;
+            _supSending = true;
+            document.getElementById('adminSupSendBtn').disabled = true;
+            fetch('/admin/support_chat/' + encodeURIComponent(_supCurrentEmpId), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': adminCsrfToken },
+                body: JSON.stringify({ message: msg, csrf_token: adminCsrfToken })
+            }).then(r => r.json()).then(data => {
+                if (data.ok) {
+                    inp.value = '';
+                    loadAdminSupportChat(false);
+                }
+            }).catch(() => {}).finally(() => {
+                _supSending = false;
+                document.getElementById('adminSupSendBtn').disabled = false;
+            });
+        }
+        window.adminSendSupport = adminSendSupport;
+
+        function adminSupInputKeydown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); adminSendSupport(); }
+        }
+        window.adminSupInputKeydown = adminSupInputKeydown;
+
+        /* ── Polling ── */
+        function startAdminSupportPolling() {
+            pollSupportBadge();
+            loadSupportInbox(false);
+            clearInterval(_supPollTimer);
+            _supPollTimer = setInterval(() => {
+                pollSupportBadge();
+                loadSupportInbox(true);
+                if (_supCurrentEmpId) loadAdminSupportChat(false);
+            }, 10000);
+        }
+
+        /* ── Poll for badge even when not on support tab ── */
+        function pollSupportBadge() {
+            console.log('[pollSupportBadge] Starting fetch to /admin/support_notifications');
+            fetch('/admin/support_notifications', { headers: { 'X-CSRF-Token': adminCsrfToken } })
+                .then(r => {
+                    console.log('[pollSupportBadge] Got response:', r.status, r.statusText);
+                    return r.json();
+                })
+                .then(data => {
+                    console.log('[pollSupportBadge] Response data:', data);
+                    const total = data.total || 0;
+                    console.log('[pollSupportBadge] Unread total:', total);
+                    const navBadge = document.getElementById('navSupportBadge');
+                    console.log('[pollSupportBadge] navBadge element:', navBadge ? 'found' : 'NOT FOUND');
+                    if (navBadge) { 
+                        navBadge.textContent = total;
+                        navBadge.style.display = total > 0 ? 'inline-block' : 'none';
+                        console.log('[pollSupportBadge] Updated badge: text=', total, 'display=', navBadge.style.display);
+                    }
+                })
+                .catch(err => {
+                    console.error('[pollSupportBadge] Error:', err);
+                });
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            {% if admin_module == 'support' %}
+            startAdminSupportPolling();
+            {% else %}
+            pollSupportBadge();
+            setInterval(pollSupportBadge, 10000);
+            {% endif %}
+
+            window.addEventListener('focus', pollSupportBadge);
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) {
+                    pollSupportBadge();
+                }
+            });
+        });
+    })();
+    </script>
 
 </body>
 
