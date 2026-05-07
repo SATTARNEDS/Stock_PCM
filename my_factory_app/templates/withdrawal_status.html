@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>สถานะคำขอเบิก</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(150deg, #f8fbff 0%, #eef4ff 45%, #f7fbf5 100%);
+            font-family: "Mitr", sans-serif;
+            font-weight: 300;
+            min-height: 100vh;
+        }
+        .card { border-radius: 16px; border: none; box-shadow: 0 2px 16px rgba(0,60,130,0.08); }
+        .status-badge-Pending   { background:#fff6da; color:#8a6400; border:1px solid #f1dd98; }
+        .status-badge-Approved  { background:#d4f5e2; color:#155724; border:1px solid #7fd3a7; }
+        .status-badge-Rejected  { background:#fde8e8; color:#842029; border:1px solid #f5b8b8; }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 0.88rem;
+            font-weight: 500;
+        }
+        .batch-header-Pending  { background: linear-gradient(135deg, #fffbe6, #fff3cd); border-left: 5px solid #ffc107; }
+        .batch-header-Approved { background: linear-gradient(135deg, #e8f5e9, #d4edda); border-left: 5px solid #28a745; }
+        .batch-header-Rejected { background: linear-gradient(135deg, #fdecea, #f8d7da); border-left: 5px solid #dc3545; }
+        .batch-header-PartialReject { background: linear-gradient(135deg, #fff3cd, #fdecea); border-left: 5px solid #fd7e14; }
+        .batch-header { border-radius: 12px; padding: 18px 22px; margin-bottom: 20px; }
+        .qr-box { background: #fff; border-radius: 12px; padding: 16px; display: inline-block; box-shadow: 0 2px 12px rgba(0,0,0,0.10); }
+        .copy-btn { cursor: pointer; }
+        .url-box { background: #f0f4ff; border-radius: 8px; padding: 10px 14px; word-break: break-all; font-size: 0.82rem; color: #1a3a6e; }
+        .pulse-dot {
+            display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+            background: #ffc107; margin-right: 6px;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%,100% { opacity: 1; transform: scale(1); }
+            50%      { opacity: 0.4; transform: scale(1.4); }
+        }
+        .refresh-hint { font-size: 0.78rem; color: #888; }
+    </style>
+</head>
+<body>
+
+<div class="container py-4" style="max-width:720px;">
+
+    <!-- Header -->
+    <div class="text-center mb-3">
+        <div style="font-size:2.2rem;">📋</div>
+        <h5 class="fw-bold mb-0" style="color:#1a3a6e;">สถานะคำขอเบิก</h5>
+        <div class="text-muted" style="font-size:0.82rem;">หน้านี้เปิดได้โดยไม่ต้องเข้าสู่ระบบ</div>
+    </div>
+
+    <!-- Batch Status Banner -->
+    {% set status_icon = {
+        'Pending':      '⏳',
+        'Approved':     '✅',
+        'Rejected':     '❌',
+        'PartialReject':'⚠️',
+        'Unknown':      'ℹ️'
+    } %}
+    {% set status_th = {
+        'Pending':      'รอการอนุมัติ',
+        'Approved':     'อนุมัติแล้ว',
+        'Rejected':     'ปฏิเสธแล้ว',
+        'PartialReject':'อนุมัติบางส่วน',
+        'Unknown':      'ไม่ทราบสถานะ'
+    } %}
+    <div class="batch-header batch-header-{{ batch_status }}">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span style="font-size:1.5rem;">{{ status_icon.get(batch_status, 'ℹ️') }}</span>
+            <div>
+                <div class="fw-bold fs-5">{{ status_th.get(batch_status, batch_status) }}</div>
+                {% if rows %}
+                <div class="text-muted" style="font-size:0.82rem;">
+                    ผู้เบิก: <strong>{{ rows[0].requester_name or rows[0].emp_id }}</strong>
+                    &nbsp;|&nbsp; {{ rows[0].department or '' }} ({{ rows[0].location or '' }})
+                </div>
+                <div class="text-muted" style="font-size:0.80rem;">
+                    วันที่เบิก: {{ rows[0].timestamp or '-' }}
+                </div>
+                {% endif %}
+            </div>
+            {% if batch_status == 'Pending' %}
+            <div class="ms-auto refresh-hint">
+                <span class="pulse-dot"></span>หน้านี้จะอัปเดตเองทุก 30 วินาที
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Item List -->
+    <div class="card mb-4">
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0 align-middle" style="border-radius:16px; overflow:hidden;">
+                <thead style="background:#f0f4ff;">
+                    <tr>
+                        <th class="ps-3">รายการ</th>
+                        <th class="text-center">จำนวน</th>
+                        <th class="text-center">สถานะ</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in rows %}
+                <tr>
+                    <td class="ps-3">
+                        <div class="fw-bold">{{ row.product_name or '-' }}</div>
+                        {% if row.note %}
+                        <div class="text-muted" style="font-size:0.78rem;">{{ row.note }}</div>
+                        {% endif %}
+                    </td>
+                    <td class="text-center">
+                        {{ row.qty }}
+                        <span class="text-muted" style="font-size:0.82rem;">{{ row.unit or '' }}</span>
+                    </td>
+                    <td class="text-center">
+                        <span class="status-badge status-badge-{{ row.status }}">
+                            {% if row.status == 'Pending' %}⏳ รอ
+                            {% elif row.status == 'Approved' %}✅ อนุมัติ
+                            {% elif row.status == 'Rejected' %}❌ ปฏิเสธ
+                            {% else %}{{ row.status }}{% endif %}
+                        </span>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- QR + Link Section -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="fw-bold mb-3" style="color:#1a3a6e;">
+                <i class="fas fa-qrcode me-1"></i> บันทึก QR หรือ Link เพื่อตรวจสอบภายหลัง
+            </div>
+            <div class="row align-items-center g-3">
+                <div class="col-auto text-center">
+                    <div class="qr-box">
+                        <img src="{{ url_for('withdrawal_status_qr', token=token) }}"
+                             alt="QR Code"
+                             style="width:160px;height:160px;"
+                             title="สแกนเพื่อดูสถานะ">
+                    </div>
+                    <div class="text-muted mt-1" style="font-size:0.75rem;">สแกน QR เพื่อดูสถานะ</div>
+                </div>
+                <div class="col">
+                    <div class="mb-2" style="font-size:0.84rem; color:#444;">
+                        แนะนำให้เปิดหน้านี้ค้างไว้บนเครื่องเดิมที่ทำรายการ ระบบจะเด้งแจ้งเตือนกลับมาที่เครื่องนี้ตาม IP ในวง LAN
+                    </div>
+                    <div class="url-box mb-2" id="statusUrl">{{ status_url }}</div>
+                    <button class="btn btn-sm btn-outline-primary copy-btn"
+                            onclick="copyUrl()"
+                            id="copyBtn">
+                        <i class="fas fa-copy me-1"></i> คัดลอก Link
+                    </button>
+                    <a href="{{ status_url }}" class="btn btn-sm btn-outline-secondary ms-2" target="_blank">
+                        <i class="fas fa-external-link-alt me-1"></i> เปิดใน Tab ใหม่
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Note for Pending -->
+    {% if batch_status == 'Pending' %}
+    <div class="alert alert-warning" style="border-radius:12px; font-size:0.88rem;">
+        <i class="fas fa-clock me-1"></i>
+        คำขอเบิกของคุณอยู่ในคิวรอดำเนินการ — ไม่ต้องเข้าสู่ระบบเพื่อตรวจสอบ เพียงเปิด Link หรือสแกน QR นี้อีกครั้ง
+    </div>
+    {% elif batch_status == 'Approved' %}
+    <div class="alert alert-success" style="border-radius:12px; font-size:0.88rem;">
+        <i class="fas fa-check-circle me-1"></i>
+        คำขอเบิกได้รับการอนุมัติแล้ว กรุณาติดต่อรับของที่จุดจ่ายสินค้า
+    </div>
+    {% elif batch_status == 'Rejected' %}
+    <div class="alert alert-danger" style="border-radius:12px; font-size:0.88rem;">
+        <i class="fas fa-times-circle me-1"></i>
+        คำขอเบิกถูกปฏิเสธ กรุณาติดต่อผู้ดูแลระบบเพื่อสอบถามเพิ่มเติม
+    </div>
+    {% elif batch_status == 'PartialReject' %}
+    <div class="alert alert-warning" style="border-radius:12px; font-size:0.88rem;">
+        <i class="fas fa-exclamation-triangle me-1"></i>
+        บางรายการได้รับการอนุมัติ / บางรายการถูกปฏิเสธ — ดูรายละเอียดด้านบน
+    </div>
+    {% endif %}
+
+    <div class="text-center mt-2">
+        <a href="/" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-home me-1"></i> กลับหน้าหลัก
+        </a>
+        <button class="btn btn-outline-primary btn-sm ms-2" onclick="window.print()">
+            <i class="fas fa-print me-1"></i> พิมพ์หน้านี้
+        </button>
+    </div>
+
+</div>
+
+<script>
+const POLL_URL_BASE = "{{ url_for('withdrawal_status_poll', token=token) }}";
+const HEARTBEAT_URL_BASE = "{{ url_for('withdrawal_status_heartbeat', token=token) }}";
+const RELEASE_URL_BASE = "{{ url_for('withdrawal_status_release', token=token) }}";
+let deviceClaimReleased = false;
+
+function getOrCreateDeviceToken() {
+    const storageKey = 'pcm_device_token_v1';
+    let token = '';
+    try {
+        token = (localStorage.getItem(storageKey) || '').trim();
+    } catch (e) {
+        token = '';
+    }
+    if (!/^[A-Za-z0-9._\-]{12,80}$/.test(token)) {
+        const randomPart = Math.random().toString(36).slice(2);
+        token = `dev-${Date.now()}-${randomPart}`.slice(0, 80);
+        try {
+            localStorage.setItem(storageKey, token);
+        } catch (e) {
+            // ignore storage errors
+        }
+    }
+    return token;
+}
+
+function copyUrl() {
+    const url = document.getElementById('statusUrl').innerText.trim();
+    navigator.clipboard.writeText(url).then(() => {
+        const btn = document.getElementById('copyBtn');
+        btn.innerHTML = '<i class="fas fa-check me-1"></i> คัดลอกแล้ว!';
+        btn.classList.replace('btn-outline-primary', 'btn-success');
+        setTimeout(() => {
+            btn.innerHTML = '<i class="fas fa-copy me-1"></i> คัดลอก Link';
+            btn.classList.replace('btn-success', 'btn-outline-primary');
+        }, 2000);
+    }).catch(() => {
+        // Fallback for older browsers / HTTP
+        const el = document.createElement('textarea');
+        el.value = url;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+    });
+}
+
+async function pollDeviceNotification() {
+    try {
+        const deviceToken = getOrCreateDeviceToken();
+        const pollUrl = `${POLL_URL_BASE}?device_token=${encodeURIComponent(deviceToken)}`;
+        const resp = await fetch(pollUrl, { cache: 'no-store', credentials: 'same-origin' });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data || !Array.isArray(data.items) || data.items.length === 0) return;
+
+        const first = data.items[0];
+        if (document.visibilityState !== 'visible') {
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification(first.title || 'สถานะคำขอเบิกอัปเดต', {
+                    body: first.message || 'กรุณากลับมาดูรายละเอียดในหน้า status',
+                });
+            }
+        } else {
+            alert((first.title || 'สถานะคำขอเบิกอัปเดต') + '\n' + (first.message || ''));
+        }
+
+        location.reload();
+    } catch (e) {
+        console.warn('poll failed', e);
+    }
+}
+
+async function sendDeviceHeartbeat() {
+    try {
+        const deviceToken = getOrCreateDeviceToken();
+        const heartbeatUrl = `${HEARTBEAT_URL_BASE}?device_token=${encodeURIComponent(deviceToken)}`;
+        await fetch(heartbeatUrl, { cache: 'no-store', credentials: 'same-origin' });
+    } catch (e) {
+        console.warn('heartbeat failed', e);
+    }
+}
+
+function releaseDeviceClaim() {
+    if (deviceClaimReleased) return;
+    deviceClaimReleased = true;
+    const deviceToken = getOrCreateDeviceToken();
+    const payload = new URLSearchParams({ device_token: deviceToken });
+    try {
+        if (navigator.sendBeacon) {
+            navigator.sendBeacon(RELEASE_URL_BASE, payload);
+            return;
+        }
+    } catch (e) {
+        console.warn('release beacon failed', e);
+    }
+    fetch(RELEASE_URL_BASE, {
+        method: 'POST',
+        body: payload,
+        keepalive: true,
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+        }
+    }).catch(() => {});
+}
+
+function initDesktopPermission() {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+    }
+}
+
+// Auto-refresh every 30s only while status is Pending
+{% if batch_status == 'Pending' %}
+initDesktopPermission();
+sendDeviceHeartbeat();
+setInterval(sendDeviceHeartbeat, 15000);
+setInterval(pollDeviceNotification, 5000);
+setTimeout(() => { location.reload(); }, 30000);
+window.addEventListener('pagehide', releaseDeviceClaim);
+window.addEventListener('beforeunload', releaseDeviceClaim);
+{% endif %}
+</script>
+
+</body>
+</html>

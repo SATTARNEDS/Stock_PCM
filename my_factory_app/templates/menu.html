@@ -495,6 +495,7 @@
                     <form action="/confirm_withdrawal" method="POST" class="w-100" id="confirmWithdrawalForm">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
+                        <input type="hidden" name="device_token" id="deviceTokenInput" value="">
                         <div id="symptomFieldWrapper"></div>
                         <div id="requestTimingFieldWrapper"></div>
                         <button type="submit" class="btn btn-success w-100 rounded-pill py-3 fw-medium" id="confirmWithdrawalBtn" disabled>
@@ -540,6 +541,34 @@
         let currentPage = 1;
         const categoryButtons = document.querySelectorAll('.cat-btn');
         let globalLoadingCount = 0;
+
+        function getOrCreateDeviceToken() {
+            const storageKey = 'pcm_device_token_v1';
+            let token = '';
+            try {
+                token = (localStorage.getItem(storageKey) || '').trim();
+            } catch (e) {
+                token = '';
+            }
+            if (!/^[A-Za-z0-9._\-]{12,80}$/.test(token)) {
+                const randomPart = Math.random().toString(36).slice(2);
+                token = `dev-${Date.now()}-${randomPart}`.slice(0, 80);
+                try {
+                    localStorage.setItem(storageKey, token);
+                } catch (e) {
+                    // ignore storage errors
+                }
+            }
+            return token;
+        }
+
+        function syncDeviceTokenInput() {
+            const hiddenInput = document.getElementById('deviceTokenInput');
+            if (!hiddenInput) return;
+            hiddenInput.value = getOrCreateDeviceToken();
+        }
+
+        syncDeviceTokenInput();
 
         function showGlobalLoading(text) {
             globalLoadingCount += 1;
@@ -771,6 +800,7 @@
         // Confirmation before submit
         document.querySelector('form[action="/confirm_withdrawal"]').onsubmit = function (e) {
             e.preventDefault();
+            syncDeviceTokenInput();
             const receivePlan = buildReceivePlanSummary();
             if (!receivePlan.valid) {
                 Swal.fire('ข้อมูลไม่ครบ', receivePlan.message, 'warning');

@@ -902,6 +902,18 @@
             min-width: 280px;
         }
 
+        .history-log-type-filter {
+            min-width: 210px;
+        }
+
+        .history-log-date-filter {
+            min-width: 150px;
+        }
+
+        .history-log-search-filter {
+            min-width: 240px;
+        }
+
         #currentPageNum,
         #totalPageNum {
             min-width: 1.6rem;
@@ -1068,6 +1080,9 @@
                 animation: none !important;
             }
         }
+        .card-header-scheduled { background: linear-gradient(135deg, #ff6b35, #f7931e); color: #fff; }
+        .modal-header-reschedule { background: linear-gradient(135deg, #0b6cc7, #0e91d8); }
+        .low-stock-search-input { width: 160px; }
     </style>
 </head>
 
@@ -1322,8 +1337,7 @@
             {# ===== ตารางเบิกล่วงหน้าที่อนุมัติแล้ว รอรับของ ===== #}
             {% if scheduled_approved_logs %}
             <div class="card border-0 shadow-sm mb-4 dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}" id="scheduledApprovedSection">
-                <div class="card-header py-3 border-0 d-flex flex-wrap justify-content-between align-items-center gap-2"
-                     style="background:linear-gradient(135deg,#ff6b35,#f7931e);color:#fff;">
+                <div class="card-header py-3 border-0 d-flex flex-wrap justify-content-between align-items-center gap-2 card-header-scheduled">
                     <span class="fw-medium">
                         <i class="fas fa-clock me-2"></i>รายการเบิกล่วงหน้า (อนุมัติแล้ว รอรับของ)
                     </span>
@@ -1346,6 +1360,9 @@
                             <tr>
                                 <td class="ps-4">
                                     <span class="fw-bold text-danger">{{ log['requested_receive_at']|format_ts }}</span>
+                                    {% if log['is_overdue'] %}
+                                    <div><span class="badge bg-danger-subtle text-danger rounded-pill mt-1">เลยกำหนดรับแล้ว</span></div>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     <div class="fw-medium text-dark">{{ log['emp_name'] or log['emp_id'] }}</div>
@@ -1366,10 +1383,18 @@
                                     {% endif %}
                                 </td>
                                 <td class="text-center">
+                                    <form action="{{ url_for('confirm_scheduled_pickup', log_id=log['id']) }}" method="POST" class="d-inline">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="button"
+                                            onclick="confirmAction(this.form, 'ยืนยันว่าผู้เบิกมารับของแล้วใช่ไหม?', 'success', this)"
+                                            class="btn btn-sm btn-success rounded-pill px-3 me-1 mb-1">
+                                            <i class="fas fa-check-circle me-1"></i>รับของแล้ว
+                                        </button>
+                                    </form>
                                     {# ปุ่มเปลี่ยนวันรับ #}
                                     <button type="button"
                                         class="btn btn-sm btn-outline-primary rounded-pill px-3 me-1 mb-1"
-                                        onclick="openRescheduleModal({{ log['id'] }}, '{{ log['requested_receive_at'][:16] if log['requested_receive_at'] else '' }}', '{{ (log['product_name'] or '')|e }}')">
+                                        onclick='openRescheduleDialog({{ log["id"] }}, {{ (log["requested_receive_at"][:16] if log["requested_receive_at"] else "")|tojson }}, {{ (log["product_name"] or "")|tojson }})'>
                                         <i class="fas fa-calendar-alt me-1"></i>เปลี่ยนวัน
                                     </button>
                                     {# ปุ่มยกเลิก #}
@@ -1391,10 +1416,10 @@
             {% endif %}
 
             {# ===== Modal เปลี่ยนวันรับของ ===== #}
-            <div class="modal fade" id="rescheduleModal" tabindex="-1" aria-hidden="true">
+            <div class="modal" id="rescheduleModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="false" data-bs-keyboard="true">
                 <div class="modal-dialog modal-dialog-centered">
                     <div class="modal-content border-0 shadow">
-                        <div class="modal-header border-0" style="background:linear-gradient(135deg,#0b6cc7,#0e91d8);">
+                        <div class="modal-header border-0 modal-header-reschedule">
                             <h6 class="modal-title text-white fw-bold"><i class="fas fa-calendar-alt me-2"></i>เปลี่ยนวันรับของ</h6>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
@@ -1428,15 +1453,30 @@
                         <div class="small text-white-50">คำร้องแจ้งซ่อม แจ้งปัญหา และประสานงานไปยัง GA / IT / SAFETY</div>
                     </div>
                     <div class="d-flex align-items-center gap-2 flex-wrap">
-                        <span class="badge bg-warning text-dark rounded-pill px-3 py-2">Pending {{ ga_pending_count }} รายการ</span>
+                        <span class="badge bg-warning text-dark rounded-pill px-3 py-2" id="gaPendingBadge">Pending {{ ga_pending_count }} รายการ</span>
                         {% if role == 'superadmin' %}
-                        <div class="btn-group btn-group-sm bg-white rounded-pill p-1 shadow-sm">
-                            <a href="{{ url_for('admin_dashboard', module='ga') }}#gaRequestSection" class="btn btn-sm rounded-pill px-3 {% if not ga_selected_loc %}btn-primary{% else %}btn-light text-muted border-0{% endif %}">รวม</a>
-                            <a href="{{ url_for('admin_dashboard', module='ga', ga_loc='PC1') }}#gaRequestSection" class="btn btn-sm rounded-pill px-3 {% if ga_selected_loc == 'PC1' %}btn-primary{% else %}btn-light text-muted border-0{% endif %}">PC1</a>
-                            <a href="{{ url_for('admin_dashboard', module='ga', ga_loc='CC') }}#gaRequestSection" class="btn btn-sm rounded-pill px-3 {% if ga_selected_loc == 'CC' %}btn-primary{% else %}btn-light text-muted border-0{% endif %}">CC</a>
+                        <div class="btn-group btn-group-sm bg-white rounded-pill p-1 shadow-sm" id="gaLocTabs">
+                            <button type="button" class="btn btn-sm rounded-pill px-3 {% if not ga_selected_loc %}btn-primary{% else %}btn-light text-muted border-0{% endif %}" onclick="switchGaLoc('')">รวม</button>
+                            <button type="button" class="btn btn-sm rounded-pill px-3 {% if ga_selected_loc == 'PC1' %}btn-primary{% else %}btn-light text-muted border-0{% endif %}" onclick="switchGaLoc('PC1')">PC1</button>
+                            <button type="button" class="btn btn-sm rounded-pill px-3 {% if ga_selected_loc == 'CC' %}btn-primary{% else %}btn-light text-muted border-0{% endif %}" onclick="switchGaLoc('CC')">CC</button>
                         </div>
                         {% endif %}
                     </div>
+                </div>
+                <div class="px-3 py-2 bg-light border-bottom d-flex flex-wrap gap-2 align-items-center">
+                    <select id="gaStatusFilter" class="form-select form-select-sm shadow-none w-auto" onchange="filterGaRequests()">
+                        <option value="">-- ทุกสถานะ --</option>
+                        {% for status in ga_status_options %}
+                        <option value="{{ status }}">{{ status }}</option>
+                        {% endfor %}
+                    </select>
+                    <input type="text" id="gaKeywordFilter" class="form-control form-control-sm shadow-none"
+                        placeholder="ค้นหาชื่อ / หัวข้อ / รายละเอียด..."
+                        oninput="filterGaRequests()" style="max-width:220px;">
+                    <button class="btn btn-sm btn-outline-secondary rounded-pill" onclick="clearGaFilters()">
+                        <i class="fas fa-times me-1"></i>ล้าง
+                    </button>
+                    <span class="ms-auto small text-muted" id="gaResultCount"></span>
                 </div>
                 <div class="card-body p-0 table-responsive">
                     <table class="table table-hover align-middle mb-0">
@@ -1450,7 +1490,7 @@
                                 <th class="text-center">จัดการ</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="gaRequestTbody">
                             {% if ga_requests %}
                             {% for req in ga_requests %}
                             <tr>
@@ -1703,8 +1743,8 @@
                     <h6 class="mb-0 fw-medium"><i class="fas fa-exclamation-triangle me-2"></i>รายการของใกล้หมด (Low
                         Stock)</h6>
                     <div class="d-flex gap-2 flex-wrap align-items-center">
-                        <input type="text" id="lowStockSearch" class="form-control form-control-sm shadow-none"
-                            placeholder="ค้นหาชื่อ..." style="width:160px;"
+                        <input type="text" id="lowStockSearch" class="form-control form-control-sm shadow-none low-stock-search-input"
+                            placeholder="ค้นหาชื่อ..."
                             oninput="filterLowStock()">
                         <select id="lowStockCatSelector" class="form-select form-select-sm shadow-none w-auto"
                             onchange="filterLowStock()">
@@ -1785,7 +1825,26 @@
                             <button type="button" onclick="filterLogs('CC')" id="btn-log-cc"
                                 class="btn btn-sm rounded-pill px-3 btn-light text-muted border-0 fw-medium">CC</button>
                         </div>
-                        {% endif %}                       
+                        {% endif %}
+                        <select id="logTypeFilter" class="form-select form-select-sm rounded-pill shadow-sm border-0 history-log-type-filter">
+                            <option value="" {% if not selected_log_type %}selected{% endif %}>ทุกประเภท</option>
+                            <option value="withdraw" {% if selected_log_type == 'withdraw' %}selected{% endif %}>เบิกออก</option>
+                            <option value="receive" {% if selected_log_type == 'receive' %}selected{% endif %}>รับเข้า</option>
+                            <option value="adjust" {% if selected_log_type == 'adjust' %}selected{% endif %}>ปรับสต็อก / ตัดจ่าย</option>
+                            <option value="approved" {% if selected_log_type == 'approved' %}selected{% endif %}>Approved ทั้งหมด</option>
+                            <option value="rejected" {% if selected_log_type == 'rejected' %}selected{% endif %}>Rejected</option>
+                            <option value="cancelled" {% if selected_log_type == 'cancelled' %}selected{% endif %}>Cancelled</option>
+                            <option value="scheduled-picked" {% if selected_log_type == 'scheduled-picked' %}selected{% endif %}>เบิกล่วงหน้า รับของแล้ว</option>
+                        </select>
+                        <input type="date" id="logDateFromFilter" value="{{ selected_log_date_from or '' }}" class="form-control form-control-sm rounded-pill shadow-sm border-0 history-log-date-filter" aria-label="วันเริ่มต้น">
+                        <input type="date" id="logDateToFilter" value="{{ selected_log_date_to or '' }}" class="form-control form-control-sm rounded-pill shadow-sm border-0 history-log-date-filter" aria-label="วันสิ้นสุด">
+                        <input type="text" id="logSearchFilter" value="{{ selected_log_search or '' }}" class="form-control form-control-sm rounded-pill shadow-sm border-0 history-log-search-filter" placeholder="ค้นหาผู้ทำรายการ / สินค้า / รหัส / ประเภท">
+                        <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3 fw-medium" onclick="resetHistoryLogFilters()">
+                            ล้าง filter
+                        </button>
+                        <button type="button" class="btn btn-light btn-sm rounded-pill shadow-sm px-3 fw-medium" onclick="exportHistoryLogs()">
+                            <i class="fas fa-file-excel me-1 text-success"></i>Export
+                        </button>
                     </div>
                 </div>
                 <div class="card-body p-0 table-responsive">
@@ -2861,12 +2920,17 @@
         // ==========================================
         // 1. ตัวแปร Global และการตั้งค่าเริ่มต้น
         // ==========================================
-        let currentLogPage = 1;
-        let currentLogLoc = '';
+        let currentLogPage = {{ page|default(1, true) }};
+        let currentLogLoc = {{ (selected_loc|default('', true))|tojson }};
+        let currentLogType = {{ (selected_log_type|default('', true))|tojson }};
+        let currentLogDateFrom = {{ (selected_log_date_from|default('', true))|tojson }};
+        let currentLogDateTo = {{ (selected_log_date_to|default('', true))|tojson }};
+        let currentLogSearch = {{ (selected_log_search|default('', true))|tojson }};
         let idleTime = 0;
         const maxIdleTime = 60; // Auto-logout 60 นาที
         let monthlyChartObj = null; // ตัวแปรเก็บกราฟรายงาน
         let deptChartObj = null;
+        let logSearchDebounceTimer = null;
         let userSearchDebounceTimer = null;
         let gaImageScale = 1;
         const GA_IMAGE_MIN_SCALE = 0.4;
@@ -4178,7 +4242,23 @@
                 logContainer.style.minHeight = `${logContainer.offsetHeight}px`;
             }
 
-            fetch(`/admin/filter_logs?page=${currentLogPage}&log_loc=${encodeURIComponent(currentLogLoc)}`)
+            const logUrl = new URL('/admin/filter_logs', window.location.origin);
+            logUrl.searchParams.set('page', currentLogPage);
+            logUrl.searchParams.set('log_loc', currentLogLoc || '');
+            if (currentLogType) {
+                logUrl.searchParams.set('log_type', currentLogType);
+            }
+            if (currentLogDateFrom) {
+                logUrl.searchParams.set('log_date_from', currentLogDateFrom);
+            }
+            if (currentLogDateTo) {
+                logUrl.searchParams.set('log_date_to', currentLogDateTo);
+            }
+            if (currentLogSearch) {
+                logUrl.searchParams.set('log_search', currentLogSearch);
+            }
+
+            fetch(logUrl.toString())
                 .then(checkAuth)
                 .then(response => {
                     const newTotalPages = response.headers.get('X-Total-Pages');
@@ -4216,10 +4296,76 @@
             });
         }
 
+        function exportHistoryLogs() {
+            const exportUrl = new URL('/admin/export_logs_excel', window.location.origin);
+            if (currentLogLoc) exportUrl.searchParams.set('log_loc', currentLogLoc);
+            if (currentLogType) exportUrl.searchParams.set('log_type', currentLogType);
+            if (currentLogDateFrom) exportUrl.searchParams.set('log_date_from', currentLogDateFrom);
+            if (currentLogDateTo) exportUrl.searchParams.set('log_date_to', currentLogDateTo);
+            if (currentLogSearch) exportUrl.searchParams.set('log_search', currentLogSearch);
+            window.location.href = exportUrl.toString();
+        }
+
+        function resetHistoryLogFilters() {
+            currentLogType = '';
+            currentLogDateFrom = '';
+            currentLogDateTo = '';
+            currentLogSearch = '';
+            currentLogPage = 1;
+
+            const logTypeEl = document.getElementById('logTypeFilter');
+            const logDateFromEl = document.getElementById('logDateFromFilter');
+            const logDateToEl = document.getElementById('logDateToFilter');
+            const logSearchEl = document.getElementById('logSearchFilter');
+            if (logTypeEl) logTypeEl.value = '';
+            if (logDateFromEl) logDateFromEl.value = '';
+            if (logDateToEl) logDateToEl.value = '';
+            if (logSearchEl) logSearchEl.value = '';
+
+            updateLogTable(false);
+        }
+
         function prevLogPage() { if (currentLogPage > 1) { currentLogPage--; updateLogTable(false); } }
         function nextLogPage() {
             const totalPages = parseInt(document.getElementById('totalPageNum').innerText);
             if (currentLogPage < totalPages) { currentLogPage++; updateLogTable(false); }
+        }
+
+        const logTypeFilter = document.getElementById('logTypeFilter');
+        if (logTypeFilter) {
+            logTypeFilter.addEventListener('change', function () {
+                currentLogType = this.value || '';
+                currentLogPage = 1;
+                updateLogTable(false);
+            });
+        }
+
+        const logDateFromFilter = document.getElementById('logDateFromFilter');
+        if (logDateFromFilter) {
+            logDateFromFilter.addEventListener('change', function () {
+                currentLogDateFrom = this.value || '';
+                currentLogPage = 1;
+                updateLogTable(false);
+            });
+        }
+
+        const logDateToFilter = document.getElementById('logDateToFilter');
+        if (logDateToFilter) {
+            logDateToFilter.addEventListener('change', function () {
+                currentLogDateTo = this.value || '';
+                currentLogPage = 1;
+                updateLogTable(false);
+            });
+        }
+
+        const logSearchFilter = document.getElementById('logSearchFilter');
+        if (logSearchFilter) {
+            logSearchFilter.addEventListener('input', function () {
+                currentLogSearch = this.value.trim();
+                currentLogPage = 1;
+                clearTimeout(logSearchDebounceTimer);
+                logSearchDebounceTimer = setTimeout(() => updateLogTable(false), 250);
+            });
         }
 
         // ==========================================
@@ -4561,17 +4707,118 @@
             });
         }
 
-        function openRescheduleModal(logId, currentDatetime, productName) {
-            const modal = document.getElementById('rescheduleModal');
-            const form = document.getElementById('rescheduleForm');
-            form.action = `/admin/reschedule_withdrawal/${logId}`;
-            document.getElementById('rescheduleProductName').textContent = productName;
-            // แปลง "YYYY-MM-DD HH:MM" → "YYYY-MM-DDTHH:MM" สำหรับ datetime-local
-            const dtValue = currentDatetime ? currentDatetime.replace(' ', 'T') : '';
-            document.getElementById('newReceiveAt').value = dtValue;
-            const bsModal = new bootstrap.Modal(modal);
-            bsModal.show();
+        function clearStaleModalBackdrop() {
+            const backdrops = document.querySelectorAll('.modal-backdrop');
+            if (backdrops.length > 1) {
+                backdrops.forEach((el, idx) => {
+                    if (idx < backdrops.length - 1) el.remove();
+                });
+            }
+            if (!document.querySelector('.modal.show')) {
+                document.body.classList.remove('modal-open');
+                document.body.style.removeProperty('padding-right');
+            }
         }
+
+        function forceResetRescheduleModalState() {
+            const modal = document.getElementById('rescheduleModal');
+            const bs = modal ? bootstrap.Modal.getInstance(modal) : null;
+            if (bs) {
+                try { bs.hide(); } catch (e) {}
+            }
+            setTimeout(clearStaleModalBackdrop, 0);
+            setTimeout(clearStaleModalBackdrop, 120);
+        }
+
+        function toDatetimeLocalValue(rawValue) {
+            const value = String(rawValue || '').trim();
+            if (!value) return '';
+
+            // already-like format: YYYY-MM-DD HH:MM[:SS]
+            if (/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}(:\d{2})?$/.test(value)) {
+                return value.slice(0, 16).replace(' ', 'T');
+            }
+
+            // format: DD/MM/YYYY HH:MM [AM|PM]
+            const m = value.match(/^(\d{2})\/(\d{2})\/(\d{4})\s(\d{1,2}):(\d{2})(?:\s?(AM|PM))?$/i);
+            if (!m) return '';
+            const dd = m[1];
+            const mm = m[2];
+            const yyyy = m[3];
+            let hh = parseInt(m[4], 10);
+            const min = m[5];
+            const ampm = (m[6] || '').toUpperCase();
+            if (ampm === 'PM' && hh < 12) hh += 12;
+            if (ampm === 'AM' && hh === 12) hh = 0;
+            const hh2 = String(hh).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}T${hh2}:${min}`;
+        }
+
+        function submitRescheduleFromDialog(logId, newReceiveAt) {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = `/admin/reschedule_withdrawal/${logId}`;
+
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = '{{ csrf_token() }}';
+            form.appendChild(csrfInput);
+
+            const dtInput = document.createElement('input');
+            dtInput.type = 'hidden';
+            dtInput.name = 'new_receive_at';
+            dtInput.value = newReceiveAt;
+            form.appendChild(dtInput);
+
+            document.body.appendChild(form);
+            form.submit();
+        }
+
+        async function openRescheduleDialog(logId, currentDatetime, productName) {
+            const dtValue = toDatetimeLocalValue(currentDatetime);
+            const result = await Swal.fire({
+                title: 'เปลี่ยนวันรับของ',
+                html: `
+                    <div class="text-start small mb-2 text-muted">รายการ</div>
+                    <div class="text-start fw-medium mb-3">${String(productName || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                    <div class="text-start small mb-2 text-muted">วันและเวลารับของใหม่</div>
+                    <input type="datetime-local" id="swalRescheduleInput" class="swal2-input" style="width:100%;margin:.25rem 0 0;" value="${dtValue}">
+                `,
+                focusConfirm: false,
+                showCancelButton: true,
+                confirmButtonText: 'บันทึก',
+                cancelButtonText: 'ยกเลิก',
+                preConfirm: () => {
+                    const value = document.getElementById('swalRescheduleInput')?.value || '';
+                    if (!value) {
+                        Swal.showValidationMessage('กรุณาระบุวันและเวลาใหม่');
+                        return false;
+                    }
+                    const selectedDate = new Date(value);
+                    if (Number.isNaN(selectedDate.getTime()) || selectedDate <= new Date()) {
+                        Swal.showValidationMessage('วันที่ใหม่ต้องเป็นเวลาในอนาคต');
+                        return false;
+                    }
+                    return value;
+                }
+            });
+
+            if (result.isConfirmed && result.value) {
+                submitRescheduleFromDialog(logId, result.value);
+            }
+        }
+
+        function openRescheduleModal(logId, currentDatetime, productName) {
+            // backward-compatible alias
+            openRescheduleDialog(logId, currentDatetime, productName);
+        }
+
+        document.getElementById('rescheduleModal')?.addEventListener('hidden.bs.modal', clearStaleModalBackdrop);
+        document.getElementById('rescheduleModal')?.addEventListener('shown.bs.modal', clearStaleModalBackdrop);
+        document.getElementById('rescheduleForm')?.addEventListener('submit', () => {
+            forceResetRescheduleModalState();
+        });
 
         function submitImport() {
             const fileInput = document.getElementById('importFile');
@@ -4607,6 +4854,59 @@
                 }
             });
         }
+
+        // ===== GA Request AJAX Filter =====
+        let currentGaLoc = '{{ ga_selected_loc }}';
+        let gaFilterTimer = null;
+
+        function switchGaLoc(loc) {
+            currentGaLoc = loc;
+            // update tab active state
+            document.querySelectorAll('#gaLocTabs button').forEach(btn => {
+                btn.className = btn.className.replace(/btn-primary|btn-light text-muted border-0/g, '').trim();
+                const isActive = (loc === '' && btn.textContent.trim() === 'รวม')
+                    || (loc === 'PC1' && btn.textContent.trim() === 'PC1')
+                    || (loc === 'CC' && btn.textContent.trim() === 'CC');
+                btn.classList.add(isActive ? 'btn-primary' : 'btn-light', ...(isActive ? [] : ['text-muted', 'border-0']));
+            });
+            filterGaRequests();
+        }
+
+        function filterGaRequests() {
+            clearTimeout(gaFilterTimer);
+            gaFilterTimer = setTimeout(_doFilterGaRequests, 250);
+        }
+
+        function clearGaFilters() {
+            document.getElementById('gaStatusFilter').value = '';
+            document.getElementById('gaKeywordFilter').value = '';
+            filterGaRequests();
+        }
+
+        function _doFilterGaRequests() {
+            const status = document.getElementById('gaStatusFilter').value;
+            const keyword = document.getElementById('gaKeywordFilter').value.trim();
+            const params = new URLSearchParams({ ga_loc: currentGaLoc, ga_status: status, ga_keyword: keyword });
+            const tbody = document.getElementById('gaRequestTbody');
+            if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin me-2"></i>กำลังโหลด...</td></tr>';
+
+            fetch('/admin/filter_ga_requests?' + params.toString())
+                .then(checkAuth).then(res => res.json()).then(data => {
+                    if (!data.success) return;
+                    if (tbody) tbody.innerHTML = data.html;
+                    const badge = document.getElementById('gaPendingBadge');
+                    if (badge) badge.textContent = 'Pending ' + data.pending_count + ' รายการ';
+                    const countEl = document.getElementById('gaResultCount');
+                    if (countEl) {
+                        const rows = tbody ? tbody.querySelectorAll('tr[class], tr:not([class])') : [];
+                        const hasEmpty = tbody && tbody.querySelector('td[colspan]');
+                        countEl.textContent = hasEmpty ? '' : (rows.length + ' รายการ');
+                    }
+                }).catch(() => {
+                    if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-danger">โหลดข้อมูลไม่สำเร็จ</td></tr>';
+                });
+        }
+        // ===== End GA Request AJAX Filter =====
 
         function openGaEmailSettingModal() {
             fetch('/admin/get_ga_email_settings').then(checkAuth).then(res => res.json()).then(data => {

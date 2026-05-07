@@ -93,6 +93,9 @@ SESSION_TIMEOUT_MINUTES = 15
 USER_LOCK_TIMEOUT_MINUTES = 5
 ACTIVE_CLIENT_WINDOW_MINUTES = int(os.environ.get('ACTIVE_CLIENT_WINDOW_MINUTES', '5'))
 ACTIVE_LOG_THROTTLE_SECONDS = int(os.environ.get('ACTIVE_LOG_THROTTLE_SECONDS', '20'))
+DEVICE_PRESENCE_TIMEOUT_SECONDS = int(os.environ.get('DEVICE_PRESENCE_TIMEOUT_SECONDS', '180'))
+DEVICE_NOTIFICATION_TTL_MINUTES = int(os.environ.get('DEVICE_NOTIFICATION_TTL_MINUTES', '120'))
+DEVICE_NOTIFICATION_READ_RETENTION_DAYS = int(os.environ.get('DEVICE_NOTIFICATION_READ_RETENTION_DAYS', '7'))
 ALLOWED_IMPORT_EXTENSIONS = {'xlsx', 'xlsm', 'xls'}
 ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 _default_ga_upload_root = os.path.join(os.environ.get('LOCALAPPDATA', BASE_DIR), 'PCM', 'ga_uploads')
@@ -102,7 +105,7 @@ GA_REQUEST_STATUS_OPTIONS = ('Pending', 'In Progress', 'Resolved', 'Rejected')
 SENSITIVE_POST_ENDPOINTS = {
     'index', 'admin_login', 'logout_user', 'admin_logout',
     'add_to_cart', 'remove_from_cart', 'update_cart_qty', 'confirm_withdrawal',
-    'approve_request', 'reject_request', 'cancel_scheduled_withdrawal', 'reschedule_withdrawal', 'import_excel', 'clear_system_data',
+    'approve_request', 'reject_request', 'cancel_scheduled_withdrawal', 'reschedule_withdrawal', 'confirm_scheduled_pickup', 'import_excel', 'clear_system_data',
     'toggle_product_status', 'add_product', 'edit_product', 'add_product_ajax',
     'write_off_ajax', 'unlock_user_ajax', 'unlock_user', 'add_user_ajax', 'delete_user',
     'update_user_ajax', 'save_alert_time', 'daily_alert', 'reset_lock',
@@ -165,9 +168,85 @@ def register_failed_attempt(scope):
 def clear_failed_attempts(scope):
     FAILED_LOGIN_ATTEMPTS.pop(f"{scope}:{get_client_ip()}", None)
 
+
+def build_history_log_filters(role, log_loc='', log_type='', log_date_from='', log_date_to='', log_search=''):
+    where_clauses = ["l.status != 'Pending'"]
+    params = []
+    ts_expr = transaction_timestamp_expr('l')
+
+    if role == 'admin_pc1':
+        where_clauses.append("(u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')")
+    elif role == 'admin_cc':
+        where_clauses.append("(u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')")
+    elif role == 'superadmin':
+        if log_loc == 'PC1':
+            where_clauses.append("(u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')")
+        elif log_loc == 'CC':
+            where_clauses.append("(u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')")
+
+    normalized_type = (log_type or '').strip().lower()
+    if normalized_type == 'withdraw':
+        where_clauses.append("""(
+            l.status = 'Approved' AND (
+                l.action = 'Withdrawn'
+                OR l.action = 'withdraw'
+                OR l.action = 'ขอเบิกยา'
+                OR l.action = 'ขอเบิกอุปกรณ์'
+                OR l.action LIKE 'เบิกหมวกเซฟตี้%'
+            )
+        )""")
+    elif normalized_type == 'receive':
+        where_clauses.append("(l.action = 'Received' OR l.action LIKE 'รับเข้า Lot:%')")
+    elif normalized_type == 'adjust':
+        where_clauses.append("(l.action = 'Adjusted' OR l.action LIKE 'ตัดจ่าย%' OR l.action LIKE 'ปรับ%')")
+    elif normalized_type == 'rejected':
+        where_clauses.append("l.status = 'Rejected'")
+    elif normalized_type == 'scheduled-picked':
+        where_clauses.append("l.status = 'Approved'")
+        where_clauses.append("COALESCE(l.request_receive_mode, 'immediate') = 'scheduled'")
+        where_clauses.append("l.pickup_confirmed_at IS NOT NULL")
+        where_clauses.append("trim(l.pickup_confirmed_at) != ''")
+    elif normalized_type == 'approved':
+        where_clauses.append("l.status = 'Approved'")
+    elif normalized_type == 'cancelled':
+        where_clauses.append("l.status = 'Cancelled'")
+
+    normalized_date_from = str(log_date_from or '').strip()
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', normalized_date_from):
+        where_clauses.append(f"substr({ts_expr}, 1, 10) >= ?")
+        params.append(normalized_date_from)
+
+    normalized_date_to = str(log_date_to or '').strip()
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', normalized_date_to):
+        where_clauses.append(f"substr({ts_expr}, 1, 10) <= ?")
+        params.append(normalized_date_to)
+
+    normalized_search = clean_input_text(log_search, 100)
+    if normalized_search:
+        keyword = f'%{normalized_search}%'
+        where_clauses.append("""(
+            COALESCE(u.name, '') LIKE ?
+            OR COALESCE(l.emp_id, '') LIKE ?
+            OR COALESCE(p.name, '') LIKE ?
+            OR COALESCE(p.code, '') LIKE ?
+            OR COALESCE(l.action, '') LIKE ?
+        )""")
+        params.extend([keyword, keyword, keyword, keyword, keyword])
+
+    return " AND " + " AND ".join(where_clauses), params
+
 def clean_input_text(value, max_length=100):
     text = re.sub(r'\s+', ' ', str(value or '').strip())
     return text[:max_length]
+
+
+def normalize_device_token(value):
+    token = clean_input_text(value, 80)
+    if not token:
+        return ''
+    if not re.fullmatch(r'[A-Za-z0-9._\-]{12,80}', token):
+        return ''
+    return token
 
 def clean_multiline_text(value, max_length=2000):
     text = str(value or '').replace('\x00', '')
@@ -704,6 +783,20 @@ def ensure_application_schema():
             conn.execute("ALTER TABLE transaction_logs ADD COLUMN request_receive_mode TEXT DEFAULT 'immediate'")
         if transaction_log_columns and 'requested_receive_at' not in transaction_log_columns:
             conn.execute("ALTER TABLE transaction_logs ADD COLUMN requested_receive_at TEXT")
+        if transaction_log_columns and 'requester_ip' not in transaction_log_columns:
+            conn.execute("ALTER TABLE transaction_logs ADD COLUMN requester_ip TEXT")
+        if transaction_log_columns and 'requester_device_token' not in transaction_log_columns:
+            conn.execute("ALTER TABLE transaction_logs ADD COLUMN requester_device_token TEXT")
+        if transaction_log_columns and 'batch_token' not in transaction_log_columns:
+            conn.execute("ALTER TABLE transaction_logs ADD COLUMN batch_token TEXT")
+        if transaction_log_columns and 'pickup_confirmed_at' not in transaction_log_columns:
+            conn.execute("ALTER TABLE transaction_logs ADD COLUMN pickup_confirmed_at TEXT")
+        if transaction_log_columns and 'pickup_confirmed_by' not in transaction_log_columns:
+            conn.execute("ALTER TABLE transaction_logs ADD COLUMN pickup_confirmed_by TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_transaction_logs_batch_token ON transaction_logs(batch_token)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_transaction_logs_requester_ip ON transaction_logs(requester_ip)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_transaction_logs_requester_device_token ON transaction_logs(requester_device_token)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_transaction_logs_pickup_confirmed_at ON transaction_logs(pickup_confirmed_at)")
 
         conn.execute('''
             CREATE TABLE IF NOT EXISTS ga_requests (
@@ -735,7 +828,20 @@ def ensure_application_schema():
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_ga_requests_status_location ON ga_requests(status, location, created_at DESC)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_ga_requests_emp_id ON ga_requests(emp_id, created_at DESC)')
-        
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS ga_request_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id INTEGER NOT NULL,
+                sender_type TEXT NOT NULL,
+                sender_name TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(request_id) REFERENCES ga_requests(id) ON DELETE CASCADE
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_ga_msg_request ON ga_request_messages(request_id, created_at)')
+
         # 📬 Notification Settings Table
         conn.execute('''
             CREATE TABLE IF NOT EXISTS notification_settings (
@@ -788,6 +894,42 @@ def ensure_application_schema():
         conn.execute('CREATE INDEX IF NOT EXISTS idx_notification_delivery_logs_created_at ON notification_delivery_logs(created_at DESC)')
 
         conn.execute('''
+            CREATE TABLE IF NOT EXISTS device_notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_ip TEXT NOT NULL,
+                target_device_token TEXT,
+                batch_token TEXT,
+                log_id INTEGER,
+                emp_id TEXT,
+                event_type TEXT NOT NULL,
+                title TEXT,
+                message TEXT,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                read_at TEXT
+            )
+        ''')
+        device_notification_columns = {row[1] for row in conn.execute("PRAGMA table_info(device_notifications)").fetchall()}
+        if device_notification_columns and 'target_device_token' not in device_notification_columns:
+            conn.execute("ALTER TABLE device_notifications ADD COLUMN target_device_token TEXT")
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_device_notifications_target ON device_notifications(target_ip, is_read, created_at DESC)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_device_notifications_target_device ON device_notifications(target_ip, target_device_token, is_read, created_at DESC)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_device_notifications_batch ON device_notifications(batch_token, is_read, created_at DESC)')
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS device_notification_presence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                batch_token TEXT NOT NULL,
+                target_ip TEXT NOT NULL,
+                target_device_token TEXT NOT NULL,
+                first_seen TEXT NOT NULL DEFAULT (datetime('now', '+7 hours')),
+                last_seen TEXT NOT NULL DEFAULT (datetime('now', '+7 hours')),
+                UNIQUE(batch_token, target_ip, target_device_token)
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_device_notification_presence_recent ON device_notification_presence(batch_token, target_ip, target_device_token, last_seen DESC)')
+
+        conn.execute('''
             CREATE TABLE IF NOT EXISTS active_client_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 actor_type TEXT NOT NULL,
@@ -820,6 +962,76 @@ def start_write_transaction(conn):
     except sqlite3.OperationalError as e:
         if 'within a transaction' not in str(e).lower():
             raise
+
+
+def queue_device_notification(conn, *, target_ip, event_type, title, message, emp_id=None, log_id=None, batch_token=None, target_device_token=None):
+    target_ip = str(target_ip or '').strip()
+    target_device_token = normalize_device_token(target_device_token)
+    if not target_ip or target_ip == 'unknown':
+        return
+    conn.execute(
+        '''
+        INSERT INTO device_notifications
+            (target_ip, target_device_token, batch_token, log_id, emp_id, event_type, title, message)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''',
+        (target_ip, target_device_token or None, batch_token or None, log_id, emp_id, event_type, title, message)
+    )
+
+
+def upsert_device_presence(conn, *, batch_token, target_ip, target_device_token):
+    batch_token = str(batch_token or '').strip()
+    target_ip = str(target_ip or '').strip()
+    target_device_token = normalize_device_token(target_device_token)
+    if not batch_token or not target_ip or target_ip == 'unknown' or not target_device_token:
+        return
+    conn.execute(
+        '''
+        INSERT INTO device_notification_presence (batch_token, target_ip, target_device_token, first_seen, last_seen)
+        VALUES (?, ?, ?, datetime('now', '+7 hours'), datetime('now', '+7 hours'))
+        ON CONFLICT(batch_token, target_ip, target_device_token)
+        DO UPDATE SET last_seen = datetime('now', '+7 hours')
+        ''',
+        (batch_token, target_ip, target_device_token)
+    )
+
+
+def is_device_presence_active(conn, *, batch_token, target_ip, target_device_token):
+    batch_token = str(batch_token or '').strip()
+    target_ip = str(target_ip or '').strip()
+    target_device_token = normalize_device_token(target_device_token)
+    if not batch_token or not target_ip or target_ip == 'unknown' or not target_device_token:
+        return False
+    row = conn.execute(
+        '''
+        SELECT 1
+        FROM device_notification_presence
+        WHERE batch_token = ?
+          AND target_ip = ?
+          AND target_device_token = ?
+          AND last_seen >= datetime('now', '+7 hours', ?)
+        LIMIT 1
+        ''',
+        (batch_token, target_ip, target_device_token, f'-{max(10, DEVICE_PRESENCE_TIMEOUT_SECONDS)} seconds')
+    ).fetchone()
+    return bool(row)
+
+
+def cleanup_device_notification_data(conn):
+    ttl_minutes = max(10, int(DEVICE_NOTIFICATION_TTL_MINUTES))
+    read_retention_days = max(1, int(DEVICE_NOTIFICATION_READ_RETENTION_DAYS))
+    conn.execute(
+        "DELETE FROM device_notifications WHERE created_at < datetime('now', ?)",
+        (f'-{ttl_minutes} minutes',)
+    )
+    conn.execute(
+        "DELETE FROM device_notifications WHERE is_read = 1 AND read_at IS NOT NULL AND read_at < datetime('now', '+7 hours', ?)",
+        (f'-{read_retention_days} days',)
+    )
+    conn.execute(
+        "DELETE FROM device_notification_presence WHERE last_seen < datetime('now', '+7 hours', ?)",
+        (f'-{max(5, DEVICE_NOTIFICATION_READ_RETENTION_DAYS)} days',)
+    )
 
 def transaction_timestamp_expr(alias='l'):
     prefix = f"{alias}." if alias else ""
@@ -3443,7 +3655,9 @@ def confirm_withdrawal():
         if not requested_receive_at:
             flash('❌ กรุณาระบุวันและเวลารับของสำหรับการเบิกล่วงหน้า', 'danger')
             return redirect(url_for('menu', emp_id=emp_id, open_cart='true'))
-        if datetime.strptime(requested_receive_at, '%Y-%m-%d %H:%M:%S') <= get_thailand_time():
+        thailand_tz = pytz.timezone(THAILAND_TZ)
+        requested_dt = thailand_tz.localize(datetime.strptime(requested_receive_at, '%Y-%m-%d %H:%M:%S'))
+        if requested_dt <= get_thailand_time():
             flash('❌ วันเวลารับของล่วงหน้าต้องมากกว่าเวลาปัจจุบัน', 'danger')
             return redirect(url_for('menu', emp_id=emp_id, open_cart='true'))
     else:
@@ -3482,7 +3696,10 @@ def confirm_withdrawal():
         msg_list.append(f"🩺 อาการ: {symptom}")
     
     thai_now = get_thailand_time().strftime('%d/%m/%Y %H:%M:%S')
-    
+    batch_token = secrets.token_urlsafe(20)
+    requester_ip = get_client_ip()
+    requester_device_token = normalize_device_token(request.form.get('device_token'))
+
     # ใช้ manager แค่คำนวณความเป็นไปได้/หมายเหตุสำหรับยา split (ยังไม่ตัดสต็อกจริง)
     manager = UnitConversionManager(conn)
     
@@ -3517,7 +3734,8 @@ def confirm_withdrawal():
             # สำหรับยาแบบแยกหน่วย: qty = จำนวนแพ็ก (full_packages_needed), qty_base_unit = จำนวนหน่วยย่อย (เม็ด)
             # สำหรับรายการอื่น: qty = จำนวนที่ขอเบิก (หน่วยเดียวกับ unit ของสินค้า)
             if is_medicine:
-                result_qty = withdrawal_result.get('full_packages_needed', item['qty'])
+                # fallback ไปที่ยอดที่ user ขอจริง ป้องกันกรณีคำนวณได้ 0 จาก open package
+                result_qty = max(1, int(withdrawal_result.get('full_packages_used', item['qty']) or item['qty'] or 1))
             else:
                 result_qty = withdrawal_result.get('full_packages_used', item['qty'])
             result_pkg_qty = withdrawal_result.get('total_packages_used', result_qty)
@@ -3533,22 +3751,22 @@ def confirm_withdrawal():
                     conn.execute('''
                         UPDATE transaction_logs 
                         SET qty = ?, qty_base_unit = ?, timestamp = ?, status = 'Pending', note = ?,
-                            request_receive_mode = ?, requested_receive_at = ?
+                            request_receive_mode = ?, requested_receive_at = ?, batch_token = ?, requester_ip = ?, requester_device_token = ?
                         WHERE id = ?
-                    ''', (result_qty, item['qty'], thai_now, result_note, receive_mode, requested_receive_at or None, existing_helmet['id']))
+                    ''', (result_qty, item['qty'], thai_now, result_note, receive_mode, requested_receive_at or None, batch_token, requester_ip, requester_device_token or None, existing_helmet['id']))
                 else:
                     conn.execute('''
-                        INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note, request_receive_mode, requested_receive_at) 
-                        VALUES (?, ?, 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)', ?, ?, ?, 'Pending', ?, ?, ?, ?)
-                    ''', (emp_id, item['product_id'], result_qty, item['qty'], result_pkg_qty, thai_now, result_note, receive_mode, requested_receive_at or None))
+                        INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note, request_receive_mode, requested_receive_at, batch_token, requester_ip, requester_device_token) 
+                        VALUES (?, ?, 'เบิกหมวกเซฟตี้ (รอบ 2 ปี)', ?, ?, ?, 'Pending', ?, ?, ?, ?, ?, ?, ?)
+                    ''', (emp_id, item['product_id'], result_qty, item['qty'], result_pkg_qty, thai_now, result_note, receive_mode, requested_receive_at or None, batch_token, requester_ip, requester_device_token or None))
             else:
                 result_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
                 if has_medicine and is_medicine:
                     result_note = f"อาการ: {symptom}" + (f" | {result_note}" if result_note else "")
                 conn.execute('''
-                    INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note, request_receive_mode, requested_receive_at) 
-                    VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, ?, ?, 'Pending', ?, ?, ?, ?)
-                ''', (emp_id, item['product_id'], result_qty, item['qty'], result_pkg_qty, thai_now, result_note, receive_mode, requested_receive_at or None))
+                    INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note, request_receive_mode, requested_receive_at, batch_token, requester_ip, requester_device_token) 
+                    VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, ?, ?, 'Pending', ?, ?, ?, ?, ?, ?, ?)
+                ''', (emp_id, item['product_id'], result_qty, item['qty'], result_pkg_qty, thai_now, result_note, receive_mode, requested_receive_at or None, batch_token, requester_ip, requester_device_token or None))
             
             log_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
             display_qty = item['qty']
@@ -3600,8 +3818,7 @@ def confirm_withdrawal():
         admin_id='superadmin'
     )
     
-    flash('✅ ส่งคำขอเบิกเรียบร้อย! รอการอนุมัติจากผู้ดูแลระบบ', 'success')
-    return redirect(url_for('menu', emp_id=emp_id))
+    return redirect(url_for('withdrawal_status_page', token=batch_token))
  
  # --- เพิ่ม Route สำหรับอัปเดตจำนวนในตะกร้า (AJAX) ---
 @app.route('/update_cart_qty', methods=['POST'])
@@ -3715,13 +3932,14 @@ def api_get_history():
 
     per_page = 5
     offset = (page - 1) * per_page
+    ts_expr = transaction_timestamp_expr('l')
 
     conn = get_db_connection()
     total = conn.execute(
         'SELECT COUNT(*) FROM transaction_logs WHERE emp_id = ?', (emp_id,)
     ).fetchone()[0]
 
-    rows = conn.execute('''
+    rows = conn.execute(f'''
          SELECT l.id, l.action, l.qty, l.qty_base_unit, l.status, l.note, l.timestamp,
              l.request_receive_mode, l.requested_receive_at,
                p.name as product_name, p.unit, p.category, p.base_unit,
@@ -3729,7 +3947,7 @@ def api_get_history():
         FROM transaction_logs l
         JOIN products p ON l.product_id = p.id
         WHERE l.emp_id = ?
-        ORDER BY l.timestamp DESC
+        ORDER BY datetime({ts_expr}) DESC, l.id DESC
         LIMIT ? OFFSET ?
     ''', (emp_id, per_page, offset)).fetchall()
     conn.close()
@@ -3869,6 +4087,176 @@ def get_estimated_days_left(stock, withdraw_total):
     days_left = stock / daily_avg
     return math.ceil(days_left)
 
+# ---------------------------------------------------------------------------
+# PUBLIC: ตรวจสถานะคำขอเบิก (ไม่ต้อง login)
+# ---------------------------------------------------------------------------
+@app.route('/withdrawal-status/<token>')
+def withdrawal_status_page(token):
+    # Validate token format to prevent path traversal / injection
+    if not re.match(r'^[A-Za-z0-9_\-]{10,60}$', token):
+        abort(404)
+    conn = get_db_connection()
+    rows = conn.execute('''
+        SELECT l.id, l.emp_id, l.action, l.qty, l.qty_base_unit, l.status,
+               l.timestamp, l.note, l.request_receive_mode, l.requested_receive_at,
+               p.name AS product_name, p.unit, p.base_unit,
+               u.name AS requester_name, u.department, u.location
+        FROM transaction_logs l
+        LEFT JOIN products p ON l.product_id = p.id
+        LEFT JOIN users u ON l.emp_id = u.emp_id
+        WHERE l.batch_token = ?
+        ORDER BY l.id ASC
+    ''', (token,)).fetchall()
+    conn.close()
+    if not rows:
+        abort(404)
+    rows = [dict(r) for r in rows]
+    # Determine overall batch status
+    statuses = {r['status'] for r in rows}
+    if statuses == {'Approved'}:
+        batch_status = 'Approved'
+    elif statuses == {'Rejected'}:
+        batch_status = 'Rejected'
+    elif 'Rejected' in statuses and all(s in ('Approved', 'Rejected') for s in statuses):
+        batch_status = 'PartialReject'
+    elif 'Pending' in statuses:
+        batch_status = 'Pending'
+    else:
+        batch_status = 'Unknown'
+    # Build absolute URL for QR
+    status_url = request.url
+    return render_template('withdrawal_status.html',
+                           token=token,
+                           rows=rows,
+                           batch_status=batch_status,
+                           status_url=status_url)
+
+
+@app.route('/withdrawal-status/<token>/qr.png')
+def withdrawal_status_qr(token):
+    if not re.match(r'^[A-Za-z0-9_\-]{10,60}$', token):
+        abort(404)
+    # Check token exists in DB
+    conn = get_db_connection()
+    exists = conn.execute(
+        'SELECT 1 FROM transaction_logs WHERE batch_token = ? LIMIT 1', (token,)
+    ).fetchone()
+    conn.close()
+    if not exists:
+        abort(404)
+    status_url = url_for('withdrawal_status_page', token=token, _external=True)
+    img = qrcode.make(status_url)
+    buf = BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    response = make_response(send_file(buf, mimetype='image/png'))
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+@app.route('/withdrawal-status/<token>/poll', methods=['GET'])
+def withdrawal_status_poll(token):
+    if not re.match(r'^[A-Za-z0-9_\-]{10,60}$', token):
+        abort(404)
+
+    current_ip = get_client_ip()
+    current_device_token = normalize_device_token(request.args.get('device_token'))
+    conn = get_db_connection()
+    cleanup_device_notification_data(conn)
+    if current_device_token and not is_device_presence_active(
+        conn,
+        batch_token=token,
+        target_ip=current_ip,
+        target_device_token=current_device_token,
+    ):
+        conn.commit()
+        conn.close()
+        return jsonify({'ok': True, 'items': []})
+
+    ttl_minutes = max(10, int(DEVICE_NOTIFICATION_TTL_MINUTES))
+    if current_device_token:
+        rows = conn.execute(
+            '''
+            SELECT id, event_type, title, message, created_at
+            FROM device_notifications
+            WHERE target_ip = ? AND batch_token = ? AND is_read = 0
+              AND COALESCE(target_device_token, '') = ?
+              AND created_at >= datetime('now', ?)
+            ORDER BY id ASC
+            ''',
+            (current_ip, token, current_device_token, f'-{ttl_minutes} minutes')
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            '''
+            SELECT id, event_type, title, message, created_at
+            FROM device_notifications
+            WHERE target_ip = ? AND batch_token = ? AND is_read = 0
+              AND (target_device_token IS NULL OR trim(target_device_token) = '')
+              AND created_at >= datetime('now', ?)
+            ORDER BY id ASC
+            ''',
+            (current_ip, token, f'-{ttl_minutes} minutes')
+        ).fetchall()
+
+    items = [dict(r) for r in rows]
+    if items:
+        conn.executemany(
+            "UPDATE device_notifications SET is_read = 1, read_at = datetime('now', '+7 hours') WHERE id = ?",
+            [(item['id'],) for item in items]
+        )
+    conn.commit()
+    conn.close()
+
+    return jsonify({'ok': True, 'items': items})
+
+
+@app.route('/withdrawal-status/<token>/heartbeat', methods=['GET'])
+def withdrawal_status_heartbeat(token):
+    if not re.match(r'^[A-Za-z0-9_\-]{10,60}$', token):
+        abort(404)
+
+    current_ip = get_client_ip()
+    current_device_token = normalize_device_token(request.args.get('device_token'))
+    conn = get_db_connection()
+    cleanup_device_notification_data(conn)
+    if current_device_token:
+        upsert_device_presence(
+            conn,
+            batch_token=token,
+            target_ip=current_ip,
+            target_device_token=current_device_token,
+        )
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/withdrawal-status/<token>/release', methods=['POST', 'GET'])
+def withdrawal_status_release(token):
+    if not re.match(r'^[A-Za-z0-9_\-]{10,60}$', token):
+        abort(404)
+
+    current_ip = get_client_ip()
+    current_device_token = normalize_device_token(request.values.get('device_token'))
+    if not current_device_token:
+        return jsonify({'ok': True})
+
+    conn = get_db_connection()
+    conn.execute(
+        '''
+        DELETE FROM device_notification_presence
+        WHERE batch_token = ?
+          AND target_ip = ?
+          AND target_device_token = ?
+        ''',
+        (token, current_ip, current_device_token)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
 @app.route('/admin_login', methods=['GET', 'POST'])
 def admin_login():
     if request.method == 'POST':
@@ -3922,17 +4310,23 @@ def admin_dashboard(module):
         role_log_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')"
 
     selected_loc = request.args.get('log_loc', '') 
+    selected_log_type = request.args.get('log_type', '').strip().lower()
+    if selected_log_type not in ('', 'withdraw', 'receive', 'adjust', 'rejected', 'scheduled-picked', 'approved', 'cancelled'):
+        selected_log_type = ''
+    selected_log_date_from = request.args.get('log_date_from', '').strip()
+    selected_log_date_to = request.args.get('log_date_to', '').strip()
+    selected_log_search = clean_input_text(request.args.get('log_search', ''), 100)
     selected_pending_receive = request.args.get('pending_receive', '').strip().lower()
     if selected_pending_receive not in ('', 'immediate', 'scheduled'):
         selected_pending_receive = ''
-    super_admin_filter = ""
-    if role == 'superadmin':
-        if selected_loc == 'PC1':
-            super_admin_filter = " AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')"
-        elif selected_loc == 'CC':
-            super_admin_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')"
-    
-    final_log_filter = role_log_filter + super_admin_filter
+    final_log_filter, final_log_params = build_history_log_filters(
+        role,
+        selected_loc,
+        selected_log_type,
+        selected_log_date_from,
+        selected_log_date_to,
+        selected_log_search,
+    )
     pending_receive_filter = ""
     if selected_pending_receive == 'immediate':
         pending_receive_filter = " AND COALESCE(l.request_receive_mode, 'immediate') = 'immediate'"
@@ -4002,7 +4396,7 @@ def admin_dashboard(module):
         JOIN users u ON l.emp_id = u.emp_id
         WHERE l.status = 'Approved' 
           AND datetime({transaction_timestamp_expr('l')}) >= datetime('now', 'localtime', '-30 days')
-          {final_log_filter}
+                    {role_log_filter}
         GROUP BY p.id 
         ORDER BY total_qty DESC LIMIT 5
     '''
@@ -4023,17 +4417,21 @@ def admin_dashboard(module):
     # --- รายการเบิกล่วงหน้าที่อนุมัติแล้ว รอรับของในอนาคต ---
     scheduled_approved_query = f'''
         SELECT l.*, u.name as emp_name, u.department, u.location,
-               p.name as product_name, p.unit, p.category, p.base_unit, p.package_unit, p.conversion_rate
+               p.name as product_name, p.unit, p.category, p.base_unit, p.package_unit, p.conversion_rate,
+               CASE
+                   WHEN l.requested_receive_at < datetime('now', '+7 hours') THEN 1
+                   ELSE 0
+               END as is_overdue
         FROM transaction_logs l
         LEFT JOIN users u ON l.emp_id = u.emp_id
         LEFT JOIN products p ON l.product_id = p.id
         WHERE l.request_receive_mode = 'scheduled'
         AND l.status = 'Approved'
+        AND (l.pickup_confirmed_at IS NULL OR trim(l.pickup_confirmed_at) = '')
         AND l.requested_receive_at IS NOT NULL
         AND trim(l.requested_receive_at) != ''
-        AND l.requested_receive_at >= datetime('now', '+7 hours')
         {role_log_filter}
-        ORDER BY l.requested_receive_at ASC
+        ORDER BY is_overdue DESC, l.requested_receive_at ASC
     '''
     scheduled_approved_logs = conn.execute(scheduled_approved_query).fetchall()
 
@@ -4054,21 +4452,32 @@ def admin_dashboard(module):
     categories = conn.execute(f"SELECT DISTINCT category FROM products WHERE 1=1 {product_loc_filter}").fetchall()
 
     logs = conn.execute(f'''
-        SELECT l.*, u.name as emp_name, u.department, u.location, p.name as product_name, p.unit
+        SELECT l.*, COALESCE(u.name, SUBSTR(l.emp_id, 7)) as emp_name, u.department, u.location, p.name as product_name, p.unit
         FROM transaction_logs l
-        LEFT JOIN users u ON l.emp_id = u.emp_id
+        LEFT JOIN users u ON (
+            CASE 
+                WHEN l.emp_id LIKE 'ADMIN:%' THEN SUBSTR(l.emp_id, 7) = u.name
+                ELSE l.emp_id = u.emp_id
+            END
+        )
         LEFT JOIN products p ON l.product_id = p.id
         WHERE 1=1 {final_log_filter}
         ORDER BY datetime({transaction_timestamp_expr('l')}) DESC, l.id DESC LIMIT ? OFFSET ?
-    ''', (log_per_page, log_offset)).fetchall()
+    ''', (*final_log_params, log_per_page, log_offset)).fetchall()
 
     count_query = f'''
         SELECT COUNT(*) FROM transaction_logs l 
-        LEFT JOIN users u ON l.emp_id = u.emp_id 
+        LEFT JOIN users u ON (
+            CASE 
+                WHEN l.emp_id LIKE 'ADMIN:%' THEN SUBSTR(l.emp_id, 7) = u.name
+                ELSE l.emp_id = u.emp_id
+            END
+        )
+        LEFT JOIN products p ON l.product_id = p.id
         WHERE 1=1 {final_log_filter}
     '''
-    total_logs = conn.execute(count_query).fetchone()[0]
-    total_pages = math.ceil(total_logs / log_per_page)
+    total_logs = conn.execute(count_query, final_log_params).fetchone()[0]
+    total_pages = max(1, math.ceil(total_logs / log_per_page))
 
     product_columns = {row[1] for row in conn.execute("PRAGMA table_info(products)").fetchall()}
     if 'is_active' in product_columns:
@@ -4162,6 +4571,10 @@ def admin_dashboard(module):
                            active_window_minutes=ACTIVE_CLIENT_WINDOW_MINUTES,
                            admin_module=admin_module,
                            selected_loc=selected_loc,
+                           selected_log_type=selected_log_type,
+                           selected_log_date_from=selected_log_date_from,
+                           selected_log_date_to=selected_log_date_to,
+                           selected_log_search=selected_log_search,
                            selected_pending_receive=selected_pending_receive,
                            ga_requests=ga_requests,
                            ga_pending_count=ga_pending_count,
@@ -4219,6 +4632,187 @@ def stock_audit():
                           selected_month=monthly_payload['selected_month'],
                           selected_month_name=monthly_payload['month_name'],
                           active_day_count=active_day_count)
+
+@app.route('/admin/filter_ga_requests')
+def filter_ga_requests():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    role = session.get('admin_role', 'superadmin')
+    ga_loc = clean_input_text(request.args.get('ga_loc', ''), 10)
+    ga_status = clean_input_text(request.args.get('ga_status', ''), 20)
+    ga_keyword = clean_input_text(request.args.get('ga_keyword', ''), 100)
+
+    # Role-based location filter
+    params = []
+    role_filter = ""
+    if role == 'admin_pc1':
+        role_filter = " AND (g.location LIKE '%PC1%')"
+    elif role == 'admin_cc':
+        role_filter = " AND (g.location LIKE '%Coil Center%' OR g.location LIKE '%CC%')"
+
+    # Superadmin location tab
+    loc_filter = ""
+    if role == 'superadmin':
+        if ga_loc == 'PC1':
+            loc_filter = " AND (g.location LIKE '%PC1%')"
+        elif ga_loc == 'CC':
+            loc_filter = " AND (g.location LIKE '%Coil Center%' OR g.location LIKE '%CC%')"
+
+    # Status filter
+    status_filter = ""
+    if ga_status and ga_status in GA_REQUEST_STATUS_OPTIONS:
+        status_filter = " AND g.status = ?"
+        params.append(ga_status)
+
+    # Keyword filter
+    kw_filter = ""
+    if ga_keyword:
+        kw_filter = " AND (g.title LIKE ? OR g.requester_name LIKE ? OR g.description LIKE ? OR g.emp_id LIKE ?)"
+        kw_val = f'%{ga_keyword}%'
+        params.extend([kw_val, kw_val, kw_val, kw_val])
+
+    final_filter = role_filter + loc_filter + status_filter + kw_filter
+
+    conn = get_db_connection()
+    rows = conn.execute(f'''
+        SELECT g.*,
+               COALESCE(NULLIF(TRIM(g.requester_email_snapshot), ''), NULLIF(TRIM(u.email), ''), '-') AS requester_email
+        FROM ga_requests g
+        LEFT JOIN users u ON g.emp_id = u.emp_id
+        WHERE 1=1 {final_filter}
+        ORDER BY
+            CASE g.status
+                WHEN 'Pending' THEN 0
+                WHEN 'In Progress' THEN 1
+                ELSE 2
+            END,
+            datetime(g.created_at) DESC,
+            g.id DESC
+        LIMIT 100
+    ''', params).fetchall()
+
+    pending_count = conn.execute(
+        f"SELECT COUNT(*) FROM ga_requests g WHERE g.status = 'Pending' {role_filter}{loc_filter}",
+    ).fetchone()[0]
+    conn.close()
+
+    # Build HTML rows
+    status_badge = {
+        'Pending': 'bg-warning text-dark',
+        'In Progress': 'bg-primary',
+        'Resolved': 'bg-success',
+        'Rejected': 'bg-danger',
+    }
+    team_badge = {
+        'IT': 'bg-info-subtle text-info',
+        'SAFETY': 'bg-warning-subtle text-warning',
+    }
+    csrf_tok = escape(generate_csrf_token())
+    ga_selected_loc_safe = escape(ga_loc)
+
+    if not rows:
+        tbody_html = (
+            '<tr><td colspan="6" class="text-center py-4 text-muted">'
+            'ยังไม่มี GA Request ในเงื่อนไขที่เลือก'
+            '</td></tr>'
+        )
+    else:
+        parts = []
+        for req in rows:
+            req_dict = dict(req)
+            req_id = int(req_dict['id'])
+            req_no = f"GA-{req_id:05d}"
+            created_ts = req_dict.get('created_at', '')
+            try:
+                from datetime import datetime as _dt
+                import pytz as _pytz
+                _tz = _pytz.timezone('Asia/Bangkok')
+                _dt_obj = _dt.strptime(created_ts, '%Y-%m-%d %H:%M:%S').replace(tzinfo=_pytz.utc).astimezone(_tz)
+                created_display = _dt_obj.strftime('%d/%m/%Y %H:%M')
+            except Exception:
+                created_display = escape(created_ts or '-')
+
+            team = escape(str(req_dict.get('target_team') or '-'))
+            team_cls = team_badge.get(str(req_dict.get('target_team') or ''), 'bg-secondary-subtle text-secondary')
+            title_e = escape(str(req_dict.get('title') or '-'))
+            desc_e = escape(str(req_dict.get('description') or ''))
+            req_name = escape(str(req_dict.get('requester_name') or '-'))
+            emp_id_e = escape(str(req_dict.get('emp_id') or '-'))
+            dept_e = escape(str(req_dict.get('department') or '-'))
+            loc_e = escape(str(req_dict.get('location') or '-'))
+            email_e = escape(str(req_dict.get('requester_email') or '-'))
+            status = str(req_dict.get('status') or 'Pending')
+            status_cls = status_badge.get(status, 'bg-secondary')
+            handled_by = escape(str(req_dict.get('handled_by') or ''))
+            admin_note_e = escape(str(req_dict.get('admin_note') or ''))
+            image_path = str(req_dict.get('image_path') or '')
+
+            image_btn = ''
+            if image_path:
+                img_url = escape(image_path if image_path.startswith('http') else f'/admin/ga_image/{req_id}')
+                image_btn = (
+                    f'<div class="mt-2">'
+                    f'<button type="button" class="btn btn-sm btn-outline-primary rounded-pill"'
+                    f' data-image-url="{img_url}"'
+                    f' data-request-no="{escape(req_no)}"'
+                    f' data-title="{title_e}"'
+                    f' onclick="openGaImageViewer(this)">'
+                    f'<i class="fas fa-image me-1"></i> ดูรูปแนบ</button></div>'
+                )
+
+            note_html = ''
+            if admin_note_e:
+                note_html = (
+                    f'<div class="small text-muted mt-2 border-top pt-2">'
+                    f'หมายเหตุแอดมิน: {admin_note_e}</div>'
+                )
+
+            handled_html = f'<div class="small text-muted mt-2">{handled_by}</div>' if handled_by else ''
+
+            status_opts = ''.join(
+                f'<option value="{escape(s)}" {"selected" if s == status else ""}>{escape(s)}</option>'
+                for s in GA_REQUEST_STATUS_OPTIONS
+            )
+
+            parts.append(
+                f'<tr>'
+                f'<td class="ps-4 small text-muted text-nowrap">{created_display}</td>'
+                f'<td>'
+                f'<div class="fw-medium text-dark">{req_name}</div>'
+                f'<div class="small text-muted">{emp_id_e} | {dept_e}</div>'
+                f'<div class="small text-muted">{loc_e}</div>'
+                f'<div class="small text-muted">{email_e}</div>'
+                f'</td>'
+                f'<td>'
+                f'<span class="badge {team_cls} rounded-pill px-3 py-2">{team}</span>'
+                f'<div class="fw-medium mt-2">{title_e}</div>'
+                f'</td>'
+                f'<td class="ga-request-detail-cell">'
+                f'<div class="small text-dark ga-request-description">{desc_e}</div>'
+                f'{image_btn}{note_html}'
+                f'</td>'
+                f'<td class="text-center">'
+                f'<span class="badge rounded-pill px-3 py-2 {status_cls}">{escape(status)}</span>'
+                f'{handled_html}'
+                f'</td>'
+                f'<td class="ga-request-action-cell">'
+                f'<form action="/admin/update_ga_request/{req_id}" method="POST">'
+                f'<input type="hidden" name="csrf_token" value="{csrf_tok}">'
+                f'<input type="hidden" name="ga_loc" value="{ga_selected_loc_safe}">'
+                f'<div class="mb-2"><select name="status" class="form-select form-select-sm shadow-none" required>'
+                f'{status_opts}</select></div>'
+                f'<div class="mb-2"><textarea name="admin_note" rows="3" class="form-control form-control-sm shadow-none"'
+                f' placeholder="หมายเหตุสำหรับผู้แจ้ง...">{admin_note_e}</textarea></div>'
+                f'<button type="submit" class="btn btn-sm btn-dark rounded-pill w-100">บันทึกสถานะ</button>'
+                f'</form>'
+                f'</td>'
+                f'</tr>'
+            )
+        tbody_html = ''.join(parts)
+
+    return jsonify({'success': True, 'html': tbody_html, 'pending_count': pending_count})
+
 
 @app.route('/admin/update_ga_request/<int:request_id>', methods=['POST'])
 def update_ga_request(request_id):
@@ -4615,6 +5209,35 @@ def approve_request(log_id):
             admin_id='superadmin'
         )
 
+        target_ip = str(log['requester_ip'] or '').strip() if 'requester_ip' in log.keys() else ''
+        if not target_ip:
+            latest_client = conn.execute(
+                '''
+                SELECT ip_address
+                FROM active_client_logs
+                WHERE actor_type = 'user' AND actor_id = ? AND is_logged_in = 1
+                ORDER BY last_seen DESC
+                LIMIT 1
+                ''',
+                (log['emp_id'],)
+            ).fetchone()
+            target_ip = str(latest_client['ip_address'] or '').strip() if latest_client else ''
+
+        batch_token = str(log['batch_token'] or '').strip() if 'batch_token' in log.keys() else ''
+        target_device_token = str(log['requester_device_token'] or '').strip() if 'requester_device_token' in log.keys() else ''
+        queue_device_notification(
+            conn,
+            target_ip=target_ip,
+            event_type='approval',
+            title='รายการเบิกได้รับการอนุมัติ',
+            message=f"{product_info['name'] if product_info else product_id} จำนวน {approved_qty} {approved_unit}",
+            emp_id=log['emp_id'],
+            log_id=log_id,
+            batch_token=batch_token or None,
+            target_device_token=target_device_token or None,
+        )
+        conn.commit()
+
         flash('✅ อนุมัติและตัดสต็อกแบบ FIFO เรียบร้อยแล้ว', 'success')
         return redirect(url_for('admin_dashboard', module='stock'))
 
@@ -4759,6 +5382,35 @@ def reject_request(log_id):
             admin_id='superadmin'
         )
 
+        target_ip = str(log['requester_ip'] or '').strip() if 'requester_ip' in log.keys() else ''
+        if not target_ip:
+            latest_client = conn.execute(
+                '''
+                SELECT ip_address
+                FROM active_client_logs
+                WHERE actor_type = 'user' AND actor_id = ? AND is_logged_in = 1
+                ORDER BY last_seen DESC
+                LIMIT 1
+                ''',
+                (log['emp_id'],)
+            ).fetchone()
+            target_ip = str(latest_client['ip_address'] or '').strip() if latest_client else ''
+
+        batch_token = str(log['batch_token'] or '').strip() if 'batch_token' in log.keys() else ''
+        target_device_token = str(log['requester_device_token'] or '').strip() if 'requester_device_token' in log.keys() else ''
+        queue_device_notification(
+            conn,
+            target_ip=target_ip,
+            event_type='rejection',
+            title='รายการเบิกถูกปฏิเสธ',
+            message=f"{product_info['name'] if product_info else log['product_id']} จำนวน {rejected_qty} {rejected_unit}",
+            emp_id=log['emp_id'],
+            log_id=log_id,
+            batch_token=batch_token or None,
+            target_device_token=target_device_token or None,
+        )
+        conn.commit()
+
         flash('❌ ปฏิเสธรายการเรียบร้อยแล้ว', 'warning')
         return redirect(url_for('admin_dashboard', module='stock'))
 
@@ -4790,7 +5442,7 @@ def cancel_scheduled_withdrawal(log_id):
                FROM transaction_logs l
                LEFT JOIN products p ON l.product_id = p.id
                WHERE l.id = ? AND l.status = 'Approved' AND l.request_receive_mode = 'scheduled'
-               AND l.requested_receive_at >= datetime('now', '+7 hours')''',
+               ''',
             (log_id,)
         ).fetchone()
 
@@ -4860,7 +5512,8 @@ def reschedule_withdrawal(log_id):
         return redirect(url_for('admin_dashboard', module='stock'))
 
     try:
-        new_dt = datetime.strptime(new_date_str, '%Y-%m-%dT%H:%M')
+        thailand_tz = pytz.timezone(THAILAND_TZ)
+        new_dt = thailand_tz.localize(datetime.strptime(new_date_str, '%Y-%m-%dT%H:%M'))
         if new_dt <= get_thailand_time():
             flash('⚠️ วันที่ใหม่ต้องเป็นเวลาในอนาคต', 'warning')
             return redirect(url_for('admin_dashboard', module='stock'))
@@ -4894,6 +5547,92 @@ def reschedule_withdrawal(log_id):
         conn.rollback()
         print(f'Reschedule withdrawal error: {e}')
         flash('❌ เกิดข้อผิดพลาด กรุณาลองใหม่', 'danger')
+        return redirect(url_for('admin_dashboard', module='stock'))
+    finally:
+        conn.close()
+
+
+@app.route('/admin/confirm_scheduled_pickup/<int:log_id>', methods=['POST'])
+def confirm_scheduled_pickup(log_id):
+    """ยืนยันว่าผู้เบิกมารับของแล้ว (ปิดคิวรอรับของ)"""
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('index'))
+
+    if not validate_csrf_token():
+        flash('❌ CSRF token ไม่ถูกต้อง', 'danger')
+        return redirect(url_for('admin_dashboard', module='stock'))
+
+    role = session.get('admin_role', 'superadmin')
+    admin_name = session.get('admin_name', '-')
+
+    conn = get_db_connection()
+    try:
+        start_write_transaction(conn)
+
+        log = conn.execute(
+            '''SELECT l.id, l.emp_id, l.product_id,
+                      p.name AS product_name, p.unit, p.base_unit
+               FROM transaction_logs l
+               LEFT JOIN products p ON l.product_id = p.id
+               WHERE l.id = ?
+                 AND l.status = 'Approved'
+                 AND l.request_receive_mode = 'scheduled'
+                 AND (l.pickup_confirmed_at IS NULL OR trim(l.pickup_confirmed_at) = '')''',
+            (log_id,)
+        ).fetchone()
+
+        if not log:
+            flash('⚠️ ไม่พบรายการ หรือรายการนี้ยืนยันรับของแล้ว', 'warning')
+            return redirect(url_for('admin_dashboard', module='stock'))
+
+        if role == 'admin_pc1':
+            permission_check = conn.execute(
+                '''SELECT 1
+                   FROM users
+                   WHERE emp_id = ? AND (location LIKE '%PC1%' OR department LIKE '%PC1%')''',
+                (log['emp_id'],)
+            ).fetchone()
+            if not permission_check:
+                flash('❌ คุณไม่มีสิทธิ์ยืนยันรายการนี้', 'danger')
+                return redirect(url_for('admin_dashboard', module='stock'))
+        elif role == 'admin_cc':
+            permission_check = conn.execute(
+                '''SELECT 1
+                   FROM users
+                   WHERE emp_id = ? AND (location LIKE '%Coil Center%' OR location LIKE '%CC%')''',
+                (log['emp_id'],)
+            ).fetchone()
+            if not permission_check:
+                flash('❌ คุณไม่มีสิทธิ์ยืนยันรายการนี้', 'danger')
+                return redirect(url_for('admin_dashboard', module='stock'))
+
+        pickup_at = get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
+        pickup_by = f"{admin_name} ({role})"
+
+        update_result = conn.execute(
+            '''UPDATE transaction_logs
+               SET pickup_confirmed_at = ?,
+                   pickup_confirmed_by = ?
+               WHERE id = ?
+                 AND status = 'Approved'
+                 AND request_receive_mode = 'scheduled'
+                 AND (pickup_confirmed_at IS NULL OR trim(pickup_confirmed_at) = '')''',
+            (pickup_at, pickup_by, log_id)
+        )
+        if update_result.rowcount == 0:
+            conn.rollback()
+            flash('⚠️ รายการนี้ถูกดำเนินการไปแล้ว', 'warning')
+            return redirect(url_for('admin_dashboard', module='stock'))
+
+        conn.commit()
+
+        flash('✅ ยืนยันรับของเรียบร้อย รายการถูกปิดจากคิวรอรับของแล้ว', 'success')
+        return redirect(url_for('admin_dashboard', module='stock'))
+
+    except Exception as e:
+        conn.rollback()
+        print(f'Confirm scheduled pickup error: {e}')
+        flash('❌ ไม่สามารถยืนยันรับของได้ กรุณาลองใหม่', 'danger')
         return redirect(url_for('admin_dashboard', module='stock'))
     finally:
         conn.close()
@@ -6114,27 +6853,23 @@ def filter_logs():
     
     role = session.get('admin_role', 'superadmin')
     log_loc = request.args.get('log_loc', '')
+    log_type = request.args.get('log_type', '').strip().lower()
+    log_date_from = request.args.get('log_date_from', '').strip()
+    log_date_to = request.args.get('log_date_to', '').strip()
+    log_search = clean_input_text(request.args.get('log_search', ''), 100)
     page = request.args.get('page', 1, type=int)
     per_page = 10
     offset = (page - 1) * per_page
     
     conn = get_db_connection()
-    
-    # 2. สร้าง Filter สำหรับ Log ตาม Role และ Location
-    role_log_filter = ""
-    if role == 'admin_pc1':
-        role_log_filter = " AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')"
-    elif role == 'admin_cc':
-        role_log_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')"
-
-    super_admin_filter = ""
-    if role == 'superadmin':
-        if log_loc == 'PC1':
-            super_admin_filter = " AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')"
-        elif log_loc == 'CC':
-            super_admin_filter = " AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')"
-    
-    final_log_filter = role_log_filter + super_admin_filter
+    final_log_filter, final_log_params = build_history_log_filters(
+        role,
+        log_loc,
+        log_type,
+        log_date_from,
+        log_date_to,
+        log_search,
+    )
 
     # --- ส่วนที่เพิ่ม: นับจำนวนหน้าใหม่ให้สัมพันธ์กับ Filter ---
     count_query = f'''
@@ -6146,10 +6881,11 @@ def filter_logs():
                 ELSE l.emp_id = u.emp_id 
             END
         )
+        LEFT JOIN products p ON l.product_id = p.id
         WHERE 1=1 {final_log_filter}
     '''
-    total_logs = conn.execute(count_query).fetchone()[0]
-    total_pages = math.ceil(total_logs / per_page) #
+    total_logs = conn.execute(count_query, final_log_params).fetchone()[0]
+    total_pages = max(1, math.ceil(total_logs / per_page))
 
     # 3. Query ข้อมูล Log พร้อม Join กับ Users และ Products เพื่อดึงชื่อพนักงานและชื่อของ
     query = f'''
@@ -6168,13 +6904,76 @@ def filter_logs():
         ORDER BY datetime({transaction_timestamp_expr('l')}) DESC, l.id DESC LIMIT ? OFFSET ?
     '''
     
-    logs = conn.execute(query, (per_page, offset)).fetchall()
+    logs = conn.execute(query, (*final_log_params, per_page, offset)).fetchall()
     conn.close()
     
     # 4. ส่ง HTML พร้อมค่า total_pages กลับไปทาง Header
     response = make_response(render_template('admin_log_row.html', logs=logs))
     response.headers['X-Total-Pages'] = total_pages # ส่งเลขหน้าใหม่ไปให้ JS
     return response
+
+
+@app.route('/admin/export_logs_excel')
+def export_logs_excel():
+    if not session.get('admin_logged_in'):
+        return redirect(url_for('index'))
+
+    role = session.get('admin_role', 'superadmin')
+    log_loc = request.args.get('log_loc', '')
+    log_type = request.args.get('log_type', '').strip().lower()
+    log_date_from = request.args.get('log_date_from', '').strip()
+    log_date_to = request.args.get('log_date_to', '').strip()
+    log_search = clean_input_text(request.args.get('log_search', ''), 100)
+    final_log_filter, final_log_params = build_history_log_filters(
+        role,
+        log_loc,
+        log_type,
+        log_date_from,
+        log_date_to,
+        log_search,
+    )
+    ts_expr = transaction_timestamp_expr('l')
+
+    conn = get_db_connection()
+    try:
+        query = f'''
+            SELECT
+                {ts_expr} AS "วัน/เวลา",
+                COALESCE(u.name, SUBSTR(l.emp_id, 7)) AS "ผู้ทำรายการ",
+                COALESCE(u.department, '') AS "แผนก",
+                COALESCE(u.location, '') AS "Location",
+                COALESCE(p.code, '') AS "รหัสของ",
+                COALESCE(p.name, '') AS "รายการ",
+                COALESCE(l.action, '') AS "ประเภท",
+                COALESCE(l.qty, 0) AS "จำนวน",
+                COALESCE(p.unit, '') AS "หน่วย",
+                CASE
+                    WHEN l.status = 'Approved' AND COALESCE(l.request_receive_mode, 'immediate') = 'scheduled' AND l.pickup_confirmed_at IS NOT NULL AND trim(l.pickup_confirmed_at) != ''
+                        THEN 'รับของแล้ว'
+                    ELSE COALESCE(l.status, '')
+                END AS "สถานะ"
+            FROM transaction_logs l
+            LEFT JOIN users u ON (
+                CASE
+                    WHEN l.emp_id LIKE 'ADMIN:%' THEN SUBSTR(l.emp_id, 7) = u.name
+                    ELSE l.emp_id = u.emp_id
+                END
+            )
+            LEFT JOIN products p ON l.product_id = p.id
+            WHERE 1=1 {final_log_filter}
+            ORDER BY datetime({ts_expr}) DESC, l.id DESC
+        '''
+        df = pd.read_sql_query(query, conn, params=final_log_params)
+    finally:
+        conn.close()
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='History_Logs')
+    output.seek(0)
+
+    suffix = (log_type or 'all').replace('-', '_')
+    return send_file(output, as_attachment=True, download_name=f'history_logs_{suffix}.xlsx')
 
 @app.route('/get_active_clients_json')
 @app.route('/admin/get_active_clients_json')
@@ -7000,6 +7799,7 @@ def monthly_report():
     if not session.get('admin_logged_in'): return redirect(url_for('index'))
     
     conn = get_db_connection()
+    ts_expr = transaction_timestamp_expr('l')
     # ดึงข้อมูลการเบิกจ่ายที่ Approved แล้วในเดือนปัจจุบัน
     query = f'''
         SELECT 
@@ -7012,7 +7812,14 @@ def monthly_report():
         JOIN products p ON l.product_id = p.id
         JOIN users u ON l.emp_id = u.emp_id
         WHERE l.status = 'Approved' 
-          AND strftime('%Y-%m', datetime({transaction_timestamp_expr('l')})) = strftime('%Y-%m', 'now', 'localtime')
+                    AND (
+                                l.action = 'Withdrawn'
+                                OR l.action = 'withdraw'
+                                OR l.action = 'ขอเบิกยา'
+                                OR l.action = 'ขอเบิกอุปกรณ์'
+                                OR l.action LIKE 'เบิกหมวกเซฟตี้%'
+                    )
+                    AND strftime('%Y-%m', datetime({ts_expr})) = strftime('%Y-%m', 'now', 'localtime')
         GROUP BY p.id, u.department
     '''
     try:
@@ -7748,22 +8555,28 @@ def get_monthly_report_data():
     
     month = request.args.get('month')
     year = request.args.get('year')
-    
-    # ดึงข้อมูลวันที่ทั้ง 2 รูปแบบที่พบใน DB มาใช้ในการกรองข้อมูล
-    pattern1 = f'{year}-{month}-%'   # yyyy-mm-dd
-    pattern2 = f'%/{month}/{year} %' # dd/mm/yyyy
+
+    ts_expr = transaction_timestamp_expr('l')
+    month_key = f'{year}-{month}'
     
     conn = get_db_connection()
-    query = '''
+    query = f'''
         SELECT p.name as item_name, SUM(l.qty) as total, p.unit
         FROM transaction_logs l
         JOIN products p ON l.product_id = p.id
-        WHERE (l.timestamp LIKE ? OR l.timestamp LIKE ?) 
+        WHERE substr({ts_expr}, 1, 7) = ?
         AND l.status = 'Approved'
+        AND (
+            l.action = 'Withdrawn'
+            OR l.action = 'withdraw'
+            OR l.action = 'ขอเบิกยา'
+            OR l.action = 'ขอเบิกอุปกรณ์'
+            OR l.action LIKE 'เบิกหมวกเซฟตี้%'
+        )
         GROUP BY p.id
         ORDER BY total DESC
     '''
-    results = conn.execute(query, (pattern1, pattern2)).fetchall()
+    results = conn.execute(query, (month_key,)).fetchall()
     conn.close()
     
     return jsonify({
@@ -7778,13 +8591,13 @@ def export_monthly_excel():
     
     month = request.args.get('month')
     year = request.args.get('year')
-    pattern1 = f'{year}-{month}-%'
-    pattern2 = f'%/{month}/{year} %'
+    ts_expr = transaction_timestamp_expr('l')
+    month_key = f'{year}-{month}'
 
     conn = get_db_connection()
-    query = '''
+    query = f'''
         SELECT 
-            l.timestamp as "วัน/เวลา",
+            {ts_expr} as "วัน/เวลา",
             u.name as "ผู้เบิก",
             u.department as "แผนก",
             p.code as "รหัสของ",
@@ -7795,11 +8608,18 @@ def export_monthly_excel():
         FROM transaction_logs l
         JOIN products p ON l.product_id = p.id
         JOIN users u ON l.emp_id = u.emp_id
-        WHERE (l.timestamp LIKE ? OR l.timestamp LIKE ?) 
+        WHERE substr({ts_expr}, 1, 7) = ?
         AND l.status = 'Approved'
-        ORDER BY l.timestamp ASC
+        AND (
+            l.action = 'Withdrawn'
+            OR l.action = 'withdraw'
+            OR l.action = 'ขอเบิกยา'
+            OR l.action = 'ขอเบิกอุปกรณ์'
+            OR l.action LIKE 'เบิกหมวกเซฟตี้%'
+        )
+        ORDER BY datetime({ts_expr}) ASC, l.id ASC
     '''
-    df = pd.read_sql_query(query, conn, params=(pattern1, pattern2))
+    df = pd.read_sql_query(query, conn, params=(month_key,))
     conn.close()
 
     output = io.BytesIO()

@@ -19,9 +19,13 @@
     </td>
     <td class="text-center fw-medium">{{ log['qty'] }}</td>
     <td class="text-center">
+        {% if log['status'] == 'Approved' and log['request_receive_mode'] == 'scheduled' and log['pickup_confirmed_at'] %}
+        <span class="badge bg-info text-dark">รับของแล้ว</span>
+        {% else %}
         <span class="badge {% if log['status']=='Approved' %}bg-success{% elif log['status']=='Rejected' %}bg-danger{% else %}bg-secondary{% endif %}">
             {{ log['status'] }}
         </span>
+        {% endif %}
     </td>
 </tr>
 {% endif %}
