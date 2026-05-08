@@ -1003,27 +1003,27 @@
         .history-log-table {
             table-layout: fixed;
             width: 100%;
-            min-width: 980px;
+            min-width: 680px;
         }
 
         .history-log-col-time {
-            width: 165px;
+            width: 140px;
         }
 
         .history-log-col-user {
-            width: 250px;
+            width: 190px;
         }
 
         .history-log-col-detail {
-            width: 345px;
+            width: auto;
         }
 
         .history-log-col-qty {
-            width: 90px;
+            width: 80px;
         }
 
         .history-log-col-status {
-            width: 130px;
+            width: 110px;
         }
 
         .history-log-table th,
@@ -1055,15 +1055,18 @@
         }
 
         .history-log-type-filter {
-            min-width: 210px;
+            min-width: 130px;
+            max-width: 160px;
         }
 
         .history-log-date-filter {
-            min-width: 150px;
+            min-width: 130px;
+            max-width: 140px;
         }
 
         .history-log-search-filter {
-            min-width: 240px;
+            min-width: 160px;
+            max-width: 200px;
         }
 
         #currentPageNum,
@@ -1075,7 +1078,7 @@
 
         @media (max-width: 991.98px) {
             .history-log-table {
-                min-width: 980px;
+                min-width: 600px;
             }
         }
 
@@ -2056,7 +2059,7 @@
                     class="card-header bg-primary text-white fw-medium py-3 d-flex flex-wrap justify-content-between align-items-center border-0 gap-2">
                     <span><i class="fas fa-history me-2"></i>ประวัติการทำรายการ (Approved/Completed)</span>
 
-                    <div class="d-flex align-items-center gap-3">
+                    <div class="d-flex align-items-center flex-wrap gap-2">
                         {% if role == 'superadmin' %}
                         <div class="btn-group btn-group-sm bg-white rounded-pill p-1 shadow-sm">
                             <button type="button" onclick="filterLogs('')" id="btn-log-all"
@@ -2590,8 +2593,8 @@
                         </div>
                         <div class="col-md-2">
                             <label class="form-label fw-semibold small text-muted">โรงงาน</label>
-                            <select name="location" class="form-select form-select-sm shadow-none" required>
-                                {% if role == 'superadmin' %}
+                            <select name="location" id="userLocationSelect" class="form-select form-select-sm shadow-none" required>
+                                {% if role in ('superadmin', 'admin_all') %}
                                 <option value="PC1">PC1</option>
                                 <option value="Coil Center">CC</option>
                                 {% elif role == 'admin_pc1' %}
@@ -4624,18 +4627,32 @@
         }
 
         const logDateFromFilter = document.getElementById('logDateFromFilter');
+        const logDateToFilter = document.getElementById('logDateToFilter');
         if (logDateFromFilter) {
             logDateFromFilter.addEventListener('change', function () {
                 currentLogDateFrom = this.value || '';
+                // Set min date of To-filter to prevent selecting before From
+                if (logDateToFilter) {
+                    logDateToFilter.min = this.value || '';
+                    if (logDateToFilter.value && this.value && logDateToFilter.value < this.value) {
+                        logDateToFilter.value = this.value;
+                        currentLogDateTo = this.value;
+                    }
+                }
                 currentLogPage = 1;
                 updateLogTable(false);
             });
         }
 
-        const logDateToFilter = document.getElementById('logDateToFilter');
         if (logDateToFilter) {
             logDateToFilter.addEventListener('change', function () {
-                currentLogDateTo = this.value || '';
+                // Prevent To < From
+                if (logDateFromFilter && logDateFromFilter.value && this.value < logDateFromFilter.value) {
+                    this.value = logDateFromFilter.value;
+                    currentLogDateTo = logDateFromFilter.value;
+                } else {
+                    currentLogDateTo = this.value || '';
+                }
                 currentLogPage = 1;
                 updateLogTable(false);
             });
@@ -5196,9 +5213,11 @@
             (adminUnreadSummarySnapshot || []).forEach((s) => {
                 const rid = Number(s.request_id || 0);
                 if (!rid) return;
-                const maxUserMsgId = Number(s.max_user_msg_id || 0);
-                const readUpto = Number(adminReadUserByReqMap[String(rid)] || 0);
-                if (maxUserMsgId > readUpto) {
+                // Use server-side unread_count (read_by_admin tracking), fall back to localStorage comparison
+                const unreadCount = s.unread_count !== undefined
+                    ? Number(s.unread_count || 0)
+                    : (Number(s.max_user_msg_id || 0) > Number(adminReadUserByReqMap[String(rid)] || 0) ? 1 : 0);
+                if (unreadCount > 0) {
                     totalUnreadRequests += 1;
                     if (!firstUnreadRequestId) {
                         firstUnreadRequestId = rid;
@@ -5234,16 +5253,19 @@
             (sourceSummaries || []).forEach((s) => {
                 const rid = Number(s.request_id || 0);
                 if (!rid) return;
-                summaryMap.set(rid, Number(s.max_user_msg_id || 0));
+                summaryMap.set(rid, {
+                    unreadCount: s.unread_count !== undefined ? Number(s.unread_count || 0)
+                        : (Number(s.max_user_msg_id || 0) > Number(adminReadUserByReqMap[String(rid)] || 0) ? 1 : 0),
+                });
             });
 
             document.querySelectorAll('[data-admin-chat-request-id]').forEach((btn) => {
                 const rid = Number(btn.getAttribute('data-admin-chat-request-id') || 0);
                 const badge = btn.querySelector('[data-admin-chat-unread]');
                 if (!rid || !badge) return;
-                const maxUserMsgId = Number(summaryMap.get(rid) || 0);
-                const readUpto = Number(adminReadUserByReqMap[String(rid)] || 0);
-                if (maxUserMsgId > readUpto) {
+                const info = summaryMap.get(rid);
+                const unreadCount = info ? info.unreadCount : 0;
+                if (unreadCount > 0) {
                     badge.textContent = 'ใหม่';
                     badge.classList.remove('d-none');
                     badge.classList.add('show');
@@ -5401,8 +5423,7 @@
                             adminSeenUserGlobalId = Math.max(adminSeenUserGlobalId, Number(msg.id || 0));
                             setAdminRequestReadUpto(gaChatRequestId, Number(msg.id || 0));
                         }
-                        const isAdmin = msg.sender_type === 'admin';
-                        const div = document.createElement('div');
+                        const isAdmin = msg.sender_type === 'admin';                        const div = document.createElement('div');
                         div.className = 'ga-chat-row ' + (isAdmin ? 'self' : 'other');
                         div.innerHTML = (
                             '<div class="ga-chat-bubble ' + (isAdmin ? 'admin' : 'user') + '">' +
@@ -5414,6 +5435,12 @@
                         box.appendChild(div);
                     });
                     persistAdminSeenUserGlobalId();
+                    // Optimistically clear unread count for this request in local snapshot
+                    // (server has already marked messages as read via GET request)
+                    const snapIdx = adminUnreadSummarySnapshot.findIndex(s => Number(s.request_id) === gaChatRequestId);
+                    if (snapIdx >= 0) {
+                        adminUnreadSummarySnapshot[snapIdx].unread_count = 0;
+                    }
                     applyAdminUnreadBadges();
                     box.scrollTop = box.scrollHeight;
                 })

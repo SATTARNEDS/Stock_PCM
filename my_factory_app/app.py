@@ -915,6 +915,12 @@ def ensure_application_schema():
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_ga_msg_request ON ga_request_messages(request_id, created_at)')
 
+        # Ensure read_by_admin exists on ga_request_messages (migration for existing instances)
+        ga_msg_columns = {row[1] for row in conn.execute("PRAGMA table_info(ga_request_messages)").fetchall()}
+        if ga_msg_columns and 'read_by_admin' not in ga_msg_columns:
+            conn.execute("ALTER TABLE ga_request_messages ADD COLUMN read_by_admin INTEGER DEFAULT 0")
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_ga_msg_read ON ga_request_messages(request_id, sender_type, read_by_admin)')
+
         # � Support Chat Table (แจ้งปัญหาการใช้งาน)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS support_messages (
@@ -4933,6 +4939,12 @@ def admin_ga_chat(request_id):
             'SELECT * FROM ga_request_messages WHERE request_id = ? AND id > ? ORDER BY id ASC LIMIT 200',
             (request_id, since_id)
         ).fetchall()
+        # Mark all user messages in this chat as read by admin (server-side tracking)
+        conn.execute(
+            "UPDATE ga_request_messages SET read_by_admin=1 WHERE request_id=? AND sender_type='user' AND COALESCE(read_by_admin,0)=0",
+            (request_id,)
+        )
+        conn.commit()
         conn.close()
         return jsonify({'success': True, 'messages': _build_ga_chat_json(rows)})
 
@@ -4955,47 +4967,44 @@ def admin_ga_chat_notifications():
 
     conn = get_db_connection()
 
-    max_visible_row = conn.execute(
-        f'''
-        SELECT COALESCE(MAX(m.id), 0) AS max_visible_id
-        FROM ga_request_messages m
-        JOIN ga_requests g ON g.id = m.request_id
-        WHERE m.sender_type = 'user'
-        {role_filter}
-        '''
+    # Max ID of currently unread user messages (used by frontend silentInit to set baseline)
+    max_unread_row = conn.execute(
+        f'''SELECT COALESCE(MAX(m.id), 0) AS max_id
+            FROM ga_request_messages m
+            JOIN ga_requests g ON g.id = m.request_id
+            WHERE m.sender_type = 'user' AND COALESCE(m.read_by_admin, 0) = 0
+            {role_filter}'''
     ).fetchone()
-    max_visible_id = int(max_visible_row['max_visible_id']) if max_visible_row else 0
-    if since_id > max_visible_id:
-        since_id = 0
+    max_visible_id = int(max_unread_row['max_id']) if max_unread_row else 0
+
+    # New unread items since since_id (for toast notifications — only fires for truly new messages)
     rows = conn.execute(
-        f'''
-        SELECT m.id, m.request_id, m.sender_name, m.message, m.created_at, g.title
-        FROM ga_request_messages m
-        JOIN ga_requests g ON g.id = m.request_id
-        WHERE m.sender_type = 'user'
-          AND m.id > ?
-          {role_filter}
-        ORDER BY m.id ASC
-        LIMIT 200
-        ''',
+        f'''SELECT m.id, m.request_id, m.sender_name, m.message, m.created_at, g.title
+            FROM ga_request_messages m
+            JOIN ga_requests g ON g.id = m.request_id
+            WHERE m.sender_type = 'user'
+              AND COALESCE(m.read_by_admin, 0) = 0
+              AND m.id > ?
+              {role_filter}
+            ORDER BY m.id ASC
+            LIMIT 200''',
         (since_id,)
     ).fetchall()
 
+    # Per-request summary with server-side unread count (for badges)
     summary_rows = conn.execute(
-        f'''
-        SELECT g.id AS request_id,
-               g.title AS title,
-               COALESCE(MAX(m.id), 0) AS max_user_msg_id
-        FROM ga_requests g
-        LEFT JOIN ga_request_messages m
-          ON m.request_id = g.id
-         AND m.sender_type = 'user'
-        WHERE 1=1
-          {role_filter}
-        GROUP BY g.id, g.title
-        ORDER BY g.id DESC
-        LIMIT 400
-        '''
+        f'''SELECT g.id AS request_id,
+                   g.title AS title,
+                   COALESCE(SUM(CASE WHEN m.sender_type='user' AND COALESCE(m.read_by_admin,0)=0 THEN 1 ELSE 0 END), 0) AS unread_count,
+                   COALESCE(MAX(CASE WHEN m.sender_type='user' THEN m.id ELSE NULL END), 0) AS max_user_msg_id
+            FROM ga_requests g
+            LEFT JOIN ga_request_messages m ON m.request_id = g.id
+            WHERE 1=1
+              {role_filter}
+            GROUP BY g.id, g.title
+            HAVING max_user_msg_id > 0
+            ORDER BY g.id DESC
+            LIMIT 400'''
     ).fetchall()
     conn.close()
 
@@ -5016,6 +5025,7 @@ def admin_ga_chat_notifications():
             'request_id': int(row['request_id']),
             'title': row['title'] or '',
             'max_user_msg_id': int(row['max_user_msg_id'] or 0),
+            'unread_count': int(row['unread_count'] or 0),
         })
 
     return jsonify({'success': True, 'items': items, 'summaries': summaries, 'max_visible_id': max_visible_id})
@@ -5597,15 +5607,27 @@ def support_chat_presence():
 def admin_support_inbox():
     if not session.get('admin_logged_in'):
         return jsonify({'error': 'unauthorized'}), 401
+    role = session.get('admin_role', 'superadmin')
+    if role == 'admin_pc1':
+        loc_join = "LEFT JOIN users u ON m.emp_id = u.emp_id"
+        loc_filter = " AND u.location = 'PC1'"
+    elif role == 'admin_cc':
+        loc_join = "LEFT JOIN users u ON m.emp_id = u.emp_id"
+        loc_filter = " AND (u.location LIKE '%CC%' OR u.location LIKE '%Coil Center%')"
+    else:
+        loc_join = ""
+        loc_filter = ""
     conn = get_db_connection()
     try:
-        rows = conn.execute('''
-            SELECT emp_id, emp_name,
-                   MAX(created_at) as last_at,
-                   SUM(CASE WHEN sender_type = 'user' AND COALESCE(read_by_admin, 0) = 0 THEN 1 ELSE 0 END) as unread_count,
-                   MAX(CASE WHEN sender_type = "user" THEN message ELSE NULL END) as last_user_msg
-            FROM support_messages
-            GROUP BY emp_id, emp_name
+        rows = conn.execute(f'''
+            SELECT m.emp_id, m.emp_name,
+                   MAX(m.created_at) as last_at,
+                   SUM(CASE WHEN m.sender_type = 'user' AND COALESCE(m.read_by_admin, 0) = 0 THEN 1 ELSE 0 END) as unread_count,
+                   MAX(CASE WHEN m.sender_type = 'user' THEN m.message ELSE NULL END) as last_user_msg
+            FROM support_messages m
+            {loc_join}
+            WHERE 1=1 {loc_filter}
+            GROUP BY m.emp_id, m.emp_name
             ORDER BY last_at DESC
         ''').fetchall()
     finally:
@@ -5703,18 +5725,31 @@ def admin_support_chat_reply(emp_id):
 def admin_support_notifications():
     if not session.get('admin_logged_in'):
         return jsonify({'error': 'unauthorized'}), 401
+    role = session.get('admin_role', 'superadmin')
+    if role == 'admin_pc1':
+        loc_join = "LEFT JOIN users u ON m.emp_id = u.emp_id"
+        loc_filter = " AND u.location = 'PC1'"
+    elif role == 'admin_cc':
+        loc_join = "LEFT JOIN users u ON m.emp_id = u.emp_id"
+        loc_filter = " AND (u.location LIKE '%CC%' OR u.location LIKE '%Coil Center%')"
+    else:
+        loc_join = ""
+        loc_filter = ""
     conn = get_db_connection()
     try:
-        total = conn.execute('''
-            SELECT COALESCE(SUM(CASE WHEN sender_type = 'user' AND COALESCE(read_by_admin, 0) = 0 THEN 1 ELSE 0 END), 0)
-            FROM support_messages
+        total = conn.execute(f'''
+            SELECT COALESCE(SUM(CASE WHEN m.sender_type = 'user' AND COALESCE(m.read_by_admin, 0) = 0 THEN 1 ELSE 0 END), 0)
+            FROM support_messages m
+            {loc_join}
+            WHERE 1=1 {loc_filter}
         ''').fetchone()[0]
-        users = conn.execute('''
-            SELECT emp_id, emp_name,
-                   SUM(CASE WHEN sender_type = 'user' AND COALESCE(read_by_admin, 0) = 0 THEN 1 ELSE 0 END) as unread
-            FROM support_messages
-            WHERE sender_type = 'user' AND COALESCE(read_by_admin, 0) = 0
-            GROUP BY emp_id, emp_name
+        users = conn.execute(f'''
+            SELECT m.emp_id, m.emp_name,
+                   SUM(CASE WHEN m.sender_type = 'user' AND COALESCE(m.read_by_admin, 0) = 0 THEN 1 ELSE 0 END) as unread
+            FROM support_messages m
+            {loc_join}
+            WHERE m.sender_type = 'user' AND COALESCE(m.read_by_admin, 0) = 0 {loc_filter}
+            GROUP BY m.emp_id, m.emp_name
             HAVING unread > 0
         ''').fetchall()
     finally:
