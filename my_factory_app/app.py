@@ -4074,8 +4074,30 @@ def api_get_history():
         r['is_split_medicine'] = is_med
         r['symptom'] = symptom
         r['receive_plan_text'] = build_receive_plan_text(r.get('request_receive_mode'), r.get('requested_receive_at'))
-        r['display_qty'] = r['qty_base_unit'] if is_med and r.get('qty_base_unit') else r['qty']
-        r['display_unit'] = (r['base_unit'] or 'เม็ด') if is_med and r.get('qty_base_unit') else (r['unit'] or '')
+        # qty_base_unit = จำนวนหน่วยย่อย (เม็ด), qty = จำนวนแพ็ก
+        # ถ้าเป็นยาให้แสดง qty_base_unit (เม็ด)
+        # ถ้า qty_base_unit เป็น NULL (record เก่าก่อนเพิ่ม column) ให้ดูจาก note หรือใช้ qty แทน
+        # ถ้า qty = 0 แต่เป็นยา แสดงว่าตัดจาก open package → แสดง qty_base_unit หรือ qty ไม่เป็น 0
+        raw_base = r.get('qty_base_unit')
+        raw_qty = r.get('qty') or 0
+        if is_med:
+            if raw_base is not None and int(raw_base or 0) > 0:
+                r['display_qty'] = int(raw_base)
+                r['display_unit'] = r.get('base_unit') or 'เม็ด'
+            elif raw_qty and int(raw_qty) > 0:
+                # legacy record: qty อาจเป็นเม็ดก็ได้ (schema เก่า)
+                r['display_qty'] = int(raw_qty)
+                r['display_unit'] = r.get('base_unit') or 'เม็ด'
+            else:
+                # qty=0 และ qty_base_unit=0/NULL → ดู note ว่าเบิกกี่เม็ด
+                note_text = r.get('note') or ''
+                import re as _re
+                m = _re.search(r'(\d+)\s*(เม็ด|tablet)', note_text)
+                r['display_qty'] = int(m.group(1)) if m else int(raw_qty)
+                r['display_unit'] = r.get('base_unit') or 'เม็ด'
+        else:
+            r['display_qty'] = int(raw_qty)
+            r['display_unit'] = r.get('unit') or ''
         r['timestamp'] = format_timestamp(r.get('timestamp', ''))
         items.append(r)
 
@@ -7759,7 +7781,8 @@ def filter_logs():
     query = f'''
         SELECT l.*, 
                COALESCE(u.name, SUBSTR(l.emp_id, 7)) as emp_name, 
-               u.department, u.location, p.name as product_name, p.unit
+               u.department, u.location, p.name as product_name, p.unit,
+               p.base_unit
         FROM transaction_logs l
         LEFT JOIN users u ON (
             CASE 

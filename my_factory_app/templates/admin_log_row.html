@@ -17,7 +17,11 @@
         </span><br>
         {{ log['product_name'] }}
     </td>
-    <td class="text-center fw-medium">{{ log['qty'] }}</td>
+    <td class="text-center fw-medium">
+        {%- set show_qty = log['qty_base_unit'] if (log['qty_base_unit'] and log['qty_base_unit']|int > 0) else log['qty'] -%}
+        {%- set show_unit = log['base_unit'] if (log['qty_base_unit'] and log['qty_base_unit']|int > 0 and log['base_unit']) else log['unit'] -%}
+        {{ show_qty }} {{ show_unit or '' }}
+    </td>
     <td class="text-center">
         {% if log['status'] == 'Approved' and log['request_receive_mode'] == 'scheduled' and log['pickup_confirmed_at'] %}
         <span class="badge bg-info text-dark">รับของแล้ว</span>
