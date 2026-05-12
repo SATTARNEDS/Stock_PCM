@@ -9558,31 +9558,52 @@ def export_monthly_excel():
 if __name__ == '__main__':
     # 1. เริ่มต้นระบบจัดการ Job
     if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        scheduler.init_app(app)
-        
-        # 2. ดึงเวลาจาก Database มาตั้งค่าเริ่มต้น
-        conn = get_db_connection()
         try:
-            saved_time = conn.execute("SELECT value FROM settings WHERE key = 'daily_alert_time'").fetchone()
-        except Exception:
-            saved_time = None
-        conn.close()
-        
-        alert_time = saved_time['value'] if saved_time else "08:30"
-        h, m = alert_time.split(':')
+            scheduler.init_app(app)
+            
+            # 2. ดึงเวลาจาก Database มาตั้งค่าเริ่มต้น
+            try:
+                conn = get_db_connection()
+                try:
+                    saved_time = conn.execute("SELECT value FROM settings WHERE key = 'daily_alert_time'").fetchone()
+                except Exception as db_error:
+                    print(f'[SCHEDULER] Warning: Could not read alert time from DB: {db_error}', flush=True)
+                    saved_time = None
+                finally:
+                    conn.close()
+            except Exception as conn_error:
+                print(f'[SCHEDULER] Warning: Database connection failed during scheduler init: {conn_error}', flush=True)
+                saved_time = None
+            
+            alert_time = saved_time['value'] if saved_time else "08:30"
+            try:
+                h, m = alert_time.split(':')
+            except ValueError:
+                print(f'[SCHEDULER] Warning: Invalid alert time format "{alert_time}", using default 08:30', flush=True)
+                h, m = "08", "30"
 
-        # 3. เพิ่ม Job เข้าไปในระบบ (ถ้ามีอยู่แล้วให้ทับของเก่า)
-        scheduler.add_job(
-            id='Daily_Alert_Job',
-            func=scheduled_daily_alert, # ชื่อฟังก์ชันส่ง Email
-            trigger='cron',
-            hour=int(h),
-            minute=int(m),
-            timezone='Asia/Bangkok',
-            replace_existing=True
-        )
-        
-        scheduler.start()
+            # 3. เพิ่ม Job เข้าไปในระบบ (ถ้ามีอยู่แล้วให้ทับของเก่า)
+            scheduler.add_job(
+                id='Daily_Alert_Job',
+                func=scheduled_daily_alert, # ชื่อฟังก์ชันส่ง Email
+                trigger='cron',
+                hour=int(h),
+                minute=int(m),
+                timezone='Asia/Bangkok',
+                replace_existing=True
+            )
+            
+            scheduler.start()
+            print('[SCHEDULER] Scheduler started successfully', flush=True)
+        except Exception as scheduler_error:
+            print(f'[SCHEDULER] ERROR: Failed to initialize scheduler: {scheduler_error}', flush=True)
+            print(f'[SCHEDULER] App will run but scheduler is disabled', flush=True)
 
     debug_mode = os.environ.get('FLASK_DEBUG', '0') == '1'
-    app.run(host='0.0.0.0', port=5000, debug=debug_mode, use_reloader=debug_mode) # ควบคุมผ่าน environment
+    try:
+        print(f'[APP] Starting Flask application (debug={debug_mode})', flush=True)
+        print(f'[APP] Listening on 0.0.0.0:5000', flush=True)
+        app.run(host='0.0.0.0', port=5000, debug=debug_mode, use_reloader=False)  # disable reloader for Task Scheduler
+    except Exception as app_error:
+        print(f'[APP] CRITICAL ERROR: {app_error}', flush=True)
+        raise
