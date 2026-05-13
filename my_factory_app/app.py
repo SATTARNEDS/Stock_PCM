@@ -4063,7 +4063,7 @@ def api_get_history():
     ).fetchone()[0]
 
     rows = conn.execute(f'''
-         SELECT l.id, l.action, l.qty, l.qty_base_unit, l.status, l.note, l.timestamp,
+            SELECT l.id, l.action, l.qty, l.qty_base_unit, l.status, l.note, l.timestamp, l.batch_token,
              l.request_receive_mode, l.requested_receive_at,
                p.name as product_name, p.unit, p.category, p.base_unit,
                p.package_unit, p.conversion_rate
@@ -4089,6 +4089,7 @@ def api_get_history():
         r['is_split_medicine'] = is_med
         r['symptom'] = symptom
         r['receive_plan_text'] = build_receive_plan_text(r.get('request_receive_mode'), r.get('requested_receive_at'))
+        r['batch_token'] = r.get('batch_token') or ''
         # qty_base_unit = จำนวนหน่วยย่อย (เม็ด), qty = จำนวนแพ็ก
         # ถ้าเป็นยาให้แสดง qty_base_unit (เม็ด)
         # ถ้า qty_base_unit เป็น NULL (record เก่าก่อนเพิ่ม column) ให้ดูจาก note หรือใช้ qty แทน
