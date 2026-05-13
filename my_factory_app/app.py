@@ -89,7 +89,7 @@ app.jinja_env.auto_reload = True
 DB_NAME = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'factory_stock.db')
 BACKUP_DIR = os.path.join(BASE_DIR, 'backups')
 THAILAND_TZ = 'Asia/Bangkok'
-SESSION_TIMEOUT_MINUTES = 15
+SESSION_TIMEOUT_MINUTES = 30  # เพิ่มจาก 15 ป้องกัน session timeout ระหว่างการเบิกสินค้า
 USER_LOCK_TIMEOUT_MINUTES = 5
 ACTIVE_CLIENT_WINDOW_MINUTES = int(os.environ.get('ACTIVE_CLIENT_WINDOW_MINUTES', '5'))
 ACTIVE_LOG_THROTTLE_SECONDS = int(os.environ.get('ACTIVE_LOG_THROTTLE_SECONDS', '20'))
@@ -112,6 +112,12 @@ SENSITIVE_POST_ENDPOINTS = {
     'email_settings', 'email_settings_test',
     'ga_request_portal', 'update_ga_request', 'delete_ga_request', 'admin_ga_chat', 'user_ga_chat', 'ga_chat_presence',
     'support_chat_send', 'support_chat_presence', 'admin_support_chat_reply'
+}
+USER_SUBMIT_ENDPOINTS = {
+    'add_to_cart', 'remove_from_cart', 'confirm_withdrawal', 'ga_request_portal', 'support_chat_send'
+}
+USER_AJAX_ENDPOINTS = {
+    'update_cart_qty', 'ga_chat_presence', 'support_chat_presence', 'user_ga_chat'
 }
 NO_CACHE_HEADERS = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -441,6 +447,14 @@ def handle_before_request():
 
     # 1.5 ป้องกัน CSRF สำหรับคำขอแก้ไขข้อมูลที่สำคัญ
     # ⚠️ ข้ามการตรวจ CSRF สำหรับ login routes (session ยังไม่มี/หมดอายุ)
+    if request.method == 'POST' and request.endpoint in (USER_SUBMIT_ENDPOINTS | USER_AJAX_ENDPOINTS):
+        request_emp_id = (request.form.get('emp_id') or request.args.get('emp_id') or '').strip()
+        if not request_emp_id or session.get('user_id') != request_emp_id:
+            if request.endpoint in USER_AJAX_ENDPOINTS or request.path.startswith('/api/'):
+                return jsonify({'success': False, 'message': 'session หมดอายุ กรุณาเข้าสู่ระบบใหม่'}), 401
+            flash('⚠️ session หมดอายุ กรุณาเข้าสู่ระบบใหม่', 'danger')
+            return redirect(url_for('index'))
+
     skip_csrf_endpoints = {'index', 'admin_login'}
     if request.method == 'POST' and request.endpoint in SENSITIVE_POST_ENDPOINTS and request.endpoint not in skip_csrf_endpoints:
         if not validate_csrf_token():
@@ -773,12 +787,11 @@ def normalize_lot_number(value):
     return lot.upper()
 
 # ==========================================
-# 📲 ตั้งค่า LINE Messaging API
+# ✅ EMAIL-ONLY NOTIFICATION MODE (May 2026)
 # ==========================================
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '')
-LINE_ADMIN_USER_ID = os.environ.get('LINE_ADMIN_USER_ID', '')
-LINE_TEST_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_TEST_CHANNEL_ACCESS_TOKEN', '')
-LINE_TEST_ADMIN_USER_ID = os.environ.get('LINE_TEST_ADMIN_USER_ID', '')
+# ⚠️ LINE Notifications have been REMOVED
+# All notifications are now sent via Email only
+# Legacy LINE env vars are no longer used
 
 def get_db_connection():
     conn = sqlite3.connect(DB_NAME, timeout=20)
@@ -1295,41 +1308,6 @@ def is_user_currently_locked(user_row):
         return False
 
     return (datetime.now() - last_seen) <= timedelta(minutes=USER_LOCK_TIMEOUT_MINUTES)
-
-def resolve_line_targets(target_group=None, location=None, role=None):
-    """เลือกกลุ่ม LINE ปลายทางตาม location / role"""
-    text = ' '.join(str(v or '') for v in [target_group, location, role]).lower()
-
-    if 'coil center' in text or 'admin_cc' in text or ' cc' in f' {text}' or text == 'cc':
-        return [{'group': 'cc', 'token': LINE_CHANNEL_ACCESS_TOKEN, 'user_id': LINE_ADMIN_USER_ID}]
-
-    if 'pc1' in text or 'admin_pc1' in text:
-        return [{'group': 'pc1', 'token': LINE_TEST_CHANNEL_ACCESS_TOKEN, 'user_id': LINE_TEST_ADMIN_USER_ID}]
-
-    return [
-        {'group': 'cc', 'token': LINE_CHANNEL_ACCESS_TOKEN, 'user_id': LINE_ADMIN_USER_ID},
-        {'group': 'pc1', 'token': LINE_TEST_CHANNEL_ACCESS_TOKEN, 'user_id': LINE_TEST_ADMIN_USER_ID},
-    ]
-
-def send_line_message(message, target_group=None, location=None, role=None):
-    url = 'https://api.line.me/v2/bot/message/push'
-    targets = resolve_line_targets(target_group=target_group, location=location, role=role)
-
-    for target in targets:
-        if not target['token'] or not target['user_id']:
-            continue
-
-        headers = {'Content-Type': 'application/json', 'Authorization': f"Bearer {target['token']}"}
-        payload = {'to': target['user_id'], 'messages': [{'type': 'text', 'text': message}]}
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=15)
-            if response.status_code >= 400:
-                print(
-                    f"LINE push failed ({target['group']}): "
-                    f"HTTP {response.status_code} - {response.text[:300]}"
-                )
-        except Exception as e:
-            print(f"Error sending LINE message ({target['group']}): {e}")
 
 def parse_email_recipients(value):
     recipients = []
@@ -2623,11 +2601,22 @@ def _send_smart_notification_sync(notification_type, message, location=None, rol
 def send_smart_notification(notification_type, message, location=None, role=None, email_body='', html_body='', recipients=None, admin_id=None, async_mode=True):
     """Wrapper ส่งแจ้งเตือนแบบ async เพื่อลดเวลา response ของหน้า submit"""
     if async_mode:
-        worker = threading.Thread(
-            target=_send_smart_notification_sync,
-            args=(notification_type, message, location, role, email_body, html_body, recipients, admin_id),
-            daemon=True,
-        )
+        def _notification_worker():
+            try:
+                _send_smart_notification_sync(
+                    notification_type=notification_type,
+                    message=message,
+                    location=location,
+                    role=role,
+                    email_body=email_body,
+                    html_body=html_body,
+                    recipients=recipients,
+                    admin_id=admin_id,
+                )
+            except Exception as e:
+                app.logger.error(f'Async notification thread failed: type={notification_type}, error={str(e)}', exc_info=True)
+        
+        worker = threading.Thread(target=_notification_worker, daemon=True)
         worker.start()
         return True
 
@@ -3529,6 +3518,11 @@ def add_to_cart():
         flash('⚠️ session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่', 'danger')
         return redirect(url_for('index'))
 
+    # ✅ Extend session ทุกครั้งที่ user ทำ activity เพื่อป้องกัน timeout
+    session.permanent = True
+    app.permanent_session_lifetime = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
+    session.modified = True
+
     try:
         qty = int(request.form.get('qty', 1))
     except (TypeError, ValueError):
@@ -3725,6 +3719,11 @@ def remove_from_cart():
         flash('⚠️ session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่', 'danger')
         return redirect(url_for('index'))
 
+    # ✅ Extend session ทุกครั้งที่ user ทำ activity
+    session.permanent = True
+    app.permanent_session_lifetime = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
+    session.modified = True
+
     conn = get_db_connection()
     start_write_transaction(conn)
     cart_item = conn.execute('SELECT * FROM carts WHERE id = ? AND emp_id = ?', (cart_id, emp_id)).fetchone()
@@ -3764,6 +3763,11 @@ def confirm_withdrawal():
     if not is_valid_user_session(emp_id):
         flash('⚠️ session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่', 'danger')
         return redirect(url_for('index'))
+
+    # ✅ Extend session เพื่อป้องกัน timeout ระหว่างการ confirm
+    session.permanent = True
+    app.permanent_session_lifetime = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
+    session.modified = True  # บังคับ Flask ให้ update session cookie
 
     if receive_mode == 'scheduled':
         if not requested_receive_at:
@@ -3942,6 +3946,11 @@ def update_cart_qty():
 
     if not is_valid_user_session(emp_id):
         return jsonify({'success': False, 'message': 'session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่'}), 403
+
+    # ✅ Extend session ทุกครั้งที่ user ทำ activity
+    session.permanent = True
+    app.permanent_session_lifetime = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
+    session.modified = True
 
     try:
         new_qty = int(request.form.get('qty', 1))
@@ -4247,6 +4256,10 @@ def withdrawal_status_page(token):
     if not rows:
         abort(404)
     rows = [dict(r) for r in rows]
+    home_url = url_for('index')
+    session_user_id = (session.get('user_id') or '').strip()
+    if session_user_id:
+        home_url = url_for('user_services', emp_id=session_user_id)
     # Determine overall batch status
     statuses = {r['status'] for r in rows}
     if statuses == {'Approved'}:
@@ -4265,7 +4278,8 @@ def withdrawal_status_page(token):
                            token=token,
                            rows=rows,
                            batch_status=batch_status,
-                           status_url=status_url)
+                           status_url=status_url,
+                           home_url=home_url)
 
 
 @app.route('/withdrawal-status/<token>/qr.png')
@@ -5967,6 +5981,103 @@ def get_pending_requests():
     
     # ส่งกลับเป็น HTML เฉพาะส่วนของแถวตาราง (Partial)
     return render_template('pending_requests_partial.html', pending_logs=pending_logs)
+
+@app.route('/api/admin/pending_debug', methods=['GET'])
+def debug_pending_requests():
+    """🔍 ดึงข้อมูล diagnostic สำหรับดีบัก pending requests ที่หาย"""
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+    
+    role = session.get('admin_role', 'superadmin')
+    conn = get_db_connection()
+    
+    try:
+        # ✅ นับ pending requests ทั้งหมด
+        total_pending = conn.execute("SELECT COUNT(*) as count FROM transaction_logs WHERE status = 'Pending'").fetchone()
+        total_pending_count = total_pending['count'] if total_pending else 0
+        
+        # ✅ นับ pending requests ตาม location
+        location_stats = conn.execute('''
+            SELECT 
+                COALESCE(u.location, 'NO-LOCATION') as location,
+                COUNT(*) as pending_count
+            FROM transaction_logs l
+            LEFT JOIN users u ON l.emp_id = u.emp_id
+            WHERE l.status = 'Pending'
+            GROUP BY COALESCE(u.location, 'NO-LOCATION')
+            ORDER BY pending_count DESC
+        ''').fetchall()
+        
+        location_breakdown = {row['location']: row['pending_count'] for row in location_stats}
+        
+        # ✅ ตรวจสอบว่า current admin สามารถเห็นได้กี่รายการ
+        visible_count = 0
+        if role == 'admin_pc1':
+            visible_result = conn.execute('''
+                SELECT COUNT(*) as count FROM transaction_logs l
+                LEFT JOIN users u ON l.emp_id = u.emp_id
+                WHERE l.status = 'Pending' AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')
+            ''').fetchone()
+            visible_count = visible_result['count'] if visible_result else 0
+        elif role == 'admin_cc':
+            visible_result = conn.execute('''
+                SELECT COUNT(*) as count FROM transaction_logs l
+                LEFT JOIN users u ON l.emp_id = u.emp_id
+                WHERE l.status = 'Pending' AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')
+            ''').fetchone()
+            visible_count = visible_result['count'] if visible_result else 0
+        else:
+            visible_count = total_pending_count  # superadmin sees all
+        
+        # ✅ ตรวจสอบ users ที่ไม่มี location
+        users_no_location = conn.execute('''
+            SELECT l.emp_id, COUNT(*) as pending_requests
+            FROM transaction_logs l
+            LEFT JOIN users u ON l.emp_id = u.emp_id
+            WHERE l.status = 'Pending' AND (u.location IS NULL OR TRIM(u.location) = '')
+            GROUP BY l.emp_id
+        ''').fetchall()
+        
+        users_no_location_count = len(users_no_location) if users_no_location else 0
+        users_no_location_list = [{'emp_id': row['emp_id'], 'pending_requests': row['pending_requests']} for row in users_no_location]
+        
+        # ✅ ตรวจสอบความสำเร็จของการส่งแจ้งเตือน
+        recent_notifications = conn.execute('''
+            SELECT 
+                status,
+                COUNT(*) as count,
+                GROUP_CONCAT(DISTINCT channel) as channels
+            FROM notification_delivery_logs
+            WHERE created_at >= datetime('now', '-7 days')
+            GROUP BY status
+        ''').fetchall()
+        
+        notification_stats = {row['status']: {'count': row['count'], 'channels': row['channels']} for row in recent_notifications}
+        
+        return jsonify({
+            'success': True,
+            'current_admin_role': role,
+            'visible_pending_count': visible_count,
+            'total_pending_count': total_pending_count,
+            'location_breakdown': location_breakdown,
+            'users_without_location': {
+                'count': users_no_location_count,
+                'details': users_no_location_list
+            },
+            'notification_delivery_stats': notification_stats,
+            'diagnostic_tips': [
+                f"Superadmin should see {total_pending_count} pending requests",
+                f"Current role ({role}) can see {visible_count} requests",
+                f"{users_no_location_count} employees have NO location set - requests may be hidden",
+                "Check if users.location is PC1, Coil Center, or CC (case-sensitive)",
+                "Recent notification status shows if emails were sent successfully"
+            ]
+        })
+    except Exception as e:
+        app.logger.error(f"Debug pending requests error: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        conn.close()
 
 @app.route('/admin/approve/<int:log_id>', methods=['POST']) # ฟังก์ชันนี้จะถูกเรียกเมื่อแอดมินกดอนุมัติการเบิก
 def approve_request(log_id):
