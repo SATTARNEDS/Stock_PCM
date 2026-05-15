@@ -75,7 +75,14 @@ app.logger.setLevel(logging.INFO)
 
 configured_secret = os.environ.get('FLASK_SECRET_KEY') or os.environ.get('SECRET_KEY')
 if not configured_secret:
-    configured_secret = secrets.token_hex(32)
+    _key_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.secret_key')
+    if os.path.exists(_key_file):
+        with open(_key_file, 'r') as _f:
+            configured_secret = _f.read().strip()
+    if not configured_secret:
+        configured_secret = secrets.token_hex(32)
+        with open(_key_file, 'w') as _f:
+            _f.write(configured_secret)
 
 app.secret_key = configured_secret
 app.config.update(
@@ -114,10 +121,10 @@ SENSITIVE_POST_ENDPOINTS = {
     'support_chat_send', 'support_chat_presence', 'admin_support_chat_reply'
 }
 USER_SUBMIT_ENDPOINTS = {
-    'add_to_cart', 'remove_from_cart', 'confirm_withdrawal', 'ga_request_portal', 'support_chat_send'
+    'add_to_cart', 'remove_from_cart', 'confirm_withdrawal', 'ga_request_portal'
 }
 USER_AJAX_ENDPOINTS = {
-    'update_cart_qty', 'ga_chat_presence', 'support_chat_presence', 'user_ga_chat'
+    'update_cart_qty', 'ga_chat_presence', 'user_ga_chat'
 }
 NO_CACHE_HEADERS = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -458,7 +465,8 @@ def handle_before_request():
     skip_csrf_endpoints = {'index', 'admin_login'}
     if request.method == 'POST' and request.endpoint in SENSITIVE_POST_ENDPOINTS and request.endpoint not in skip_csrf_endpoints:
         if not validate_csrf_token():
-            if request.path.startswith('/api/') or request.endpoint == 'update_cart_qty':
+            _ajax_endpoints = USER_AJAX_ENDPOINTS | {'support_chat_send', 'support_chat_presence', 'admin_support_chat_reply'}
+            if request.path.startswith('/api/') or request.endpoint == 'update_cart_qty' or request.endpoint in _ajax_endpoints:
                 return jsonify({'success': False, 'message': 'คำขอไม่ปลอดภัยหรือ session หมดอายุ'}), 400
             flash('❌ คำขอไม่ปลอดภัยหรือ session หมดอายุ กรุณาลองใหม่', 'danger')
             return redirect(request.referrer or url_for('index'))
