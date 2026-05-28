@@ -23,6 +23,7 @@ import requests
 from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify, make_response, abort, has_request_context
 from flask_apscheduler import APScheduler
 from io import BytesIO
+from openpyxl.utils import get_column_letter
 from unit_conversion import UnitConversionManager  # ✅ Unit Conversion Support
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -52,6 +53,14 @@ def load_env_file(env_path=ENV_FILE):
         print(f"Warning loading .env: {e}")
 
 load_env_file()
+
+def _set_xlsxwriter_auto_widths(worksheet, df):
+    for idx, col in enumerate(df.columns):
+        max_value_length = max(
+            df[col].astype(str).map(len).max() if len(df) > 0 else 0,
+            len(str(col))
+        )
+        worksheet.set_column(idx, idx, max_value_length + 2)
 
 # --- เพิ่ม Config ---
 class Config:
@@ -143,6 +152,8 @@ GA_CHAT_USER_PRESENCE_LOCK = threading.Lock()
 SUPPORT_PRESENCE_SECONDS = int(os.environ.get('SUPPORT_PRESENCE_SECONDS', '90'))
 SUPPORT_CHAT_PRESENCE = {}
 SUPPORT_CHAT_PRESENCE_LOCK = threading.Lock()
+SUPPORT_ADMIN_PRESENCE = {}
+SUPPORT_ADMIN_PRESENCE_LOCK = threading.Lock()
 
 
 def _cleanup_ga_chat_presence(now_ts):
@@ -206,6 +217,41 @@ def is_user_actively_viewing_support(emp_id):
     with SUPPORT_CHAT_PRESENCE_LOCK:
         last_seen = float(SUPPORT_CHAT_PRESENCE.get(emp_id, 0))
     return (now_ts - last_seen) <= SUPPORT_PRESENCE_SECONDS
+
+
+def _resolve_support_admin_presence_key(role=None, location=None):
+    role_text = str(role or '').strip().lower()
+    if role_text == 'superadmin':
+        return 'all'
+    if role_text == 'admin_pc1':
+        return 'pc1'
+    if role_text == 'admin_cc':
+        return 'cc'
+
+    location_value = normalize_location_value(location)
+    if location_value == 'PC1':
+        return 'pc1'
+    if is_cc_location_value(location_value):
+        return 'cc'
+    return 'general'
+
+
+def mark_support_admin_presence(role=None, location=None):
+    presence_key = _resolve_support_admin_presence_key(role=role, location=location)
+    now_ts = time.time()
+    with SUPPORT_ADMIN_PRESENCE_LOCK:
+        SUPPORT_ADMIN_PRESENCE[presence_key] = now_ts
+
+
+def is_admin_actively_viewing_support(role=None, location=None):
+    now_ts = time.time()
+    presence_key = _resolve_support_admin_presence_key(role=role, location=location)
+    candidate_keys = {'all', presence_key}
+    if presence_key in ('pc1', 'cc'):
+        candidate_keys.add('general')
+
+    with SUPPORT_ADMIN_PRESENCE_LOCK:
+        return any((now_ts - float(SUPPORT_ADMIN_PRESENCE.get(key, 0))) <= SUPPORT_PRESENCE_SECONDS for key in candidate_keys)
 
 
 def utc_now_naive():
@@ -1538,6 +1584,130 @@ def build_email_link(endpoint_name, **values):
 
     return urljoin(base_url, relative_url.lstrip('/'))
 
+
+def send_support_chat_admin_notification(emp_id, emp_name, location, message):
+    scope = resolve_notification_scope(location=location)
+    if is_admin_actively_viewing_support(location=location):
+        log_notification_delivery(
+            admin_id='superadmin',
+            notification_type='support_chat_admin',
+            scope=scope,
+            channel='email',
+            recipients=[],
+            status='skipped-active-view',
+            location=str(location or ''),
+            role=''
+        )
+        return
+
+    settings = get_notification_settings('superadmin')
+    recipients = resolve_notification_email_recipients(settings=settings, location=location)
+    if not recipients:
+        log_notification_delivery(
+            admin_id='superadmin',
+            notification_type='support_chat_admin',
+            scope=scope,
+            channel='email',
+            recipients=[],
+            status='no-recipients',
+            error_message='No support notification recipients configured',
+            location=str(location or ''),
+            role=''
+        )
+        return
+
+    admin_link = build_email_link('admin_dashboard', module='support') or build_email_link('index')
+    safe_message = escape(message)
+    safe_name = escape(emp_name or emp_id)
+    html_body = f'''<div style="font-family:Mitr,sans-serif;max-width:560px;margin:auto;background:#f5f8ff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.10)">
+<div style="background:linear-gradient(135deg,#005fcc,#00a1c9);padding:22px 28px;color:#fff">
+  <div style="font-size:18px;font-weight:600">💬 มีข้อความใหม่จากผู้ใช้งานใน Support Chat</div>
+  <div style="font-size:13px;opacity:.85;margin-top:4px">PCM Stock System</div>
+</div>
+<div style="padding:24px 28px">
+  <div style="font-size:14px;color:#475467;margin-bottom:12px">ผู้ส่ง: <strong>{safe_name}</strong> ({escape(emp_id)})</div>
+  <div style="background:#fff;border-radius:10px;padding:14px 18px;font-size:15px;color:#1f2d3d;border-left:4px solid #005fcc">{safe_message}</div>
+  {f'<div style="margin-top:16px"><a href="{escape(admin_link)}" style="display:inline-block;background:linear-gradient(135deg,#005fcc,#00a1c9);color:#fff;text-decoration:none;padding:10px 22px;border-radius:8px;font-size:14px">เปิดหน้าจัดการ Support Chat</a></div>' if admin_link else ''}
+</div></div>'''
+    sent, error = send_email_message(
+        subject='[PCM Support] มีข้อความใหม่จากผู้ใช้งาน',
+        body=f'ผู้ใช้ {emp_name or emp_id} ({emp_id}) ส่งข้อความใหม่ใน Support Chat: {message}',
+        recipients=recipients,
+        html_body=html_body
+    )
+    log_notification_delivery(
+        admin_id='superadmin',
+        notification_type='support_chat_admin',
+        scope=scope,
+        channel='email',
+        recipients=recipients,
+        status='sent' if sent else 'failed',
+        error_message=error,
+        location=str(location or ''),
+        role=''
+    )
+
+
+def send_support_chat_user_notification(emp_id, emp_name, user_email, admin_name, message):
+    if is_user_actively_viewing_support(emp_id):
+        log_notification_delivery(
+            admin_id='superadmin',
+            notification_type='support_chat_user',
+            scope='general',
+            channel='email',
+            recipients=[user_email] if user_email else [],
+            status='skipped-active-view',
+            location='',
+            role=''
+        )
+        return
+
+    recipients = parse_email_recipients(user_email)
+    if not recipients:
+        log_notification_delivery(
+            admin_id='superadmin',
+            notification_type='support_chat_user',
+            scope='general',
+            channel='email',
+            recipients=[],
+            status='no-recipients',
+            error_message='User email is missing or invalid',
+            location='',
+            role=''
+        )
+        return
+
+    user_link = build_email_link('index')
+    safe_message = escape(message)
+    safe_admin_name = escape(admin_name or 'Admin')
+    html_body = f'''<div style="font-family:Mitr,sans-serif;max-width:520px;margin:auto;background:#f5f8ff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.10)">
+<div style="background:linear-gradient(135deg,#005fcc,#00a1c9);padding:22px 28px;color:#fff">
+  <div style="font-size:18px;font-weight:600">💬 มีข้อความตอบกลับจากทีม Support</div>
+  <div style="font-size:13px;opacity:.85;margin-top:4px">PCM Stock System</div>
+</div>
+<div style="padding:24px 28px">
+  <div style="background:#fff;border-radius:10px;padding:14px 18px;font-size:15px;color:#1f2d3d;border-left:4px solid #005fcc">{safe_message}</div>
+  <div style="margin-top:16px;font-size:13px;color:#666">โดย: <strong>{safe_admin_name}</strong></div>
+  {f'<div style="margin-top:16px"><a href="{escape(user_link)}" style="display:inline-block;background:linear-gradient(135deg,#005fcc,#00a1c9);color:#fff;text-decoration:none;padding:10px 22px;border-radius:8px;font-size:14px">เปิดระบบเพื่อดูข้อความ</a></div>' if user_link else ''}
+</div></div>'''
+    sent, error = send_email_message(
+        subject='[PCM Support] มีข้อความตอบกลับจากทีม Support',
+        body=f'มีข้อความตอบกลับจากทีม Support ถึง {emp_name or emp_id}: {message}',
+        recipients=recipients,
+        html_body=html_body
+    )
+    log_notification_delivery(
+        admin_id='superadmin',
+        notification_type='support_chat_user',
+        scope='general',
+        channel='email',
+        recipients=recipients,
+        status='sent' if sent else 'failed',
+        error_message=error,
+        location='',
+        role=''
+    )
+
 def save_uploaded_image(file_storage):
     if not file_storage or not file_storage.filename:
         return ''
@@ -2836,6 +3006,8 @@ def get_stock_audit_monthly_snapshot(selected_year, selected_month=None):
                 COALESCE(p.category, '') AS category,
                 COALESCE(p.location, '') AS location,
                 COALESCE(p.unit, '') AS unit,
+                COALESCE(p.base_unit, '') AS base_unit,
+                COALESCE(p.conversion_rate, 1) AS conversion_rate,
                 COALESCE(p.safety_stock, 0) AS safety_stock,
                 COALESCE(p.stock, 0) AS current_balance
             FROM products p
@@ -2850,6 +3022,7 @@ def get_stock_audit_monthly_snapshot(selected_year, selected_month=None):
                 l.action,
                 l.status,
                 COALESCE(l.qty, 0) AS qty,
+                COALESCE(l.qty_base_unit, 0) AS qty_base_unit,
                 {ts_expr} AS normalized_ts
             FROM transaction_logs l
             WHERE l.product_id IS NOT NULL
@@ -2893,8 +3066,13 @@ def get_stock_audit_monthly_snapshot(selected_year, selected_month=None):
             day_number = 0
 
         metrics = monthly_metrics[(row['product_id'], row_month_key)]
-        qty = int(row['qty'] or 0)
         action = str(row['action'] or '').strip()
+
+        # สำหรับยาแบบ split: ใช้ qty_base_unit ถ้ามี, ไม่เช่นนั้นใช้ qty
+        if action in ('Withdrawn', 'withdraw', 'ขอเบิกยา', 'ขอเบิกอุปกรณ์') or action.startswith('เบิกหมวกเซฟตี้'):
+            qty = int(row['qty_base_unit'] or 0) if int(row['qty_base_unit'] or 0) > 0 else int(row['qty'] or 0)
+        else:
+            qty = int(row['qty'] or 0)
 
         if action == 'Received':
             metrics['received'] += qty
@@ -2955,7 +3133,11 @@ def get_stock_audit_monthly_snapshot(selected_year, selected_month=None):
             'category': product['category'],
             'location': product['location'],
             'unit': product['unit'],
+            'base_unit': product['base_unit'],
+            'conversion_rate': int(product['conversion_rate'] or 1),
             'safety_stock': int(product['safety_stock'] or 0),
+            # ตัดสินใจว่าควรแสดงหน่วยอะไร: ถ้า base_unit มีค่า และ conversion_rate > 1 ให้ใช้ base_unit
+            'display_unit': (product['base_unit'] if (product['base_unit'] and int(product['conversion_rate'] or 1) > 1) else product['unit']),
             **month_snapshot,
         })
 
@@ -3090,7 +3272,8 @@ def export_stock_audit_monthly_excel(selected_year):
                     item['order_qty'],
                     low_stock_format if item['order_qty'] > 0 else number_format
                 )
-                worksheet.write(row_cursor, 12, item['unit'], text_center_format)
+                # ใช้ display_unit แทน unit เพื่อแสดงหน่วยที่ถูกต้อง (base_unit สำหรับยาแบบ split)
+                worksheet.write(row_cursor, 12, item.get('display_unit', item['unit']), text_center_format)
 
                 for day in range(1, 32):
                     day_value = item['daily_withdrawals'].get(day, '')
@@ -3889,10 +4072,11 @@ def confirm_withdrawal():
                 result_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
                 if has_medicine and is_medicine:
                     result_note = f"อาการ: {symptom}" + (f" | {result_note}" if result_note else "")
+                action_label = 'ขอเบิกยา' if is_medicine else 'ขอเบิกอุปกรณ์'
                 conn.execute('''
                     INSERT INTO transaction_logs (emp_id, product_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp, note, request_receive_mode, requested_receive_at, batch_token, requester_ip, requester_device_token) 
-                    VALUES (?, ?, 'ขอเบิกอุปกรณ์', ?, ?, ?, 'Pending', ?, ?, ?, ?, ?, ?, ?)
-                ''', (emp_id, item['product_id'], result_qty, item['qty'], result_pkg_qty, thai_now, result_note, receive_mode, requested_receive_at or None, batch_token, requester_ip, requester_device_token or None))
+                    VALUES (?, ?, ?, ?, ?, ?, 'Pending', ?, ?, ?, ?, ?, ?, ?)
+                ''', (emp_id, item['product_id'], action_label, result_qty, item['qty'], result_pkg_qty, thai_now, result_note, receive_mode, requested_receive_at or None, batch_token, requester_ip, requester_device_token or None))
             
             log_note = withdrawal_result.get('note') or withdrawal_result.get('transaction_note', '')
             display_qty = item['qty']
@@ -5566,6 +5750,7 @@ def support_chat_get():
 def support_chat_send():
     emp_id = session.get('user_id')
     emp_name = session.get('user_name', '')
+    user_location = session.get('user_location', '')
     if not emp_id:
         return jsonify({'error': 'unauthorized'}), 401
     data = request.get_json(silent=True) or {}
@@ -5584,6 +5769,10 @@ def support_chat_send():
         conn.commit()
     finally:
         conn.close()
+    try:
+        send_support_chat_admin_notification(emp_id=emp_id, emp_name=emp_name, location=user_location, message=message)
+    except Exception as exc:
+        app.logger.error(f'Error sending support admin notification: {exc}', exc_info=True)
     return jsonify({
         'ok': True,
         'message': {
@@ -5631,6 +5820,7 @@ def admin_support_inbox():
     if not session.get('admin_logged_in'):
         return jsonify({'error': 'unauthorized'}), 401
     role = session.get('admin_role', 'superadmin')
+    mark_support_admin_presence(role=role)
     if role == 'admin_pc1':
         loc_join = "LEFT JOIN users u ON m.emp_id = u.emp_id"
         loc_filter = " AND u.location = 'PC1'"
@@ -5680,15 +5870,19 @@ def admin_support_chat_reply(emp_id):
     if not session.get('admin_logged_in'):
         return jsonify({'error': 'unauthorized'}), 401
     admin_name = session.get('admin_name', 'Admin')
+    admin_role = session.get('admin_role', 'superadmin')
+    mark_support_admin_presence(role=admin_role)
     if request.method == 'POST':
         data = request.get_json(silent=True) or {}
         message = str(data.get('message', '')).strip()
         if not message or len(message) > 2000:
             return jsonify({'error': 'invalid'}), 400
         conn = get_db_connection()
+        user_row = None
         try:
+            user_row = conn.execute('SELECT name, email, location FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
             row = conn.execute('SELECT emp_name FROM support_messages WHERE emp_id = ? LIMIT 1', (emp_id,)).fetchone()
-            emp_name = row['emp_name'] if row else emp_id
+            emp_name = (user_row['name'] if user_row and user_row['name'] else '') or (row['emp_name'] if row else emp_id)
             tz = pytz.timezone('Asia/Bangkok')
             now_str = datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S')
             conn.execute(
@@ -5696,33 +5890,18 @@ def admin_support_chat_reply(emp_id):
                 (emp_id, emp_name, 'admin', admin_name, message, now_str)
             )
             conn.commit()
-            # send email if user not actively viewing
-            if not is_user_actively_viewing_support(emp_id):
-                try:
-                    conn2 = get_db_connection()
-                    user_row = conn2.execute('SELECT email FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
-                    conn2.close()
-                    if user_row and user_row['email']:
-                        html_body = f'''<div style="font-family:Mitr,sans-serif;max-width:520px;margin:auto;background:#f5f8ff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.10)">
-<div style="background:linear-gradient(135deg,#005fcc,#00a1c9);padding:22px 28px;color:#fff">
-  <div style="font-size:18px;font-weight:600">💬 มีข้อความตอบกลับจากทีม Support</div>
-  <div style="font-size:13px;opacity:.85;margin-top:4px">PCM Stock System</div>
-</div>
-<div style="padding:24px 28px">
-  <div style="background:#fff;border-radius:10px;padding:14px 18px;font-size:15px;color:#1f2d3d;border-left:4px solid #005fcc">{message}</div>
-  <div style="margin-top:16px;font-size:13px;color:#666">โดย: <strong>{admin_name}</strong></div>
-  <div style="margin-top:16px"><a href="#" style="display:inline-block;background:linear-gradient(135deg,#005fcc,#00a1c9);color:#fff;text-decoration:none;padding:10px 22px;border-radius:8px;font-size:14px">เปิดระบบเพื่อดูข้อความ</a></div>
-</div></div>'''
-                        send_email_message(
-                            subject='[PCM Stock] มีข้อความตอบกลับจากทีม Support',
-                            body=f'มีข้อความตอบกลับจากทีม Support: {message}',
-                            recipients=[user_row['email']],
-                            html_body=html_body
-                        )
-                except Exception:
-                    pass
         finally:
             conn.close()
+        try:
+            send_support_chat_user_notification(
+                emp_id=emp_id,
+                emp_name=emp_name,
+                user_email=(user_row['email'] if user_row else ''),
+                admin_name=admin_name,
+                message=message
+            )
+        except Exception as exc:
+            app.logger.error(f'Error sending support user notification: {exc}', exc_info=True)
         return jsonify({'ok': True})
 
     # GET
@@ -7710,6 +7889,80 @@ def get_product(code):
         return jsonify(payload)
     return jsonify({'error': 'Product not found'}), 404
 
+
+@app.route('/admin/get_product_lots/<int:product_id>')
+def get_product_lots(product_id):
+    if not session.get('admin_logged_in'):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    conn = get_db_connection()
+    lots = conn.execute('''
+        SELECT id, COALESCE(lot_number, '') AS lot_number, COALESCE(qty, 0) AS qty,
+               COALESCE(received_date, '') AS received_date, COALESCE(expiry_date, '') AS expiry_date
+        FROM product_lots
+        WHERE product_id = ?
+        ORDER BY received_date ASC, id ASC
+    ''', (product_id,)).fetchall()
+    conn.close()
+
+    return jsonify({
+        'product_id': product_id,
+        'lots': [dict(lot) for lot in lots]
+    })
+
+
+@app.route('/admin/update_product_lot', methods=['POST'])
+def update_product_lot():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    lot_id = request.form.get('lot_id', type=int)
+    if not lot_id:
+        return jsonify({'success': False, 'message': 'ไม่พบ Lot ที่จะแก้ไข'}), 400
+
+    lot_number = normalize_lot_number(request.form.get('lot_number', ''))
+    qty = max(0, request.form.get('qty', 0, type=int) or 0)
+    received_date = standardize_date(request.form.get('received_date', ''))
+    expiry_date = standardize_date(request.form.get('expiry_date', ''))
+
+    conn = get_db_connection()
+    existing = conn.execute('SELECT id FROM product_lots WHERE id = ?', (lot_id,)).fetchone()
+    if not existing:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Lot นี้ไม่มีอยู่ในระบบ'}), 404
+
+    conn.execute('''
+        UPDATE product_lots
+        SET lot_number = ?, qty = ?, received_date = ?, expiry_date = ?
+        WHERE id = ?
+    ''', (lot_number, qty, received_date, expiry_date, lot_id))
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True})
+
+
+@app.route('/admin/delete_product_lot/<int:lot_id>', methods=['POST'])
+def delete_product_lot(lot_id):
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    conn = get_db_connection()
+    existing = conn.execute('SELECT id FROM product_lots WHERE id = ?', (lot_id,)).fetchone()
+    if not existing:
+        conn.close()
+        return jsonify({'success': False, 'message': 'Lot นี้ไม่มีอยู่ในระบบ'}), 404
+
+    referenced = conn.execute('SELECT COUNT(*) AS cnt FROM transaction_logs WHERE lot_id = ?', (lot_id,)).fetchone()[0]
+    if referenced and int(referenced) > 0:
+        conn.close()
+        return jsonify({'success': False, 'message': 'ไม่สามารถลบ Lot ที่มีรายการเชื่อมโยง'}), 400
+
+    conn.execute('DELETE FROM product_lots WHERE id = ?', (lot_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
 @app.route('/admin/edit_product', methods=['POST'])
 def edit_product():
     if not session.get('admin_logged_in'): 
@@ -7991,8 +8244,11 @@ def export_logs_excel():
                 COALESCE(p.code, '') AS "รหัสของ",
                 COALESCE(p.name, '') AS "รายการ",
                 COALESCE(l.action, '') AS "ประเภท",
-                COALESCE(l.qty, 0) AS "จำนวน",
-                COALESCE(p.unit, '') AS "หน่วย",
+                COALESCE(l.note, '') AS "note",
+                -- ถ้ามี qty_base_unit ให้ใช้ค่าเม็ด/หน่วยย่อยแทน qty
+                CASE WHEN COALESCE(l.qty_base_unit, 0) > 0 THEN COALESCE(l.qty_base_unit, 0) ELSE COALESCE(l.qty, 0) END AS "จำนวน",
+                -- ถ้ามี base_unit และ qty_base_unit>0 ให้แสดง base_unit, มิฉะนั้นใช้ unit ปกติ
+                CASE WHEN COALESCE(l.qty_base_unit, 0) > 0 AND COALESCE(p.base_unit, '') != '' THEN COALESCE(p.base_unit, p.unit, '') ELSE COALESCE(p.unit, '') END AS "หน่วย",
                 CASE
                     WHEN l.status = 'Approved' AND COALESCE(l.request_receive_mode, 'immediate') = 'scheduled' AND l.pickup_confirmed_at IS NOT NULL AND trim(l.pickup_confirmed_at) != ''
                         THEN 'รับของแล้ว'
@@ -8010,12 +8266,31 @@ def export_logs_excel():
             ORDER BY datetime({ts_expr}) DESC, l.id DESC
         '''
         df = pd.read_sql_query(query, conn, params=final_log_params)
+        df['อาการ'] = df['note'].fillna('').apply(
+            lambda v: v.split(' | ')[0].replace('อาการ: ', '', 1).strip() if isinstance(v, str) and v.startswith('อาการ: ') else ''
+        )
+        df = df[[
+            'วัน/เวลา', 'ผู้ทำรายการ', 'แผนก', 'Location', 'รหัสของ', 'รายการ', 'อาการ',
+            'ประเภท', 'จำนวน', 'หน่วย', 'สถานะ'
+        ]]
     finally:
         conn.close()
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='History_Logs')
+        worksheet = writer.sheets['History_Logs']
+        if len(df) > 0:
+            worksheet.autofilter(0, 0, len(df), len(df.columns) - 1)
+        else:
+            worksheet.autofilter(0, 0, 0, len(df.columns) - 1)
+        worksheet.freeze_panes(1, 0)
+        for idx, col in enumerate(df.columns):
+            max_value_length = max(
+                df[col].astype(str).map(len).max() if len(df) > 0 else 0,
+                len(str(col))
+            )
+            worksheet.set_column(idx, idx, max_value_length + 2)
     output.seek(0)
 
     suffix = (log_type or 'all').replace('-', '_')
@@ -8852,8 +9127,10 @@ def monthly_report():
             p.code AS "รหัสของ", 
             p.name AS "ชื่อของ", 
             u.department AS "แผนกที่เบิก", 
-            SUM(l.qty) AS "จำนวนที่เบิกทั้งหมด",
-            p.unit AS "หน่วย"
+            -- SUM ใช้ qty_base_unit เมื่อมีค่าที่แท้จริงในหน่วยย่อย
+            SUM(CASE WHEN COALESCE(l.qty_base_unit, 0) > 0 THEN l.qty_base_unit ELSE l.qty END) AS "จำนวนที่เบิกทั้งหมด",
+            -- แสดงหน่วยเป็น base_unit เมื่อใช้ qty_base_unit
+            CASE WHEN SUM(CASE WHEN COALESCE(l.qty_base_unit, 0) > 0 THEN 1 ELSE 0 END) > 0 AND COALESCE(p.base_unit, '') != '' THEN COALESCE(p.base_unit, p.unit) ELSE COALESCE(p.unit, '') END AS "หน่วย"
         FROM transaction_logs l
         JOIN products p ON l.product_id = p.id
         JOIN users u ON l.emp_id = u.emp_id
@@ -8876,6 +9153,16 @@ def monthly_report():
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Monthly_Summary')
+            worksheet = writer.sheets['Monthly_Summary']
+            if len(df) > 0:
+                worksheet.auto_filter.ref = worksheet.dimensions
+            worksheet.freeze_panes = 'A2'
+            for idx, col in enumerate(df.columns, start=1):
+                column_letter = get_column_letter(idx)
+                max_length = max(
+                    len(str(cell.value or '')) for cell in worksheet[column_letter]
+                )
+                worksheet.column_dimensions[column_letter].width = max_length + 2
         output.seek(0)
 
         filename = f"Summary_Report_{datetime.now().strftime('%B_%Y')}.xlsx"
@@ -9607,7 +9894,9 @@ def get_monthly_report_data():
     
     conn = get_db_connection()
     query = f'''
-        SELECT p.name as item_name, SUM(l.qty) as total, p.unit
+        SELECT p.name as item_name,
+               SUM(CASE WHEN COALESCE(l.qty_base_unit,0) > 0 THEN l.qty_base_unit ELSE l.qty END) as total,
+               CASE WHEN SUM(CASE WHEN COALESCE(l.qty_base_unit,0) > 0 THEN 1 ELSE 0 END) > 0 AND COALESCE(p.base_unit,'') != '' THEN COALESCE(p.base_unit,p.unit) ELSE COALESCE(p.unit,'') END as unit
         FROM transaction_logs l
         JOIN products p ON l.product_id = p.id
         WHERE substr({ts_expr}, 1, 7) = ?
@@ -9648,8 +9937,8 @@ def export_monthly_excel():
             u.department as "แผนก",
             p.code as "รหัสของ",
             p.name as "รายการของ",
-            l.qty as "จำนวน",
-            p.unit as "หน่วย",
+            CASE WHEN COALESCE(l.qty_base_unit,0) > 0 THEN l.qty_base_unit ELSE l.qty END as "จำนวน",
+            CASE WHEN COALESCE(l.qty_base_unit,0) > 0 AND COALESCE(p.base_unit,'') != '' THEN COALESCE(p.base_unit,p.unit) ELSE COALESCE(p.unit,'') END as "หน่วย",
             l.status as "สถานะ"
         FROM transaction_logs l
         JOIN products p ON l.product_id = p.id
@@ -9671,6 +9960,13 @@ def export_monthly_excel():
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Monthly_Report')
+        worksheet = writer.sheets['Monthly_Report']
+        _set_xlsxwriter_auto_widths(worksheet, df)
+        if len(df) > 0:
+            worksheet.autofilter(0, 0, len(df), len(df.columns) - 1)
+        else:
+            worksheet.autofilter(0, 0, 0, len(df.columns) - 1)
+        worksheet.freeze_panes(1, 0)
     output.seek(0)
 
     return send_file(output, as_attachment=True, download_name=f"Report_{month}_{year}.xlsx")

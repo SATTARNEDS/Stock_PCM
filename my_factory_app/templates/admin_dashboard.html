@@ -1891,6 +1891,12 @@
                                     </button>
 
                                     <button
+                                        class="btn btn-sm btn-light text-primary border shadow-sm rounded-circle me-1 {% if item['is_active'] == 0 %}disabled{% endif %}"
+                                        title="แก้ไข Lot" onclick="{% if item['is_active'] == 1 %}openEditLotModal('{{ item.code }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %}disabled class="disabled-action"{% endif %}>
+                                        <i class="fas fa-tags"></i>
+                                    </button>
+
+                                    <button
                                         class="btn btn-sm btn-light text-warning border shadow-sm rounded-circle hover-shadow"
                                         title="แก้ไข" onclick="editProductModal('{{ item['code'] }}')" {% if
                                         item['is_active']==0 %}disabled class="disabled-action" {%
@@ -2733,6 +2739,72 @@
             </div>
         </div>
     </div>
+    <div class="modal fade" id="editLotModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-primary text-white border-0">
+                    <h5 class="modal-title fw-medium"><i class="fas fa-boxes me-2"></i>จัดการ Lot ของสินค้า</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <input type="hidden" id="editLot_product_id">
+                    <div class="mb-3">
+                        <label class="form-label text-muted small fw-medium">สินค้า</label>
+                        <input type="text" id="editLot_product_display" class="form-control bg-light text-primary" readonly>
+                    </div>
+                    <div class="table-responsive mb-4">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Lot</th>
+                                    <th class="text-center">จำนวน</th>
+                                    <th>วันที่รับเข้า</th>
+                                    <th>วันหมดอายุ</th>
+                                    <th class="text-center">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="editLotTableBody">
+                                <tr><td colspan="5" class="text-center text-muted py-4">กำลังโหลดข้อมูล Lot...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="border rounded-3 p-3 bg-white">
+                        <h6 class="fw-medium mb-3">แก้ไข Lot ที่เลือก</h6>
+                        <form id="editLotForm">
+                            <input type="hidden" id="editLot_lot_id" name="lot_id">
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small fw-medium">เลข Lot</label>
+                                    <input type="text" id="editLot_number" name="lot_number" class="form-control shadow-none">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small fw-medium">จำนวน</label>
+                                    <input type="number" id="editLot_qty" name="qty" class="form-control shadow-none" min="0">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small fw-medium">วันที่รับเข้า</label>
+                                    <input type="text" id="editLot_received_date" name="received_date" class="form-control shadow-none" placeholder="DD/MM/YYYY">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small fw-medium">วันหมดอายุ</label>
+                                    <input type="text" id="editLot_expiry_date" name="expiry_date" class="form-control shadow-none" placeholder="DD/MM/YYYY">
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light border-0">
+                    <button type="button" class="btn btn-secondary rounded-pill px-4" data-bs-dismiss="modal">ยกเลิก</button>
+                    <button type="button" class="btn btn-danger rounded-pill px-4 pending-action-btn" id="deleteLotButton" onclick="confirmDeleteLot()" disabled>
+                        <i class="fas fa-trash-alt me-1"></i>ลบ Lot
+                    </button>
+                    <button type="button" class="btn btn-primary rounded-pill px-4 pending-action-btn" onclick="submitEditLot()" id="saveLotButton" disabled>
+                        <i class="fas fa-save me-1"></i>บันทึก Lot
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
     <div class="modal fade" id="writeOffModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content border-0 shadow-lg">
@@ -3559,6 +3631,8 @@
             flatpickr("#date_picker_expiry", dateConfig);
             flatpickr("#add_lot_date_picker_expiry", dateConfig);
             flatpickr("#edit_date_picker_expiry", dateConfig);
+            flatpickr("#editLot_received_date", dateConfig);
+            flatpickr("#editLot_expiry_date", dateConfig);
 
             // Sync labels for Safety/Stock with active counting unit.
             updateStockUnitHints('add');
@@ -4464,6 +4538,163 @@
                 }
                 new bootstrap.Modal(document.getElementById('editProductModal')).show();
             });
+        }
+
+        function openEditLotModal(code) {
+            fetch('/admin/get_product/' + code).then(checkAuth).then(res => res.json()).then(data => {
+                if (data.is_active === 0 || data.is_active === '0') {
+                    Swal.fire({ icon: 'warning', title: 'ไม่สามารถแก้ไข Lot ได้', text: 'สินค้านี้ถูกปิดใช้งานอยู่', confirmButtonText: 'ตกลง' });
+                    return;
+                }
+
+                document.getElementById('editLot_product_id').value = data.id;
+                document.getElementById('editLot_product_display').value = `[${data.code}] ${data.name}`;
+                document.getElementById('editLot_lot_id').value = '';
+                document.getElementById('editLot_number').value = '';
+                document.getElementById('editLot_qty').value = '';
+                document.getElementById('editLot_received_date').value = '';
+                document.getElementById('editLot_expiry_date').value = '';
+                document.getElementById('deleteLotButton').disabled = true;
+                document.getElementById('saveLotButton').disabled = true;
+
+                loadProductLots(data.id);
+                new bootstrap.Modal(document.getElementById('editLotModal')).show();
+            });
+        }
+
+        function loadProductLots(productId) {
+            const body = document.getElementById('editLotTableBody');
+            body.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-4">กำลังโหลดข้อมูล Lot...</td></tr>`;
+
+            fetch(`/admin/get_product_lots/${productId}`).then(checkAuth).then(res => res.json()).then(data => {
+                const rows = (data.lots || []).map(lot => {
+                    return `
+                        <tr onclick="selectLot(${lot.id})" class="lot-row" data-lot-id="${lot.id}">
+                            <td>${lot.lot_number || '-'}</td>
+                            <td class="text-center">${lot.qty}</td>
+                            <td>${lot.received_date || '-'}</td>
+                            <td>${lot.expiry_date || '-'}</td>
+                            <td class="text-center"><button type="button" class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); selectLot(${lot.id});">เลือก</button></td>
+                        </tr>`;
+                }).join('');
+                body.innerHTML = rows.length ? rows : `<tr><td colspan="5" class="text-center text-muted py-4">ไม่มี Lot สำหรับสินค้านี้</td></tr>`;
+            }).catch(() => {
+                body.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">ไม่สามารถโหลดข้อมูล Lot ได้</td></tr>`;
+            });
+        }
+
+        function selectLot(lotId) {
+            const rows = document.querySelectorAll('#editLotTableBody tr');
+            rows.forEach(row => row.classList.toggle('table-primary', parseInt(row.dataset.lotId || 0, 10) === lotId));
+
+            fetch(`/admin/get_product_lots/${document.getElementById('editLot_product_id').value}`).then(checkAuth).then(res => res.json()).then(data => {
+                const lot = (data.lots || []).find(item => item.id === lotId);
+                if (!lot) return;
+                document.getElementById('editLot_lot_id').value = lot.id;
+                document.getElementById('editLot_number').value = lot.lot_number;
+                document.getElementById('editLot_qty').value = lot.qty;
+                document.getElementById('editLot_received_date').value = lot.received_date;
+                document.getElementById('editLot_expiry_date').value = lot.expiry_date;
+                document.getElementById('deleteLotButton').disabled = false;
+                document.getElementById('saveLotButton').disabled = false;
+            });
+        }
+
+        function showToast(type, message) {
+            Swal.fire({
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 2500,
+                icon: type,
+                title: message,
+                customClass: { popup: 'swal2-toast' }
+            });
+        }
+
+        function submitEditLot() {
+            const lotId = document.getElementById('editLot_lot_id').value;
+            if (!lotId) {
+                Swal.fire({ icon: 'warning', title: 'กรุณาเลือก Lot ที่ต้องการแก้ไข' });
+                return;
+            }
+
+            const saveBtn = document.getElementById('saveLotButton');
+            const deleteBtn = document.getElementById('deleteLotButton');
+            saveBtn.disabled = true; saveBtn.classList.add('is-submitting');
+            deleteBtn.disabled = true; deleteBtn.classList.add('is-submitting');
+
+            const form = document.getElementById('editLotForm');
+            const formData = new FormData(form);
+            formData.append('csrf_token', adminCsrfToken);
+            fetch('/admin/update_product_lot', { method: 'POST', body: formData, headers: { 'X-CSRF-Token': adminCsrfToken } })
+                .then(checkAuth).then(res => res.json()).then(data => {
+                    if (data.success) {
+                        showToast('success', 'บันทึก Lot แล้ว');
+                        loadProductLots(document.getElementById('editLot_product_id').value);
+                    } else {
+                        showToast('error', data.message || 'เกิดข้อผิดพลาด');
+                    }
+                }).catch(() => {
+                    showToast('error', 'ไม่สามารถติดต่อเซิร์ฟเวอร์');
+                }).finally(() => {
+                    saveBtn.classList.remove('is-submitting');
+                    deleteBtn.classList.remove('is-submitting');
+                    saveBtn.disabled = false;
+                    // keep delete disabled if no lot selected
+                    if (!document.getElementById('editLot_lot_id').value) {
+                        document.getElementById('deleteLotButton').disabled = true;
+                    }
+                });
+        }
+
+        function confirmDeleteLot() {
+            const lotId = document.getElementById('editLot_lot_id').value;
+            if (!lotId) {
+                Swal.fire({ icon: 'warning', title: 'กรุณาเลือก Lot ที่ต้องการลบ' });
+                return;
+            }
+            Swal.fire({
+                title: 'ยืนยันการลบ Lot?',
+                text: 'การลบ Lot จะไม่สามารถกู้คืนได้ หาก Lot ถูกใช้งานในรายการ จะไม่สามารถลบได้',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'ลบ',
+                cancelButtonText: 'ยกเลิก'
+            }).then(result => {
+                if (result.isConfirmed) {
+                    deleteLot(lotId);
+                }
+            });
+        }
+
+        function deleteLot(lotId) {
+            const saveBtn = document.getElementById('saveLotButton');
+            const deleteBtn = document.getElementById('deleteLotButton');
+            saveBtn.disabled = true; saveBtn.classList.add('is-submitting');
+            deleteBtn.disabled = true; deleteBtn.classList.add('is-submitting');
+
+            fetch(`/admin/delete_product_lot/${lotId}`, { method: 'POST', headers: { 'X-CSRF-Token': adminCsrfToken } })
+                .then(checkAuth).then(res => res.json()).then(data => {
+                    if (data.success) {
+                        showToast('success', 'ลบ Lot เรียบร้อย');
+                        loadProductLots(document.getElementById('editLot_product_id').value);
+                        document.getElementById('editLot_lot_id').value = '';
+                        document.getElementById('deleteLotButton').disabled = true;
+                        document.getElementById('saveLotButton').disabled = true;
+                    } else {
+                        showToast('error', data.message || 'ไม่สามารถลบได้');
+                    }
+                }).catch(() => {
+                    showToast('error', 'ไม่สามารถติดต่อเซิร์ฟเวอร์');
+                }).finally(() => {
+                    saveBtn.classList.remove('is-submitting');
+                    deleteBtn.classList.remove('is-submitting');
+                    // ensure buttons reflect current selection
+                    const hasSelection = !!document.getElementById('editLot_lot_id').value;
+                    document.getElementById('saveLotButton').disabled = !hasSelection;
+                    document.getElementById('deleteLotButton').disabled = !hasSelection;
+                });
         }
 
         function submitEditProduct() {

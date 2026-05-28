@@ -16,6 +16,9 @@
             {{ log['action'] }}
         </span><br>
         {{ log['product_name'] }}
+        {% if log['note'] %}
+            <div class="small text-muted mt-1">{{ log['note'] }}</div>
+        {% endif %}
     </td>
     <td class="text-center fw-medium">
         {%- set show_qty = log['qty_base_unit'] if (log['qty_base_unit'] and log['qty_base_unit']|int > 0) else log['qty'] -%}

@@ -53,6 +53,10 @@
             title="ตัดจำหน่าย (Scrap)" onclick="{% if item['is_active'] == 1 %}openWriteOffModal('{{ item['code'] }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %} disabled style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
             <i class="fas fa-trash-alt"></i>
         </button>
+        <button class="btn btn-sm btn-light text-primary border shadow-sm rounded-circle me-1 {% if item['is_active'] == 0 %}disabled{% endif %}"
+            title="แก้ไข Lot" onclick="{% if item['is_active'] == 1 %}openEditLotModal('{{ item['code'] }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %} disabled style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
+            <i class="fas fa-tags"></i>
+        </button>
     </td>
 </tr>
 {% else %}
