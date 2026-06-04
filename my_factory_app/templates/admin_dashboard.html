@@ -3490,6 +3490,33 @@
                 .replace(/'/g, '&#039;');
         }
 
+        function syncWriteOffQtyToLot() {
+            const lotSelect = document.getElementById('writeOff_lot_select');
+            const qtyEl = document.getElementById('writeOff_qty');
+            const unitSelect = document.getElementById('writeOff_qty_unit');
+            const ctx = window.writeOffContext || {};
+            if (!lotSelect || !qtyEl || !unitSelect) return;
+
+            const selectedLotOption = lotSelect.options[lotSelect.selectedIndex] || {};
+            const selectedLotQty = parseInt(selectedLotOption.dataset.qty || '0', 10) || 0;
+            if (!selectedLotQty) {
+                qtyEl.readOnly = false;
+                return;
+            }
+
+            const conversionRate = parseInt(ctx.conversion_rate || 1, 10) || 1;
+            const qtyUnit = unitSelect.value || 'package';
+            let adjustedQty = selectedLotQty;
+            if (qtyUnit === 'base') {
+                adjustedQty = selectedLotQty * conversionRate;
+            }
+
+            qtyEl.value = String(adjustedQty);
+            qtyEl.readOnly = true;
+            normalizeWriteOffQtyInput();
+            renderWriteOffUnitHint();
+        }
+
         async function parseJsonResponseStrict(res) {
             const contentType = (res.headers.get('content-type') || '').toLowerCase();
             const raw = await res.text();
@@ -6045,8 +6072,11 @@
                             lotSelect.appendChild(opt);
                         });
                         lotSelect.value = '';
+                        lotSelect.onchange = syncWriteOffQtyToLot;
+                        syncWriteOffQtyToLot();
                     }).catch(() => {
                         // ignore load errors - keep auto option
+                        document.getElementById('writeOff_qty').readOnly = false;
                     });
                 }
 
@@ -6162,16 +6192,31 @@
 
         // ส่งข้อมูลไปบันทึก
         function submitWriteOff() {
-            const qty = document.getElementById('writeOff_qty').value;
-            if (!qty || qty <= 0) {
+            let qty = document.getElementById('writeOff_qty').value;
+            const ctx = window.writeOffContext || {};
+            const lotSelect = document.getElementById('writeOff_lot_select');
+            const qtyUnit = (document.getElementById('writeOff_qty_unit') || {}).value || 'package';
+            const conversionRate = parseInt(ctx.conversion_rate || 1, 10) || 1;
+
+            if (lotSelect && lotSelect.value) {
+                const selectedLotOption = lotSelect.options[lotSelect.selectedIndex] || {};
+                const selectedLotQty = parseInt(selectedLotOption.dataset.qty || '0', 10) || 0;
+                if (selectedLotQty > 0) {
+                    if (qtyUnit === 'base') {
+                        qty = String(selectedLotQty * conversionRate);
+                    } else {
+                        qty = String(selectedLotQty);
+                    }
+                    document.getElementById('writeOff_qty').value = qty;
+                }
+            }
+
+            if (!qty || parseInt(qty, 10) <= 0) {
                 Swal.fire('แจ้งเตือน', 'กรุณาระบุจำนวนที่ต้องการตัดจำหน่าย', 'warning');
                 return;
             }
 
-            const ctx = window.writeOffContext || {};
-            const conversionRate = parseInt(ctx.conversion_rate || 1, 10);
             const splitEnabled = !!(ctx.base_unit && ctx.package_unit && conversionRate > 1);
-            const qtyUnit = (document.getElementById('writeOff_qty_unit') || {}).value || 'package';
             let confirmText = 'สต็อกจะถูกหักออกและบันทึกลงประวัติทันที';
             if (splitEnabled) {
                 const packageUnit = ctx.package_unit || ctx.unit || 'แพ็ก';
@@ -6323,11 +6368,7 @@
             writeOffQtyUnitInput.addEventListener('change', () => {
                 updateWriteOffQtyControl();
                 renderWriteOffUnitHint();
-            });
-        }
-
-        const addLotQtyInput = document.getElementById('addLot_qty');
-        if (addLotQtyInput) {
+                    syncWriteOffQtyToLot();
             addLotQtyInput.addEventListener('input', () => {
                 renderAddLotUnitHint();
             });
