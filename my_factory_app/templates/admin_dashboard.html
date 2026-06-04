@@ -199,6 +199,17 @@
             transform: translateY(-4px);
         }
 
+        /* เมื่อยอดสต็อกมีการอัปเดต ให้ไฮไลต์แถวชั่วคราว */
+        .stock-updated {
+            animation: highlightFade 2.2s ease forwards;
+            box-shadow: 0 6px 18px rgba(13,110,253,0.12) !important;
+        }
+        @keyframes highlightFade {
+            0% { background-color: rgba(13,110,253,0.22); }
+            40% { background-color: rgba(13,110,253,0.12); }
+            100% { background-color: transparent; }
+        }
+
         .stat-icon {
             width: 60px;
             height: 60px;
@@ -2813,6 +2824,7 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body bg-light">
+
                     <form id="writeOffForm">
                         <input type="hidden" name="product_id" id="writeOff_product_id">
 
@@ -2841,6 +2853,14 @@
                                 <input type="text" id="writeOff_current_stock" class="form-control text-muted bg-white"
                                     readonly>
                             </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label text-muted small fw-medium">เลือก Lot ที่จะตัด (ไม่เลือก = ตัดอัตโนมัติตาม FIFO)</label>
+                            <select id="writeOff_lot_select" name="lot_id" class="form-select shadow-none">
+                                <option value="">ตัดอัตโนมัติ (เก่าที่สุดก่อน)</option>
+                            </select>
+                            <div class="form-text mt-2 text-muted">สามารถเลือก Lot ที่ต้องการตัดได้ หากต้องการ</div>
                         </div>
 
                         <div class="mb-3 is-hidden" id="writeOff_unit_hint_wrap">
@@ -3840,6 +3860,19 @@
             fetch(`/admin/filter_stock?cat=${encodeURIComponent(cat)}&search=${encodeURIComponent(search)}`)
                 .then(checkAuth).then(res => res.text()).then(html => {
                     document.getElementById('stockTableBody').innerHTML = html;
+                    // ถ้ามีคำขอให้เน้นสินค้าตัวใดตัวหนึ่ง ให้ทำการหาและแอนิเมทแถว
+                    try {
+                        const pendingId = window.pendingHighlightProductId;
+                        if (pendingId) {
+                            window.pendingHighlightProductId = null;
+                            const row = document.querySelector(`#stockTableBody tr[data-product-id="${String(pendingId).trim()}"]`);
+                            if (row) {
+                                row.classList.add('stock-updated');
+                                try { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+                                setTimeout(() => row.classList.remove('stock-updated'), 2200);
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
                 });
         }
 
@@ -4480,6 +4513,9 @@
                 = ${qtyPackage.toFixed(2)} ${packageUnit} / ${qtyBase} ${baseUnit}
                 <span class="text-muted">(ก่อนเพิ่ม: ${currentPkg} ${packageUnit} + เปิดใช้แล้ว ${openBase} ${baseUnit})</span>
             `;
+            if (isBaseMode && qty > 0 && qty < conversionRate) {
+                hintBox.innerHTML += `<div class="text-warning small mt-2">จำนวนนี้จะถูกเก็บเป็นสต็อกเปิดและจะไม่แสดงในรายการ Lot</div>`;
+            }
             hintWrap.classList.remove('is-hidden');
         }
 
@@ -4547,6 +4583,7 @@
                     return;
                 }
 
+                window.editLotContext = data;
                 document.getElementById('editLot_product_id').value = data.id;
                 document.getElementById('editLot_product_display').value = `[${data.code}] ${data.name}`;
                 document.getElementById('editLot_lot_id').value = '';
@@ -4567,7 +4604,8 @@
             body.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-4">กำลังโหลดข้อมูล Lot...</td></tr>`;
 
             fetch(`/admin/get_product_lots/${productId}`).then(checkAuth).then(res => res.json()).then(data => {
-                const rows = (data.lots || []).map(lot => {
+                const openStockRow = getEditLotOpenStockRow(window.editLotContext);
+                const lotRows = (data.lots || []).map(lot => {
                     return `
                         <tr onclick="selectLot(${lot.id})" class="lot-row" data-lot-id="${lot.id}">
                             <td>${lot.lot_number || '-'}</td>
@@ -4577,10 +4615,28 @@
                             <td class="text-center"><button type="button" class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); selectLot(${lot.id});">เลือก</button></td>
                         </tr>`;
                 }).join('');
+                const rows = [openStockRow, lotRows].filter(Boolean).join('');
                 body.innerHTML = rows.length ? rows : `<tr><td colspan="5" class="text-center text-muted py-4">ไม่มี Lot สำหรับสินค้านี้</td></tr>`;
             }).catch(() => {
                 body.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">ไม่สามารถโหลดข้อมูล Lot ได้</td></tr>`;
             });
+        }
+
+        function getEditLotOpenStockRow(ctx) {
+            if (!ctx || !ctx.split_summary) return '';
+            const openBase = parseInt(ctx.split_summary.open_base_qty || 0, 10) || 0;
+            const openExtra = parseInt(ctx.split_summary.open_extra_tablet_qty || 0, 10) || 0;
+            if (openBase <= 0 && openExtra <= 0) return '';
+            const baseUnit = ctx.base_unit || 'หน่วย';
+            const parts = [];
+            if (openBase > 0) parts.push(`${openBase} ${baseUnit}`);
+            if (openExtra > 0) parts.push(`${openExtra} extra`);
+            return `
+                <tr class="table-secondary">
+                    <td>สต็อกเปิด</td>
+                    <td class="text-center">-</td>
+                    <td colspan="3">${parts.join(' + ')}</td>
+                </tr>`;
         }
 
         function selectLot(lotId) {
@@ -4593,8 +4649,30 @@
                 document.getElementById('editLot_lot_id').value = lot.id;
                 document.getElementById('editLot_number').value = lot.lot_number;
                 document.getElementById('editLot_qty').value = lot.qty;
-                document.getElementById('editLot_received_date').value = lot.received_date;
-                document.getElementById('editLot_expiry_date').value = lot.expiry_date;
+                const receivedDateInput = document.getElementById('editLot_received_date');
+                const expiryDateInput = document.getElementById('editLot_expiry_date');
+                if (receivedDateInput && receivedDateInput._flatpickr) {
+                    if (lot.received_date) {
+                        receivedDateInput._flatpickr.setDate(lot.received_date, true);
+                        receivedDateInput.value = lot.received_date;
+                    } else {
+                        receivedDateInput._flatpickr.clear();
+                        receivedDateInput.value = '';
+                    }
+                } else if (receivedDateInput) {
+                    receivedDateInput.value = lot.received_date;
+                }
+                if (expiryDateInput && expiryDateInput._flatpickr) {
+                    if (lot.expiry_date) {
+                        expiryDateInput._flatpickr.setDate(lot.expiry_date, true);
+                        expiryDateInput.value = lot.expiry_date;
+                    } else {
+                        expiryDateInput._flatpickr.clear();
+                        expiryDateInput.value = '';
+                    }
+                } else if (expiryDateInput) {
+                    expiryDateInput.value = lot.expiry_date;
+                }
                 document.getElementById('deleteLotButton').disabled = false;
                 document.getElementById('saveLotButton').disabled = false;
             });
@@ -4630,8 +4708,13 @@
             fetch('/admin/update_product_lot', { method: 'POST', body: formData, headers: { 'X-CSRF-Token': adminCsrfToken } })
                 .then(checkAuth).then(res => res.json()).then(data => {
                     if (data.success) {
-                        showToast('success', 'บันทึก Lot แล้ว');
+                        showToast('success', data.message || 'บันทึก Lot แล้ว');
+                        // ให้หน้า stock รีเฟรชและเน้นสินค้าเดียวกัน
+                        if (window.editLotContext && window.editLotContext.id) {
+                            window.pendingHighlightProductId = window.editLotContext.id;
+                        }
                         loadProductLots(document.getElementById('editLot_product_id').value);
+                        if (typeof loadStock === 'function') loadStock();
                     } else {
                         showToast('error', data.message || 'เกิดข้อผิดพลาด');
                     }
@@ -4677,8 +4760,14 @@
             fetch(`/admin/delete_product_lot/${lotId}`, { method: 'POST', headers: { 'X-CSRF-Token': adminCsrfToken } })
                 .then(checkAuth).then(res => res.json()).then(data => {
                     if (data.success) {
-                        showToast('success', 'ลบ Lot เรียบร้อย');
+                        showToast('success', data.message || 'ลบ Lot เรียบร้อย');
+                        // ให้หน้า stock รีเฟรชและเน้นสินค้าเดียวกัน
+                        if (window.editLotContext && window.editLotContext.id) {
+                            window.pendingHighlightProductId = window.editLotContext.id;
+                        }
                         loadProductLots(document.getElementById('editLot_product_id').value);
+                        // รีเฟรชตารางสินค้าให้ยอดสต็อกแสดงผลทันที
+                        if (typeof loadStock === 'function') loadStock();
                         document.getElementById('editLot_lot_id').value = '';
                         document.getElementById('deleteLotButton').disabled = true;
                         document.getElementById('saveLotButton').disabled = true;
@@ -5635,26 +5724,29 @@
             nativeFetch('/admin/ga_request/' + gaChatRequestId + '/chat?since_id=' + gaChatLastId)
                 .then(checkAuth).then(r => r.json()).then(data => {
                     const box = document.getElementById('gaChatBox');
-                    if (!data.success) {
-                        if (gaChatLastId === 0 && box) {
-                            box.innerHTML = '<div class="text-center text-danger py-4 small">โหลดข้อความไม่สำเร็จ</div>';
-                        }
-                        return;
-                    }
-                    if (!data.messages.length) {
+                    if (!data || !data.success) {
                         if (gaChatLastId === 0 && box) {
                             box.innerHTML = '<div class="text-center text-muted py-4 small">ยังไม่มีข้อความ เริ่มคุยได้เลย</div>';
                         }
                         return;
                     }
+
+                    if (!data.messages || !data.messages.length) {
+                        if (gaChatLastId === 0 && box) {
+                            box.innerHTML = '<div class="text-center text-muted py-4 small">ยังไม่มีข้อความ เริ่มคุยได้เลย</div>';
+                        }
+                        return;
+                    }
+
                     if (gaChatLastId === 0) box.innerHTML = '';
                     data.messages.forEach(msg => {
-                        gaChatLastId = Math.max(gaChatLastId, msg.id);
+                        gaChatLastId = Math.max(gaChatLastId, msg.id || 0);
                         if (msg.sender_type === 'user') {
                             adminSeenUserGlobalId = Math.max(adminSeenUserGlobalId, Number(msg.id || 0));
                             setAdminRequestReadUpto(gaChatRequestId, Number(msg.id || 0));
                         }
-                        const isAdmin = msg.sender_type === 'admin';                        const div = document.createElement('div');
+                        const isAdmin = msg.sender_type === 'admin';
+                        const div = document.createElement('div');
                         div.className = 'ga-chat-row ' + (isAdmin ? 'self' : 'other');
                         div.innerHTML = (
                             '<div class="ga-chat-bubble ' + (isAdmin ? 'admin' : 'user') + '">' +
@@ -5666,8 +5758,6 @@
                         box.appendChild(div);
                     });
                     persistAdminSeenUserGlobalId();
-                    // Optimistically clear unread count for this request in local snapshot
-                    // (server has already marked messages as read via GET request)
                     const snapIdx = adminUnreadSummarySnapshot.findIndex(s => Number(s.request_id) === gaChatRequestId);
                     if (snapIdx >= 0) {
                         adminUnreadSummarySnapshot[snapIdx].unread_count = 0;
@@ -5929,6 +6019,25 @@
                 updateWriteOffQtyControl();
                 document.getElementById('writeOff_qty').value = ''; // เคลียร์ค่าเดิม
                 renderWriteOffUnitHint();
+                // load product lots and populate lot select for manual choice
+                const lotSelect = document.getElementById('writeOff_lot_select');
+                if (lotSelect) {
+                    lotSelect.innerHTML = `<option value="">ตัดอัตโนมัติ (เก่าที่สุดก่อน)</option>`;
+                    fetch(`/admin/get_product_lots/${data.id}`).then(checkAuth).then(res => res.json()).then(payload => {
+                        const lots = payload.lots || [];
+                        lots.forEach(lot => {
+                            const label = `${lot.lot_number || '(no lot)'} — ${lot.qty} ชิ้น — ${lot.received_date || '-'} `;
+                            const opt = document.createElement('option');
+                            opt.value = lot.id;
+                            opt.textContent = label;
+                            opt.dataset.qty = String(lot.qty || 0);
+                            lotSelect.appendChild(opt);
+                        });
+                        lotSelect.value = '';
+                    }).catch(() => {
+                        // ignore load errors - keep auto option
+                    });
+                }
 
                 new bootstrap.Modal(document.getElementById('writeOffModal')).show();
             });
@@ -6064,6 +6173,36 @@
                     const qtyPackage = parseInt(qty || '0', 10);
                     const qtyBase = qtyPackage * conversionRate;
                     confirmText = `ระบบจะตัด ${qtyPackage} ${packageUnit} (${qtyBase} ${baseUnit}) และบันทึกลงประวัติทันที`;
+                }
+            }
+
+            // If admin selected a specific lot, show it in the confirmation text and remaining qty
+            const lotSelect = document.getElementById('writeOff_lot_select');
+            if (lotSelect) {
+                const selVal = (lotSelect.value || '').toString();
+                const selOption = lotSelect.options[lotSelect.selectedIndex] || {};
+                const selText = selOption.text || '';
+                if (selVal) {
+                    // compute remaining in that lot after this cut (convert units if needed)
+                    const lotQty = parseInt(selOption.dataset.qty || '0', 10);
+                    let cutInLotUnits = 0;
+                    if (splitEnabled) {
+                        if (qtyUnit === 'base') {
+                            cutInLotUnits = parseInt(qty || '0', 10);
+                        } else {
+                            const conv = parseInt(ctx.conversion_rate || 1, 10) || 1;
+                            cutInLotUnits = parseInt(qty || '0', 10) * conv;
+                        }
+                    } else {
+                        cutInLotUnits = parseInt(qty || '0', 10);
+                    }
+                    const remainingInLot = Math.max(0, lotQty - cutInLotUnits);
+                    confirmText += `\n\nจะตัดจากล็อต: ${selText.trim()}\nคงเหลือในล็อตหลังตัด: ${remainingInLot} ชิ้น`;
+                    if (cutInLotUnits > lotQty) {
+                        confirmText += '\n(จำนวนมากกว่าที่มีในล็อตนี้ ระบบจะดึงจากล็อตถัดไปเพิ่มเติมจนกว่าจะครบ)';
+                    }
+                } else {
+                    confirmText += '\n\n(จะตัดตาม FIFO — ล็อตที่เก่าที่สุดก่อน หากไม่ระบุ)';
                 }
             }
 

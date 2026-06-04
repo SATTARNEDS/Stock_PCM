@@ -7926,16 +7926,35 @@ def update_product_lot():
     expiry_date = standardize_date(request.form.get('expiry_date', ''))
 
     conn = get_db_connection()
-    existing = conn.execute('SELECT id FROM product_lots WHERE id = ?', (lot_id,)).fetchone()
+    existing = conn.execute('''
+        SELECT product_id,
+               COALESCE(qty, 0) AS qty,
+               COALESCE(received_date, '') AS received_date,
+               COALESCE(expiry_date, '') AS expiry_date
+        FROM product_lots
+        WHERE id = ?
+    ''', (lot_id,)).fetchone()
     if not existing:
         conn.close()
         return jsonify({'success': False, 'message': 'Lot นี้ไม่มีอยู่ในระบบ'}), 404
 
+    qty_diff = qty - int(existing['qty'] or 0)
     conn.execute('''
         UPDATE product_lots
-        SET lot_number = ?, qty = ?, received_date = ?, expiry_date = ?
+        SET lot_number = ?,
+            qty = ?,
+            received_date = CASE WHEN ? = '' THEN received_date ELSE ? END,
+            expiry_date = CASE WHEN ? = '' THEN expiry_date ELSE ? END
         WHERE id = ?
-    ''', (lot_number, qty, received_date, expiry_date, lot_id))
+    ''', (lot_number, qty, received_date, received_date, expiry_date, expiry_date, lot_id))
+
+    if qty_diff != 0 and existing['product_id']:
+        conn.execute('''
+            UPDATE products
+            SET stock = CASE WHEN stock + ? >= 0 THEN stock + ? ELSE 0 END
+            WHERE id = ?
+        ''', (qty_diff, qty_diff, existing['product_id']))
+
     conn.commit()
     conn.close()
 
@@ -7948,20 +7967,54 @@ def delete_product_lot(lot_id):
         return jsonify({'success': False, 'message': 'Unauthorized'}), 401
 
     conn = get_db_connection()
-    existing = conn.execute('SELECT id FROM product_lots WHERE id = ?', (lot_id,)).fetchone()
+    existing = conn.execute('SELECT id, product_id, COALESCE(qty,0) AS qty, COALESCE(lot_number, \'\') AS lot_number FROM product_lots WHERE id = ?', (lot_id,)).fetchone()
     if not existing:
         conn.close()
         return jsonify({'success': False, 'message': 'Lot นี้ไม่มีอยู่ในระบบ'}), 404
+    # ถ้า Lot มีจำนวนคงเหลือ ให้หักออกจากยอดรวมในตาราง products
+    try:
+        lot_qty = int(existing['qty'] or 0)
+        product_id = existing['product_id']
+        if lot_qty > 0 and product_id:
+            # ลด stock แต่ไม่ให้ค่าติดลบ
+            conn.execute('''
+                UPDATE products
+                SET stock = CASE WHEN stock >= ? THEN stock - ? ELSE 0 END
+                WHERE id = ?
+            ''', (lot_qty, lot_qty, product_id))
 
-    referenced = conn.execute('SELECT COUNT(*) AS cnt FROM transaction_logs WHERE lot_id = ?', (lot_id,)).fetchone()[0]
-    if referenced and int(referenced) > 0:
+        # บันทึก Transaction Log สำหรับการลบ/ตัดสต็อกโดยแอดมิน
+        try:
+            admin_name = session.get('admin_name', 'Unknown')
+            lot_number_text = existing.get('lot_number') or str(lot_id)
+            action_text = f"ลบ/ตัดสต็อก Lot: {lot_number_text}"
+            conn.execute('''
+                INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, status)
+                VALUES (?, ?, ?, ?, ?, 'Completed')
+            ''', (f"ADMIN:{admin_name}", product_id, lot_id, action_text, lot_qty))
+        except Exception:
+            # ไม่ให้การ log ทำให้กระบวนการหลักล้มเหลว
+            pass
+
+        referenced = conn.execute('SELECT COUNT(*) AS cnt FROM transaction_logs WHERE lot_id = ?', (lot_id,)).fetchone()[0]
+        if referenced and int(referenced) > 0:
+            # Lot ถูกอ้างอิงใน transaction_logs แล้ว จึงไม่สามารถลบแถวได้โดยตรง
+            # ทำเครื่องหมายเป็นถูกลบออกจากคลัง (qty=0) เพื่อเก็บประวัติไว้
+            conn.execute('UPDATE product_lots SET qty = 0, lot_number = NULL, received_date = NULL, expiry_date = NULL WHERE id = ?', (lot_id,))
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True, 'message': 'Lot นี้ถูกทำเครื่องหมายว่าไม่อยู่ในคลังแล้ว และยอดรวมถูกอัปเดตแล้ว'}), 200
+
+        # ไม่มีการอ้างอิง สามารถลบแถวได้เลย
+        conn.execute('DELETE FROM product_lots WHERE id = ?', (lot_id,))
+        conn.commit()
         conn.close()
-        return jsonify({'success': False, 'message': 'ไม่สามารถลบ Lot ที่มีรายการเชื่อมโยง'}), 400
-
-    conn.execute('DELETE FROM product_lots WHERE id = ?', (lot_id,))
-    conn.commit()
-    conn.close()
-    return jsonify({'success': True})
+        return jsonify({'success': True, 'message': 'ลบ Lot เรียบร้อยและยอดรวมถูกอัปเดตแล้ว'})
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f'Delete lot error: {e}')
+        return jsonify({'success': False, 'message': 'เกิดข้อผิดพลาดในการลบ Lot'}), 500
 
 @app.route('/admin/edit_product', methods=['POST'])
 def edit_product():
@@ -8922,7 +8975,7 @@ def write_off_ajax():
     try:
         start_write_transaction(conn)
         product = conn.execute('''
-            SELECT id, stock, unit, category, base_unit, package_unit, conversion_rate, base_unit_to_tablet_rate, package_tablet_total
+            SELECT id, name, stock, unit, category, base_unit, package_unit, conversion_rate, base_unit_to_tablet_rate, package_tablet_total
             FROM products WHERE id = ?
         ''', (product_id,)).fetchone()
 
@@ -8979,6 +9032,32 @@ def write_off_ajax():
 
         remaining_qty = lot_qty_to_cut
 
+        # Allow admin to choose a specific lot to cut first. If provided, consume from it first,
+        # then continue with FIFO for any remainder.
+        selected_lot_id = request.form.get('lot_id', type=int)
+        if selected_lot_id:
+            sel = conn.execute(
+                'SELECT id, qty, lot_number FROM product_lots WHERE id = ? AND product_id = ? AND qty > 0',
+                (selected_lot_id, product_id)
+            ).fetchone()
+            if sel and remaining_qty > 0:
+                lot_available = int(sel['qty'] or 0)
+                cut_qty = min(lot_available, remaining_qty)
+                conn.execute('UPDATE product_lots SET qty = qty - ? WHERE id = ?', (cut_qty, sel['id']))
+                action_text = f"ตัดจำหน่าย (Scrap) - {reason} [Lot: {sel['lot_number']}]"
+                if is_split_med:
+                    qty_package = cut_qty / conv
+                    conn.execute('''
+                        INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'Approved', datetime('now', '+7 hours'))
+                    ''', (admin_name, product_id, sel['id'], action_text, qty_package, cut_qty, qty_package))
+                else:
+                    conn.execute('''
+                        INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, status, timestamp)
+                        VALUES (?, ?, ?, ?, ?, 'Approved', datetime('now', '+7 hours'))
+                    ''', (admin_name, product_id, sel['id'], action_text, cut_qty))
+                remaining_qty -= cut_qty
+
         # --- 1. ไล่ตัดสต็อกจากตาราง Lot แบบ FIFO ---
         lots = conn.execute('''
             SELECT id, qty, lot_number
@@ -8986,8 +9065,14 @@ def write_off_ajax():
             WHERE product_id = ? AND qty > 0
             ORDER BY
                 CASE
+                    WHEN expiry_date IS NULL OR trim(expiry_date) = '' THEN '9999-12-31'
                     WHEN expiry_date LIKE '%/%/%' THEN substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2)
                     ELSE expiry_date
+                END ASC,
+                CASE
+                    WHEN received_date IS NULL OR trim(received_date) = '' THEN '9999-12-31'
+                    WHEN received_date LIKE '%/%/%' THEN substr(received_date, 7, 4) || '-' || substr(received_date, 4, 2) || '-' || substr(received_date, 1, 2)
+                    ELSE received_date
                 END ASC,
                 id ASC
         ''', (product_id,)).fetchall()
