@@ -697,14 +697,14 @@
         }
 
         .dashboard-section {
-            opacity: 0;
-            transform: translateY(14px);
+            opacity: 1;
+            transform: none;
             transition: opacity calc(0.45s * var(--motion-multiplier)) ease, transform calc(0.45s * var(--motion-multiplier)) ease;
         }
 
         .dashboard-section.revealed {
             opacity: 1;
-            transform: translateY(0);
+            transform: none;
         }
 
         .stock-cat-selector {
@@ -3632,18 +3632,24 @@
                 bar.style.width = `${Math.max(0, Math.min(100, width))}%`;
             });
 
-            const sectionObserver = new IntersectionObserver((entries) => {
+            const sectionObserverCallback = (entries, observer) => {
                 entries.forEach((entry) => {
                     if (entry.isIntersecting) {
                         entry.target.classList.add('revealed');
-                        sectionObserver.unobserve(entry.target);
+                        observer.unobserve(entry.target);
                     }
                 });
-            }, { threshold: 0.08 });
+            };
+
+            const sectionObserver = window.IntersectionObserver ? new IntersectionObserver(sectionObserverCallback, { threshold: 0.08 }) : null;
 
             document.querySelectorAll('.dashboard-section').forEach((section, index) => {
                 section.style.transitionDelay = `${Math.min(index, 6) * 45}ms`;
-                sectionObserver.observe(section);
+                if (sectionObserver) {
+                    sectionObserver.observe(section);
+                } else {
+                    section.classList.add('revealed');
+                }
             });
 
             const gaViewerStage = document.getElementById('gaImageViewerStage');
@@ -5513,8 +5519,12 @@
             fetch('/admin/save_alert_time', { method: 'POST', body: formData, headers: { 'X-CSRF-Token': adminCsrfToken } }).then(checkAuth).then(res => res.json()).then(data => {
                 if (data.success) {
                     bootstrap.Modal.getInstance(document.getElementById('alertSettingModal')).hide();
-                    Swal.fire('บันทึกสำเร็จ!', '', 'success');
+                    Swal.fire('บันทึกสำเร็จ!', data.message || '', 'success');
+                } else {
+                    Swal.fire('ผิดพลาด', data.message || 'ไม่สามารถบันทึกการตั้งค่าได้', 'error');
                 }
+            }).catch(() => {
+                Swal.fire('ผิดพลาด', 'ไม่สามารถเชื่อมต่อระบบได้', 'error');
             });
         }
 
@@ -6233,7 +6243,6 @@
             }
 
             // If admin selected a specific lot, show it in the confirmation text and remaining qty
-            const lotSelect = document.getElementById('writeOff_lot_select');
             if (lotSelect) {
                 const selVal = (lotSelect.value || '').toString();
                 const selOption = lotSelect.options[lotSelect.selectedIndex] || {};
@@ -6368,7 +6377,12 @@
             writeOffQtyUnitInput.addEventListener('change', () => {
                 updateWriteOffQtyControl();
                 renderWriteOffUnitHint();
-                    syncWriteOffQtyToLot();
+                syncWriteOffQtyToLot();
+            });
+        }
+
+        const addLotQtyInput = document.getElementById('addLot_qty');
+        if (addLotQtyInput) {
             addLotQtyInput.addEventListener('input', () => {
                 renderAddLotUnitHint();
             });

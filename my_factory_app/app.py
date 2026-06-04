@@ -9775,7 +9775,8 @@ def update_scheduler_time(new_time):
 def get_alert_time():
     if not session.get('admin_logged_in'): 
         return jsonify({'success': False, 'message': 'Unauthorized'}), 401
-    
+
+    init_settings_db()
     conn = get_db_connection()
     # ดึงค่าจากตาราง settings
     row = conn.execute("SELECT value FROM settings WHERE key = 'daily_alert_time'").fetchone()
@@ -9794,6 +9795,7 @@ def save_alert_time():
     if not is_valid_alert_time(new_time):
         return jsonify({'success': False, 'message': 'รูปแบบเวลาไม่ถูกต้อง'}), 400
     
+    init_settings_db()
     conn = get_db_connection()
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('daily_alert_time', ?)", (new_time,))
     conn.commit()
