@@ -3479,6 +3479,17 @@
             return response;
         }
 
+        // Simple HTML escape to avoid injection when inserting user-controlled strings into SweetAlert HTML
+        function escapeHtml(unsafe) {
+            if (unsafe === null || unsafe === undefined) return '';
+            return String(unsafe)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
         async function parseJsonResponseStrict(res) {
             const contentType = (res.headers.get('content-type') || '').toLowerCase();
             const raw = await res.text();
@@ -6206,9 +6217,74 @@
                 }
             }
 
+            // build HTML confirmation for nicer formatting
+            const productDisplay = ctx.code ? `[${ctx.code}] ${ctx.name || ''}` : (ctx.name || '');
+            // compute package/base display and remaining product stock
+            let cutPackageDisplay = '';
+            let cutBaseDisplay = '';
+            let cutInPackages = 0;
+            if (splitEnabled) {
+                const conv = parseInt(ctx.conversion_rate || 1, 10) || 1;
+                if (qtyUnit === 'base') {
+                    const qtyBase = parseInt(qty || '0', 10);
+                    cutBaseDisplay = `${qtyBase} ${ctx.base_unit || 'หน่วยย่อย'}`;
+                    cutInPackages = qtyBase / conv;
+                    cutPackageDisplay = `${cutInPackages.toFixed(2)} ${ctx.package_unit || ctx.unit || 'แพ็ก'}`;
+                } else {
+                    const qtyPackage = parseInt(qty || '0', 10);
+                    cutPackageDisplay = `${qtyPackage} ${ctx.package_unit || ctx.unit || 'แพ็ก'}`;
+                    cutInPackages = qtyPackage;
+                    const qtyBase = qtyPackage * conv;
+                    cutBaseDisplay = `${qtyBase} ${ctx.base_unit || 'หน่วยย่อย'}`;
+                }
+            } else {
+                const qtyNum = parseInt(qty || '0', 10);
+                cutPackageDisplay = `${qtyNum} ${ctx.unit || ''}`;
+                cutInPackages = qtyNum;
+            }
+
+            const packageStock = parseFloat(parseInt(ctx.stock || 0, 10));
+            const remainingProductStock = Math.max(0, (packageStock - cutInPackages));
+
+            let confirmHtml = `<div style="text-align:left">`;
+            confirmHtml += `<div><strong>สินค้า:</strong> ${escapeHtml(productDisplay)}</div>`;
+            confirmHtml += `<div><strong>จำนวนที่ต้องการตัด:</strong> ${escapeHtml(cutPackageDisplay)}${cutBaseDisplay ? ' (' + escapeHtml(cutBaseDisplay) + ')' : ''}</div>`;
+
+            if (lotSelect) {
+                const selVal = (lotSelect.value || '').toString();
+                const selOption = lotSelect.options[lotSelect.selectedIndex] || {};
+                const selText = selOption.text || '';
+                if (selVal) {
+                    const lotQty = parseInt(selOption.dataset.qty || '0', 10);
+                    let cutInLotUnits = 0;
+                    if (splitEnabled) {
+                        if (qtyUnit === 'base') {
+                            cutInLotUnits = parseInt(qty || '0', 10);
+                        } else {
+                            const conv = parseInt(ctx.conversion_rate || 1, 10) || 1;
+                            cutInLotUnits = parseInt(qty || '0', 10) * conv;
+                        }
+                    } else {
+                        cutInLotUnits = parseInt(qty || '0', 10);
+                    }
+                    const remainingInLot = Math.max(0, lotQty - cutInLotUnits);
+                    confirmHtml += `<div><strong>ล็อตที่เลือก:</strong> ${escapeHtml(selText.trim())}</div>`;
+                    confirmHtml += `<div><strong>คงเหลือในล็อตหลังตัด:</strong> ${remainingInLot} ชิ้น</div>`;
+                    if (cutInLotUnits > lotQty) {
+                        confirmHtml += `<div style="color:#b92635"><strong>หมายเหตุ:</strong> จำนวนที่ตัดมากกว่าที่มีในล็อตนี้ ระบบจะใช้ล็อตถัดไป (FIFO) อัตโนมัติ</div>`;
+                    }
+                } else {
+                    confirmHtml += `<div><strong>โหมด:</strong> ตัดอัตโนมัติ (FIFO — ล็อตที่เก่าที่สุดก่อน หากไม่ระบุ)</div>`;
+                }
+            }
+
+            confirmHtml += `<div style="margin-top:.5rem"><strong>คงเหลือรวมของสินค้า (ประมาณ):</strong> ${remainingProductStock.toFixed(2)} ${ctx.package_unit || ctx.unit || ''}</div>`;
+            confirmHtml += `<div class="small text-muted" style="margin-top:.35rem">สต็อกจริงอาจเปลี่ยนแปลงหากมีรายการอื่นระหว่างเวลา</div>`;
+            confirmHtml += `</div>`;
+
             Swal.fire({
                 title: 'ยืนยันการตัดจำหน่าย?',
-                text: confirmText,
+                html: confirmHtml,
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonColor: '#dc3545',
