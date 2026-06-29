@@ -3494,6 +3494,7 @@
             const lotSelect = document.getElementById('writeOff_lot_select');
             const qtyEl = document.getElementById('writeOff_qty');
             const unitSelect = document.getElementById('writeOff_qty_unit');
+            const maxHintEl = document.getElementById('writeOff_qty_max_hint');
             const ctx = window.writeOffContext || {};
             if (!lotSelect || !qtyEl || !unitSelect) return;
 
@@ -3501,18 +3502,26 @@
             const selectedLotQty = parseInt(selectedLotOption.dataset.qty || '0', 10) || 0;
             if (!selectedLotQty) {
                 qtyEl.readOnly = false;
+                updateWriteOffQtyControl();
+                renderWriteOffUnitHint();
                 return;
             }
 
             const conversionRate = parseInt(ctx.conversion_rate || 1, 10) || 1;
+            const splitEnabled = !!(ctx.base_unit && ctx.package_unit && conversionRate > 1);
             const qtyUnit = unitSelect.value || 'package';
-            let adjustedQty = selectedLotQty;
-            if (qtyUnit === 'base') {
-                adjustedQty = selectedLotQty * conversionRate;
-            }
+            const lotLimit = splitEnabled && qtyUnit === 'package'
+                ? Math.floor(selectedLotQty / conversionRate)
+                : selectedLotQty;
+            const unitLabel = splitEnabled && qtyUnit === 'base'
+                ? (ctx.base_unit || 'หน่วยย่อย')
+                : (ctx.package_unit || ctx.unit || 'ชิ้น');
 
-            qtyEl.value = String(adjustedQty);
-            qtyEl.readOnly = true;
+            qtyEl.max = String(Math.max(0, lotLimit));
+            qtyEl.readOnly = false;
+            if (maxHintEl) {
+                maxHintEl.textContent = `สูงสุด ${Math.max(0, lotLimit)} ${unitLabel} จาก Lot ที่เลือก`;
+            }
             normalizeWriteOffQtyInput();
             renderWriteOffUnitHint();
         }
@@ -6207,19 +6216,6 @@
             const lotSelect = document.getElementById('writeOff_lot_select');
             const qtyUnit = (document.getElementById('writeOff_qty_unit') || {}).value || 'package';
             const conversionRate = parseInt(ctx.conversion_rate || 1, 10) || 1;
-
-            if (lotSelect && lotSelect.value) {
-                const selectedLotOption = lotSelect.options[lotSelect.selectedIndex] || {};
-                const selectedLotQty = parseInt(selectedLotOption.dataset.qty || '0', 10) || 0;
-                if (selectedLotQty > 0) {
-                    if (qtyUnit === 'base') {
-                        qty = String(selectedLotQty * conversionRate);
-                    } else {
-                        qty = String(selectedLotQty);
-                    }
-                    document.getElementById('writeOff_qty').value = qty;
-                }
-            }
 
             if (!qty || parseInt(qty, 10) <= 0) {
                 Swal.fire('แจ้งเตือน', 'กรุณาระบุจำนวนที่ต้องการตัดจำหน่าย', 'warning');

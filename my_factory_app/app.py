@@ -301,20 +301,28 @@ def clear_failed_attempts(scope):
     FAILED_LOGIN_ATTEMPTS.pop(f"{scope}:{get_client_ip()}", None)
 
 
+def build_admin_history_scope_filter(scope):
+    if scope == 'PC1':
+        return "((u.location LIKE '%PC1%' OR u.department LIKE '%PC1%') OR p.location LIKE '%PC1%')"
+    if scope == 'CC':
+        return "((u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%') OR (p.location LIKE '%Coil Center%' OR p.location LIKE '%CC%'))"
+    return ""
+
+
 def build_history_log_filters(role, log_loc='', log_type='', log_date_from='', log_date_to='', log_search=''):
     where_clauses = ["l.status != 'Pending'"]
     params = []
     ts_expr = transaction_timestamp_expr('l')
 
     if role == 'admin_pc1':
-        where_clauses.append("(u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')")
+        where_clauses.append(build_admin_history_scope_filter('PC1'))
     elif role == 'admin_cc':
-        where_clauses.append("(u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')")
+        where_clauses.append(build_admin_history_scope_filter('CC'))
     elif role == 'superadmin':
         if log_loc == 'PC1':
-            where_clauses.append("(u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')")
+            where_clauses.append(build_admin_history_scope_filter('PC1'))
         elif log_loc == 'CC':
-            where_clauses.append("(u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')")
+            where_clauses.append(build_admin_history_scope_filter('CC'))
 
     normalized_type = (log_type or '').strip().lower()
     if normalized_type == 'withdraw':
@@ -494,6 +502,13 @@ def user_can_access_product(user_row, product_row):
 # ==========================================
 @app.before_request
 def handle_before_request():
+    if not getattr(app, '_scheduler_request_checked', False):
+        app._scheduler_request_checked = True
+        try:
+            ensure_scheduler_running()
+        except Exception as e:
+            app.logger.error(f"Error ensuring scheduler is running: {e}", exc_info=True)
+
     # 1. ตั้งค่า Session ให้ถาวร (Zombie Check)
     session.permanent = True
     app.permanent_session_lifetime = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
@@ -2695,7 +2710,7 @@ def get_notification_settings(admin_id):
     finally:
         conn.close()
 
-def _send_smart_notification_sync(notification_type, message, location=None, role=None, email_body='', html_body='', recipients=None, admin_id=None):
+def _send_smart_notification_sync(notification_type, message, location=None, role=None, email_body='', html_body='', recipients=None, admin_id=None, subject=None):
     """
     ส่งแจ้งเตือนผ่าน Email ตามการตั้งค่า (LINE ถูกยกเลิกถาวร)
     notification_type: 'approval', 'rejection', 'low_stock', 'withdrawal_confirmed', 'pending_request'
@@ -2732,9 +2747,9 @@ def _send_smart_notification_sync(notification_type, message, location=None, rol
             email_recipients = list(dict.fromkeys([e for e in email_recipients if is_valid_email_address(e)]))
             
             if email_recipients:
-                subject = f'[PCM] แจ้งเตือน - {notification_type}'
+                email_subject = subject or f'[PCM] แจ้งเตือน - {notification_type}'
                 sent, error = send_email_message(
-                    subject=subject,
+                    subject=email_subject,
                     body=email_body or message,
                     recipients=email_recipients,
                     html_body=html_body
@@ -2776,7 +2791,7 @@ def _send_smart_notification_sync(notification_type, message, location=None, rol
                 role=str(role or '')
             )
 
-def send_smart_notification(notification_type, message, location=None, role=None, email_body='', html_body='', recipients=None, admin_id=None, async_mode=True):
+def send_smart_notification(notification_type, message, location=None, role=None, email_body='', html_body='', recipients=None, admin_id=None, async_mode=True, subject=None):
     """Wrapper ส่งแจ้งเตือนแบบ async เพื่อลดเวลา response ของหน้า submit"""
     if async_mode:
         def _notification_worker():
@@ -2790,6 +2805,7 @@ def send_smart_notification(notification_type, message, location=None, role=None
                     html_body=html_body,
                     recipients=recipients,
                     admin_id=admin_id,
+                    subject=subject,
                 )
             except Exception as e:
                 app.logger.error(f'Async notification thread failed: type={notification_type}, error={str(e)}', exc_info=True)
@@ -2807,6 +2823,7 @@ def send_smart_notification(notification_type, message, location=None, role=None
         html_body=html_body,
         recipients=recipients,
         admin_id=admin_id,
+        subject=subject,
     )
     return True
 
@@ -4795,7 +4812,8 @@ def admin_dashboard(module):
     categories = conn.execute(f"SELECT DISTINCT category FROM products WHERE 1=1 {product_loc_filter}").fetchall()
 
     logs = conn.execute(f'''
-        SELECT l.*, COALESCE(u.name, SUBSTR(l.emp_id, 7)) as emp_name, u.department, u.location, p.name as product_name, p.unit
+        SELECT l.*, COALESCE(u.name, SUBSTR(l.emp_id, 7)) as emp_name, u.department, u.location,
+               p.location as product_location, p.name as product_name, p.unit
         FROM transaction_logs l
         LEFT JOIN users u ON (
             CASE 
@@ -7901,6 +7919,7 @@ def get_product_lots(product_id):
                COALESCE(received_date, '') AS received_date, COALESCE(expiry_date, '') AS expiry_date
         FROM product_lots
         WHERE product_id = ?
+          AND COALESCE(qty, 0) > 0
         ORDER BY received_date ASC, id ASC
     ''', (product_id,)).fetchall()
     conn.close()
@@ -8242,7 +8261,7 @@ def filter_logs():
     query = f'''
         SELECT l.*, 
                COALESCE(u.name, SUBSTR(l.emp_id, 7)) as emp_name, 
-               u.department, u.location, p.name as product_name, p.unit,
+               u.department, u.location, p.location as product_location, p.name as product_name, p.unit,
                p.base_unit
         FROM transaction_logs l
         LEFT JOIN users u ON (
@@ -8293,7 +8312,7 @@ def export_logs_excel():
                 {ts_expr} AS "วัน/เวลา",
                 COALESCE(u.name, SUBSTR(l.emp_id, 7)) AS "ผู้ทำรายการ",
                 COALESCE(u.department, '') AS "แผนก",
-                COALESCE(u.location, '') AS "Location",
+                COALESCE(NULLIF(TRIM(u.location), ''), NULLIF(TRIM(p.location), ''), '') AS "Location",
                 COALESCE(p.code, '') AS "รหัสของ",
                 COALESCE(p.name, '') AS "รายการ",
                 COALESCE(l.action, '') AS "ประเภท",
@@ -9591,13 +9610,15 @@ def list_departments():
 
 # ฟังก์ชันที่จะให้ทำงานอัตโนมัติ (Background Task)
 def scheduled_daily_alert():
-    with app.app_context():
-        conn = get_db_connection()
-        
-        # ==========================================
-        # 1. แจ้งเตือนของใกล้หมดอายุ (จาก product_lots รองรับทั้งของเก่า + Lot ใหม่)
-        # ==========================================
-        expiry_query = '''
+    try:
+        with app.app_context():
+            print(f'[DAILY ALERT] Triggered at {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} (Asia/Bangkok)', flush=True)
+            conn = get_db_connection()
+
+            # ==========================================
+            # 1. แจ้งเตือนของใกล้หมดอายุ (จาก product_lots รองรับทั้งของเก่า + Lot ใหม่)
+            # ==========================================
+            expiry_query = '''
             SELECT p.name, p.category, p.location,
                 CASE
                     WHEN pl.expiry_date LIKE '%/%/%' THEN substr(pl.expiry_date,7,4)||'-'||substr(pl.expiry_date,4,2)||'-'||substr(pl.expiry_date,1,2)
@@ -9661,6 +9682,8 @@ def scheduled_daily_alert():
         scheduled_withdrawals = conn.execute(scheduled_query).fetchall()
         conn.close()
         
+        print(f'[DAILY ALERT] found expiring={len(expiring_items)}, helmets={len(helmet_alerts)}, scheduled_withdrawals={len(scheduled_withdrawals)}', flush=True)
+
         # ==========================================
         # 4. จัดกลุ่มแยก CC / PC1 แล้วส่งแยกกัน
         # ==========================================
@@ -9728,47 +9751,48 @@ def scheduled_daily_alert():
                 'scheduled_withdrawals': scheduled_payload,
             }
 
-            send_smart_notification(
-                notification_type='low_stock',
-                message=build_periodic_alert_email_body(periodic_payload),
-                location=location_label,
-                email_body=build_periodic_alert_email_body(periodic_payload),
-                html_body=build_periodic_alert_email_html(periodic_payload),
-                admin_id='superadmin'
-            )
+            if loc_expiry or loc_helmets or loc_scheduled:
+                print(f'[DAILY ALERT] sending {location_label} email: expiry={len(loc_expiry)}, helmets={len(loc_helmets)}, scheduled={len(loc_scheduled)}', flush=True)
+                send_smart_notification(
+                    notification_type='daily_alert',
+                    message=build_periodic_alert_email_body(periodic_payload),
+                    location=location_label,
+                    email_body=build_periodic_alert_email_body(periodic_payload),
+                    html_body=build_periodic_alert_email_html(periodic_payload),
+                    admin_id='superadmin',
+                    async_mode=False,
+                    subject=f'[PCM] แจ้งเตือนประจำวัน [{location_label}]'
+                )
+            else:
+                print(f'[DAILY ALERT] no alerts to send for {location_label}', flush=True)
+    except Exception as exc:
+        print(f'[DAILY ALERT] ERROR: {exc}', flush=True)
+        import traceback
+        traceback.print_exc()
+
 
 def update_scheduler_time(new_time):
     """
     new_time: รูปแบบ "HH:MM" (24 ชม.) เช่น "15:30"
     """
     try:
+        ensure_scheduler_running()
         hour, minute = new_time.split(':')
-        
-        # ใช้ scheduler.scheduler เพื่อเข้าถึงเมธอดของ APScheduler โดยตรง
-        scheduler.scheduler.reschedule_job(
-            'Daily_Alert_Job', 
-            trigger='cron', 
-            hour=int(hour), 
+        scheduler.add_job(
+            id='Daily_Alert_Job',
+            func=scheduled_daily_alert_task,
+            trigger='cron',
+            hour=int(hour),
             minute=int(minute),
-            timezone='Asia/Bangkok'
+            timezone='Asia/Bangkok',
+            replace_existing=True
         )
+        print(f'[SCHEDULER] Rescheduled Daily_Alert_Job to {new_time}', flush=True)
+        log_scheduler_state('[SCHEDULER] After reschedule')
         return True
     except Exception as e:
-        # หาก Job ยังไม่ถูกสร้าง (หา ID ไม่เจอ) ให้ใช้ add_job แทน
-        try:
-            hour, minute = new_time.split(':')
-            scheduler.add_job(
-                id='Daily_Alert_Job',
-                func=scheduled_daily_alert,
-                trigger='cron',
-                hour=int(hour),
-                minute=int(minute),
-                timezone='Asia/Bangkok',
-                replace_existing=True
-            )
-            return True
-        except Exception as ex:
-            return False
+        app.logger.error(f'Failed to update Daily_Alert_Job schedule: {e}', exc_info=True)
+        return False
 
 # 1. API ดึงเวลาปัจจุบันมาโชว์ในช่อง Input
 @app.route('/admin/get_alert_time')
@@ -9801,9 +9825,35 @@ def save_alert_time():
     conn.commit()
     conn.close()
 
-    update_scheduler_time(new_time)
+    if not update_scheduler_time(new_time):
+        return jsonify({'success': False, 'message': 'บันทึกเวลาเรียบร้อย แต่ไม่สามารถตั้งค่า scheduler ได้'}), 500
     
     return jsonify({'success': True, 'message': f'เปลี่ยนเวลาแจ้งเตือนอีเมลเป็น {new_time} น. เรียบร้อย'})
+
+@app.route('/admin/scheduler_status')
+def scheduler_status():
+    if session.get('admin_role') != 'superadmin':
+        return jsonify({'success': False, 'message': 'No Permission'}), 403
+
+    ensure_scheduler_running()
+    jobs = []
+    try:
+        for job in scheduler.scheduler.get_jobs():
+            next_run_time = getattr(job, 'next_run_time', None)
+            next_run = next_run_time.isoformat() if next_run_time else None
+            jobs.append({
+                'id': job.id,
+                'name': job.name,
+                'next_run_time': next_run
+            })
+    except Exception as e:
+        app.logger.error(f'Failed to read scheduler jobs: {e}', exc_info=True)
+
+    return jsonify({
+        'success': True,
+        'running': is_scheduler_running(),
+        'jobs': jobs
+    })
 
 @app.route('/admin/get_ga_email_settings')
 def get_ga_email_settings():
@@ -9953,7 +10003,6 @@ def backup_database():
     )
 
 # --- 2. ตั้ง Job แบบใช้ฟังก์ชันธรรมดา ---
-@scheduler.task('cron', id='Daily_Alert_Job', hour=14, minute=45, timezone='Asia/Bangkok')
 def scheduled_daily_alert_task():
     # บังคับให้ใช้ App Context เพื่อให้ดึง DB ได้บน Codespaces
     with app.app_context():
@@ -10058,50 +10107,104 @@ def export_monthly_excel():
 
     return send_file(output, as_attachment=True, download_name=f"Report_{month}_{year}.xlsx")
     
-if __name__ == '__main__':
-    # 1. เริ่มต้นระบบจัดการ Job
-    if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        try:
+def is_scheduler_running():
+    try:
+        if bool(getattr(scheduler, 'running', False)):
+            return True
+        raw_scheduler = getattr(scheduler, 'scheduler', None)
+        return bool(getattr(raw_scheduler, 'running', False))
+    except Exception:
+        return False
+
+
+def log_scheduler_state(prefix='[SCHEDULER] State'):
+    try:
+        jobs = scheduler.scheduler.get_jobs()
+        if not jobs:
+            print(f'{prefix}: running={is_scheduler_running()} jobs=0', flush=True)
+            return
+        for job in jobs:
+            next_run_time = getattr(job, 'next_run_time', None)
+            next_run = next_run_time.strftime('%Y-%m-%d %H:%M:%S %Z') if next_run_time else 'None'
+            print(f'{prefix}: running={is_scheduler_running()} job={job.id} next_run={next_run}', flush=True)
+    except Exception as e:
+        print(f'{prefix}: unable to inspect jobs: {e}', flush=True)
+
+
+def start_scheduler_with_verification():
+    scheduler.start()
+    if is_scheduler_running():
+        return True
+
+    # Flask-APScheduler intentionally no-ops when FLASK_DEBUG is enabled and the
+    # Werkzeug reloader is not active. This app runs with use_reloader=False, so
+    # start the underlying BackgroundScheduler after verifying the wrapper did not.
+    print('[SCHEDULER] Wrapper start did not activate scheduler; starting core scheduler directly', flush=True)
+    scheduler.scheduler.start()
+    return is_scheduler_running()
+
+
+def ensure_scheduler_running():
+    if not is_scheduler_running():
+        return initialize_scheduler()
+    return True
+
+
+def initialize_scheduler():
+    if getattr(app, '_scheduler_initialized', False) and is_scheduler_running():
+        return True
+
+    try:
+        if not getattr(app, '_scheduler_initialized', False):
             scheduler.init_app(app)
-            
-            # 2. ดึงเวลาจาก Database มาตั้งค่าเริ่มต้น
+
+        # 2. ดึงเวลาจาก Database มาตั้งค่าเริ่มต้น
+        try:
+            conn = get_db_connection()
             try:
-                conn = get_db_connection()
-                try:
-                    saved_time = conn.execute("SELECT value FROM settings WHERE key = 'daily_alert_time'").fetchone()
-                except Exception as db_error:
-                    print(f'[SCHEDULER] Warning: Could not read alert time from DB: {db_error}', flush=True)
-                    saved_time = None
-                finally:
-                    conn.close()
-            except Exception as conn_error:
-                print(f'[SCHEDULER] Warning: Database connection failed during scheduler init: {conn_error}', flush=True)
+                saved_time = conn.execute("SELECT value FROM settings WHERE key = 'daily_alert_time'").fetchone()
+            except Exception as db_error:
+                print(f'[SCHEDULER] Warning: Could not read alert time from DB: {db_error}', flush=True)
                 saved_time = None
-            
-            alert_time = saved_time['value'] if saved_time else "08:30"
-            try:
-                h, m = alert_time.split(':')
-            except ValueError:
-                print(f'[SCHEDULER] Warning: Invalid alert time format "{alert_time}", using default 08:30', flush=True)
-                h, m = "08", "30"
+            finally:
+                conn.close()
+        except Exception as conn_error:
+            print(f'[SCHEDULER] Warning: Database connection failed during scheduler init: {conn_error}', flush=True)
+            saved_time = None
 
-            # 3. เพิ่ม Job เข้าไปในระบบ (ถ้ามีอยู่แล้วให้ทับของเก่า)
-            scheduler.add_job(
-                id='Daily_Alert_Job',
-                func=scheduled_daily_alert, # ชื่อฟังก์ชันส่ง Email
-                trigger='cron',
-                hour=int(h),
-                minute=int(m),
-                timezone='Asia/Bangkok',
-                replace_existing=True
-            )
-            
-            scheduler.start()
-            print('[SCHEDULER] Scheduler started successfully', flush=True)
-        except Exception as scheduler_error:
-            print(f'[SCHEDULER] ERROR: Failed to initialize scheduler: {scheduler_error}', flush=True)
-            print(f'[SCHEDULER] App will run but scheduler is disabled', flush=True)
+        alert_time = saved_time['value'] if saved_time else "08:30"
+        try:
+            h, m = alert_time.split(':')
+        except ValueError:
+            print(f'[SCHEDULER] Warning: Invalid alert time format "{alert_time}", using default 08:30', flush=True)
+            h, m = "08", "30"
 
+        # 3. เพิ่ม Job เข้าไปในระบบ (ถ้ามีอยู่แล้วให้ทับของเก่า)
+        scheduler.add_job(
+            id='Daily_Alert_Job',
+            func=scheduled_daily_alert_task, # ชื่อฟังก์ชันส่ง Email
+            trigger='cron',
+            hour=int(h),
+            minute=int(m),
+            timezone='Asia/Bangkok',
+            replace_existing=True
+        )
+
+        if not start_scheduler_with_verification():
+            raise RuntimeError('Scheduler did not enter running state after start')
+        app._scheduler_initialized = True
+        print('[SCHEDULER] Scheduler started successfully', flush=True)
+        log_scheduler_state('[SCHEDULER] Startup')
+        return True
+    except Exception as scheduler_error:
+        print(f'[SCHEDULER] ERROR: Failed to initialize scheduler: {scheduler_error}', flush=True)
+        print(f'[SCHEDULER] App will run but scheduler is disabled', flush=True)
+        app._scheduler_initialized = False
+        return False
+
+initialize_scheduler()
+
+if __name__ == '__main__' or os.environ.get('FLASK_RUN_FROM_CLI') == 'true':
     debug_mode = os.environ.get('FLASK_DEBUG', '0') == '1'
     try:
         print(f'[APP] Starting Flask application (debug={debug_mode})', flush=True)

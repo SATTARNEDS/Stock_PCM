@@ -99,7 +99,12 @@ if (-not $SkipTasks) {
     $startupAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
     $startupTrigger = New-ScheduledTaskTrigger -AtStartup
     $startupPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest -LogonType ServiceAccount
-    $startupSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew
+    $startupSettings = New-ScheduledTaskSettingsSet `
+        -StartWhenAvailable `
+        -MultipleInstances IgnoreNew `
+        -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
+        -RestartCount 999 `
+        -RestartInterval (New-TimeSpan -Minutes 1)
 
     Register-ScheduledTask -TaskName $startupTaskName -Action $startupAction -Trigger $startupTrigger -Principal $startupPrincipal -Settings $startupSettings -Force | Out-Null
 

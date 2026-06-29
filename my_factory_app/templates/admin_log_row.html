@@ -6,8 +6,9 @@
         <div class="fw-medium">{{ log['emp_name'] or log['emp_id'] }}</div>
         <small class="text-muted">
             {{ log['department'] }} 
-            {% if log['location'] %}
-                <span class="text-primary">({{ log['location'] }})</span>
+            {% set display_location = log['location'] or log['product_location'] %}
+            {% if display_location %}
+                <span class="text-primary">({{ display_location }})</span>
             {% endif %}
         </small>
     </td>
