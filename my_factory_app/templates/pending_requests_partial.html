@@ -46,7 +46,7 @@
         </form>
         <form action="{{ url_for('reject_request', log_id=log['id']) }}" method="POST" class="d-inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="button" onclick="confirmAction(this.form, 'ปฏิเสธรายการนี้?', 'warning', this)"
+            <button type="button" onclick="confirmRejectAction(this.form, this)"
                 class="btn btn-sm btn-outline-danger rounded-pill px-3 shadow-sm pending-action-btn pending-action-reject">
                 <i class="fas fa-times me-1"></i>ปฏิเสธ
             </button>

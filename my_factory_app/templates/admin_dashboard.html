@@ -5380,6 +5380,54 @@
             });
         }
 
+        async function confirmRejectAction(form, triggerBtn = null) {
+            if (!form || typeof form.submit !== 'function') return;
+
+            let reason = '';
+            if (window.Swal && typeof Swal.fire === 'function') {
+                const result = await Swal.fire({
+                    title: 'ปฏิเสธรายการนี้?',
+                    input: 'textarea',
+                    inputLabel: 'เหตุผลในการปฏิเสธ',
+                    inputPlaceholder: 'เช่น สต็อกไม่เพียงพอ / รายการซ้ำ / เลือกของผิดประเภท',
+                    inputAttributes: {
+                        maxlength: 500,
+                        'aria-label': 'เหตุผลในการปฏิเสธ'
+                    },
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'ปฏิเสธรายการ',
+                    cancelButtonText: 'ยกเลิก',
+                    inputValidator: (value) => {
+                        if (!value || !value.trim()) return 'กรุณาระบุเหตุผลในการปฏิเสธ';
+                        if (value.trim().length > 500) return 'เหตุผลต้องไม่เกิน 500 ตัวอักษร';
+                        return null;
+                    }
+                });
+                if (!result.isConfirmed) return;
+                reason = (result.value || '').trim();
+            } else {
+                reason = (window.prompt('กรุณาระบุเหตุผลในการปฏิเสธ') || '').trim();
+                if (!reason) return;
+            }
+
+            let reasonInput = form.querySelector('input[name="rejection_reason"]');
+            if (!reasonInput) {
+                reasonInput = document.createElement('input');
+                reasonInput.type = 'hidden';
+                reasonInput.name = 'rejection_reason';
+                form.appendChild(reasonInput);
+            }
+            reasonInput.value = reason;
+
+            if (triggerBtn) {
+                triggerBtn.classList.add('is-submitting');
+                const row = triggerBtn.closest('tr');
+                if (row) row.classList.add('pending-row-processing');
+            }
+            form.submit();
+        }
+
         function clearStaleModalBackdrop() {
             const backdrops = document.querySelectorAll('.modal-backdrop');
             if (backdrops.length > 1) {

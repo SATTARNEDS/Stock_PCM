@@ -113,6 +113,11 @@
                         {% if row.note %}
                         <div class="text-muted" style="font-size:0.78rem;">{{ row.note }}</div>
                         {% endif %}
+                        {% if row.status == 'Rejected' and row.rejection_reason %}
+                        <div class="mt-1 text-danger" style="font-size:0.80rem;">
+                            <i class="fas fa-circle-info me-1"></i>ปฏิเสธเนื่องจาก: {{ row.rejection_reason }}
+                        </div>
+                        {% endif %}
                     </td>
                     <td class="text-center">
                         {{ row.qty }}
@@ -181,12 +186,12 @@
     {% elif batch_status == 'Rejected' %}
     <div class="alert alert-danger" style="border-radius:12px; font-size:0.88rem;">
         <i class="fas fa-times-circle me-1"></i>
-        คำขอเบิกถูกปฏิเสธ กรุณาติดต่อผู้ดูแลระบบเพื่อสอบถามเพิ่มเติม
+        คำขอเบิกถูกปฏิเสธ ดูเหตุผลของแต่ละรายการด้านบน
     </div>
     {% elif batch_status == 'PartialReject' %}
     <div class="alert alert-warning" style="border-radius:12px; font-size:0.88rem;">
         <i class="fas fa-exclamation-triangle me-1"></i>
-        บางรายการได้รับการอนุมัติ / บางรายการถูกปฏิเสธ — ดูรายละเอียดด้านบน
+        บางรายการได้รับการอนุมัติ / บางรายการถูกปฏิเสธ — ดูเหตุผลของรายการที่ถูกปฏิเสธด้านบน
     </div>
     {% endif %}
 

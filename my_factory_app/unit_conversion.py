@@ -400,7 +400,7 @@ class UnitConversionManager:
     # 5. APPLY WITHDRAWAL (บันทึกลงฐานข้อมูล)
     # ============================================================================
     
-    def apply_withdrawal(self, product_id, qty_base_unit, emp_id, lot_id=None, use_open_box=True, autocommit=True):
+    def apply_withdrawal(self, product_id, qty_base_unit, emp_id, lot_id=None, use_open_box=True, autocommit=True, create_log=True):
         """
         Execute the withdrawal and update inventory
         
@@ -449,20 +449,21 @@ class UnitConversionManager:
                     VALUES (?, ?, datetime('now'), ?, ?, 1, 'active')
                 ''', (product_id, lot_id, calc['new_open_box_qty'], new_open_extra_tablets))
             
-            # 4. Log transaction
-            self.cursor.execute('''
-                INSERT INTO transaction_logs 
-                (emp_id, product_id, lot_id, action, qty, qty_base_unit, qty_package_unit, note, status, timestamp)
-                VALUES (?, ?, ?, 'ขอเบิกยา', ?, ?, ?, ?, 'Approved', datetime('now'))
-            ''', (
-                emp_id, 
-                product_id, 
-                lot_id,
-                calc['full_packages_needed'],
-                qty_base_unit,
-                calc['total_packages_used'],
-                calc['transaction_note']
-            ))
+            # route อนุมัติจะ update pending log เดิม จึงปิดการสร้าง log ซ้ำได้ด้วย create_log=False
+            if create_log:
+                self.cursor.execute('''
+                    INSERT INTO transaction_logs
+                    (emp_id, product_id, lot_id, action, qty, qty_base_unit, qty_package_unit, note, status, timestamp)
+                    VALUES (?, ?, ?, 'ขอเบิกยา', ?, ?, ?, ?, 'Approved', datetime('now'))
+                ''', (
+                    emp_id,
+                    product_id,
+                    lot_id,
+                    calc['full_packages_needed'],
+                    qty_base_unit,
+                    calc['total_packages_used'],
+                    calc['transaction_note']
+                ))
             
             if autocommit:
                 self.conn.commit()

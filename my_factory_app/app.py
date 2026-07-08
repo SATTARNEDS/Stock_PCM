@@ -948,6 +948,8 @@ def ensure_application_schema():
             conn.execute("ALTER TABLE transaction_logs ADD COLUMN pickup_confirmed_at TEXT")
         if transaction_log_columns and 'pickup_confirmed_by' not in transaction_log_columns:
             conn.execute("ALTER TABLE transaction_logs ADD COLUMN pickup_confirmed_by TEXT")
+        if transaction_log_columns and 'rejection_reason' not in transaction_log_columns:
+            conn.execute("ALTER TABLE transaction_logs ADD COLUMN rejection_reason TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_transaction_logs_batch_token ON transaction_logs(batch_token)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_transaction_logs_requester_ip ON transaction_logs(requester_ip)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_transaction_logs_requester_device_token ON transaction_logs(requester_device_token)")
@@ -1158,6 +1160,70 @@ def start_write_transaction(conn):
     except sqlite3.OperationalError as e:
         if 'within a transaction' not in str(e).lower():
             raise
+
+
+def get_product_lot_total(conn, product_id):
+    row = conn.execute(
+        '''
+        SELECT COALESCE(SUM(CASE WHEN COALESCE(qty, 0) > 0 THEN qty ELSE 0 END), 0) AS lot_total
+        FROM product_lots
+        WHERE product_id = ?
+        ''',
+        (product_id,)
+    ).fetchone()
+    return int(row['lot_total'] or 0) if row else 0
+
+
+def sync_product_stock_from_lots(conn, product_id, *, previous_stock=None, previous_lot_total=None, force=False):
+    """ให้ product_lots เป็นแหล่งความจริงหลังการแก้ Lot โดยตรง"""
+    product = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
+    if not product:
+        return None
+
+    # สินค้ายาแบบแตกหน่วยมี open_packages ร่วมด้วย จึงห้าม sync จาก lot อย่างเดียว
+    if is_split_tablet_medicine(product):
+        return int(product['stock'] or 0)
+
+    lot_exists = conn.execute(
+        'SELECT 1 FROM product_lots WHERE product_id = ? LIMIT 1',
+        (product_id,)
+    ).fetchone()
+    if not lot_exists:
+        return int(product['stock'] or 0)
+
+    lot_total = get_product_lot_total(conn, product_id)
+    current_stock = int(product['stock'] or 0)
+    if not force:
+        if previous_stock is not None and previous_lot_total is not None:
+            # ถ้าก่อนแก้ Lot มี mismatch อยู่แล้ว ห้าม sync ทั้งก้อน เพราะจะทำให้ยอดกระโดดจากข้อมูลเก่า
+            if int(previous_stock or 0) != int(previous_lot_total or 0):
+                return current_stock
+        elif current_stock != lot_total:
+            return current_stock
+
+    conn.execute(
+        'UPDATE products SET stock = ? WHERE id = ?',
+        (lot_total, product_id)
+    )
+    return lot_total
+
+
+def restore_zero_stock_from_remaining_lots(conn, product_id, *, deleted_lot_qty=0):
+    """กู้ยอดหลังลบ Lot กรณีโค้ดเก่าเคยหัก stock จนเป็น 0 แต่ยังมี Lot อื่นเหลือ"""
+    product = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
+    if not product or is_split_tablet_medicine(product):
+        return None
+
+    current_stock = int(product['stock'] or 0)
+    lot_total = get_product_lot_total(conn, product_id)
+    # กู้เฉพาะเมื่อ lot ที่เหลือดูสมเหตุผลเทียบกับ lot ที่เพิ่งลบ ป้องกันดึง lot เพี้ยนก้อนใหญ่กลับมา
+    if current_stock == 0 and lot_total > 0 and lot_total <= max(1, int(deleted_lot_qty or 0)):
+        conn.execute(
+            'UPDATE products SET stock = ? WHERE id = ?',
+            (lot_total, product_id)
+        )
+        return lot_total
+    return current_stock
 
 
 def queue_device_notification(conn, *, target_ip, event_type, title, message, emp_id=None, log_id=None, batch_token=None, target_device_token=None):
@@ -2375,7 +2441,8 @@ def build_approval_email_html(payload):
 """
 
 def build_rejection_email_body(payload):
-    return "\n".join([
+    reason = str(payload.get('reason') or '').strip()
+    lines = [
         'มีการปฏิเสธรายการเบิกจากระบบ PCM',
         '',
         f"ผู้เบิก: {payload.get('requester_name', '-')}",
@@ -2384,6 +2451,11 @@ def build_rejection_email_body(payload):
         f"จำนวน: {payload.get('qty', '-')} {payload.get('unit', '')}".strip(),
         f"ผู้ดำเนินการ: {payload.get('approver', '-')}",
         f"เวลาปฏิเสธ: {payload.get('rejected_at', '-')}",
+    ]
+    if reason:
+        lines.append(f"เหตุผล: {reason}")
+    return "\n".join([
+        *lines,
     ])
 
 def build_rejection_email_html(payload):
@@ -2395,6 +2467,12 @@ def build_rejection_email_html(payload):
     unit = escape(str(payload.get('unit') or ''))
     approver = escape(str(payload.get('approver') or '-'))
     rejected_at = escape(str(payload.get('rejected_at') or '-'))
+    reason = escape(str(payload.get('reason') or '').strip())
+    reason_row = (
+        f'<tr><td style="padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;">เหตุผล</td>'
+        f'<td style="padding:9px 0;color:#b42318;font-size:13px;border-bottom:1px solid #edf1f7;">{reason}</td></tr>'
+        if reason else ''
+    )
     action_link = build_email_link('admin_dashboard', module='stock')
     action_section = ''
     if action_link:
@@ -2432,6 +2510,7 @@ def build_rejection_email_html(payload):
                             <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">รายการ</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{product_name}</td></tr>
                             <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">จำนวน</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{qty} {unit}</td></tr>
                             <tr><td style=\"padding:9px 0;color:#6a768f;font-size:13px;border-bottom:1px solid #edf1f7;\">ผู้ดำเนินการ</td><td style=\"padding:9px 0;color:#1d2a44;font-size:13px;border-bottom:1px solid #edf1f7;\">{approver}</td></tr>
+                            {reason_row}
                         </table>
                     </td>
                 </tr>
@@ -4454,6 +4533,7 @@ def withdrawal_status_page(token):
     rows = conn.execute('''
         SELECT l.id, l.emp_id, l.action, l.qty, l.qty_base_unit, l.status,
                l.timestamp, l.note, l.request_receive_mode, l.requested_receive_at,
+               l.rejection_reason,
                p.name AS product_name, p.unit, p.base_unit,
                u.name AS requester_name, u.department, u.location
         FROM transaction_logs l
@@ -6327,6 +6407,12 @@ def approve_request(log_id):
         product_info_for_approve = conn.execute(
             'SELECT * FROM products WHERE id = ?', (product_id,)
         ).fetchone()
+        if not product_info_for_approve:
+            conn.rollback()
+            flash('❌ ไม่พบข้อมูลสินค้าในระบบ', 'danger')
+            return redirect(url_for('admin_dashboard', module='stock'))
+
+        product_stock_before = int(product_info_for_approve['stock'] or 0)
         is_split_med = is_split_tablet_medicine(product_info_for_approve) if product_info_for_approve else False
 
         last_lot_id = None
@@ -6368,8 +6454,7 @@ def approve_request(log_id):
             flash('⚠️ รายการนี้ถูกดำเนินการไปแล้ว', 'warning')
             return redirect(url_for('admin_dashboard', module='stock'))
 
-        # สำหรับยาแบบแยกหน่วย: products.stock ถูกลดแล้วตอน confirm (apply_withdrawal)
-        # สำหรับรายการอื่น: ต้องลด products.stock ตอน approve และปลด reservation พร้อมกัน
+        # ตัดสต็อกจริงตอน approve เท่านั้น เพื่อให้ Pending ยังเป็นแค่ยอดจอง
         if not is_split_med:
             stock_update = conn.execute(
                 'UPDATE products SET stock = MAX(0, stock - ?), reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ? AND stock >= ?',
@@ -6379,6 +6464,30 @@ def approve_request(log_id):
                 conn.rollback()
                 flash('❌ สต็อกปัจจุบันไม่พอสำหรับการอนุมัติ', 'danger')
                 return redirect(url_for('admin_dashboard', module='stock'))
+
+            stock_after_row = conn.execute(
+                'SELECT stock FROM products WHERE id = ?',
+                (product_id,)
+            ).fetchone()
+            product_stock_after = int(stock_after_row['stock'] or 0) if stock_after_row else product_stock_before
+            expected_stock_after = product_stock_before - qty_to_withdraw
+            if product_stock_after != expected_stock_after:
+                conn.rollback()
+                flash('❌ ระบบตรวจพบว่ายอดสต็อกไม่ลดตามจำนวนที่อนุมัติ จึงยกเลิกการอนุมัติเพื่อป้องกันยอดผิด', 'danger')
+                return redirect(url_for('admin_dashboard', module='stock'))
+
+            stock_audit_note = f"ตัดสต็อก: {product_stock_before} -> {product_stock_after}"
+            conn.execute(
+                '''
+                UPDATE transaction_logs
+                SET note = CASE
+                    WHEN note IS NULL OR TRIM(note) = '' THEN ?
+                    ELSE note || ' | ' || ?
+                END
+                WHERE id = ?
+                ''',
+                (stock_audit_note, stock_audit_note, log_id)
+            )
         else:
             qty_base_to_withdraw = int(log['qty_base_unit'] or 0)
             if qty_base_to_withdraw <= 0:
@@ -6392,6 +6501,7 @@ def approve_request(log_id):
                 emp_id=log['emp_id'],
                 lot_id=last_lot_id,
                 autocommit=False,
+                create_log=False,
             )
             if not withdrawal_result.get('success'):
                 conn.rollback()
@@ -6532,6 +6642,11 @@ def reject_request(log_id):
         return redirect(url_for('index'))
 
     role = session.get('admin_role', 'superadmin')
+    rejection_reason = clean_input_text(request.form.get('rejection_reason'), 500)
+    if not rejection_reason:
+        flash('❌ กรุณาระบุเหตุผลในการปฏิเสธ', 'danger')
+        return redirect(url_for('admin_dashboard', module='stock'))
+
     conn = get_db_connection()
 
     try:
@@ -6570,7 +6685,14 @@ def reject_request(log_id):
             (reserved_release_qty, log['product_id'])
         )
 
-        update_result = conn.execute('UPDATE transaction_logs SET status = "Rejected" WHERE id = ? AND status = "Pending"', (log_id,))
+        update_result = conn.execute(
+            '''
+            UPDATE transaction_logs
+            SET status = "Rejected", rejection_reason = ?, timestamp = ?
+            WHERE id = ? AND status = "Pending"
+            ''',
+            (rejection_reason, get_thailand_time().strftime('%d/%m/%Y %H:%M:%S'), log_id)
+        )
         if update_result.rowcount == 0:
             conn.rollback()
             flash('⚠️ รายการนี้ถูกดำเนินการไปแล้ว', 'warning')
@@ -6590,6 +6712,7 @@ def reject_request(log_id):
             f"📍 แผนก: {user_info['department'] if user_info else '-'} ({user_info['location'] if user_info else '-'})\n"
             f"📦 รายการ: {product_info['name'] if product_info else log['product_id']}\n"
             f"🔢 จำนวน: {rejected_qty} {rejected_unit}\n"
+            f"📝 เหตุผล: {rejection_reason}\n"
             f"🧾 ผู้ดำเนินการ: {admin_label}\n"
             f"🕒 เวลาปฏิเสธ: {rejected_at}"
         )
@@ -6610,6 +6733,7 @@ def reject_request(log_id):
                 'unit': rejected_unit,
                 'approver': admin_label,
                 'rejected_at': rejected_at,
+                'reason': rejection_reason,
             }),
             html_body=build_rejection_email_html({
                 'requester_name': user_info['name'] if user_info else log['emp_id'],
@@ -6620,6 +6744,7 @@ def reject_request(log_id):
                 'unit': rejected_unit,
                 'approver': admin_label,
                 'rejected_at': rejected_at,
+                'reason': rejection_reason,
             }),
             admin_id='superadmin'
         )
@@ -6645,7 +6770,7 @@ def reject_request(log_id):
             target_ip=target_ip,
             event_type='rejection',
             title='รายการเบิกถูกปฏิเสธ',
-            message=f"{product_info['name'] if product_info else log['product_id']} จำนวน {rejected_qty} {rejected_unit}",
+            message=f"{product_info['name'] if product_info else log['product_id']} จำนวน {rejected_qty} {rejected_unit} | เหตุผล: {rejection_reason}",
             emp_id=log['emp_id'],
             log_id=log_id,
             batch_token=batch_token or None,
@@ -7054,6 +7179,7 @@ def add_product():
                 INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
                 VALUES (?, ?, ?, ?, ?)
             ''', (product_id, lot_number, stock, receive_date, expiry_date))
+            sync_product_stock_from_lots(conn, product_id, force=True)
 
             # 4. บันทึกประวัติ
             conn.execute('''
@@ -7715,7 +7841,15 @@ def import_excel():
                     pass
 
                 existing = conn.execute('SELECT id FROM products WHERE code = ?', (code,)).fetchone()
+                stock_before_sync = None
+                lot_total_before_sync = None
                 if existing:
+                    before_sync_row = conn.execute(
+                        'SELECT COALESCE(stock, 0) AS stock FROM products WHERE id = ?',
+                        (existing['id'],)
+                    ).fetchone()
+                    stock_before_sync = int(before_sync_row['stock'] or 0) if before_sync_row else 0
+                    lot_total_before_sync = get_product_lot_total(conn, existing['id'])
                     # อัปเดต split-unit fields ถ้ามีในไฟล์
                     if is_medicine_row and split_payload_present:
                         effective_pkg_unit = import_pkg_unit
@@ -7798,6 +7932,14 @@ def import_excel():
                             INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
                             VALUES (?, ?, ?, ?, ?)
                         ''', (product_id, lot_no, effective_lot_qty, received_date, expiry_date))
+                    if not is_medicine_row:
+                        sync_product_stock_from_lots(
+                            conn,
+                            product_id,
+                            previous_stock=stock_before_sync,
+                            previous_lot_total=lot_total_before_sync,
+                            force=(stock_before_sync is None)
+                        )
                 elif effective_lot_qty > 0:
                     # ไม่มี Lot No. แต่มีจำนวน → upsert ด้วย received_date (เช่น อุปกรณ์ IT)
                     existing_lot = conn.execute(
@@ -7814,6 +7956,14 @@ def import_excel():
                             INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
                             VALUES (?, NULL, ?, ?, ?)
                         ''', (product_id, effective_lot_qty, received_date, expiry_date))
+                    if not is_medicine_row:
+                        sync_product_stock_from_lots(
+                            conn,
+                            product_id,
+                            previous_stock=stock_before_sync,
+                            previous_lot_total=lot_total_before_sync,
+                            force=(stock_before_sync is None)
+                        )
 
         conn.commit()
         flash(f'✅ นำเข้าสำเร็จ: อัปเดต {updated_count}, เพิ่มใหม่ {inserted_count}', 'success')
@@ -7957,7 +8107,13 @@ def update_product_lot():
         conn.close()
         return jsonify({'success': False, 'message': 'Lot นี้ไม่มีอยู่ในระบบ'}), 404
 
-    qty_diff = qty - int(existing['qty'] or 0)
+    product_before = conn.execute(
+        'SELECT COALESCE(stock, 0) AS stock FROM products WHERE id = ?',
+        (existing['product_id'],)
+    ).fetchone()
+    stock_before = int(product_before['stock'] or 0) if product_before else 0
+    lot_total_before = get_product_lot_total(conn, existing['product_id']) if existing['product_id'] else 0
+
     conn.execute('''
         UPDATE product_lots
         SET lot_number = ?,
@@ -7967,12 +8123,13 @@ def update_product_lot():
         WHERE id = ?
     ''', (lot_number, qty, received_date, received_date, expiry_date, expiry_date, lot_id))
 
-    if qty_diff != 0 and existing['product_id']:
-        conn.execute('''
-            UPDATE products
-            SET stock = CASE WHEN stock + ? >= 0 THEN stock + ? ELSE 0 END
-            WHERE id = ?
-        ''', (qty_diff, qty_diff, existing['product_id']))
+    if existing['product_id']:
+        sync_product_stock_from_lots(
+            conn,
+            existing['product_id'],
+            previous_stock=stock_before,
+            previous_lot_total=lot_total_before
+        )
 
     conn.commit()
     conn.close()
@@ -7994,14 +8151,12 @@ def delete_product_lot(lot_id):
     try:
         lot_qty = int(existing['qty'] or 0)
         product_id = existing['product_id']
-        if lot_qty > 0 and product_id:
-            # ลด stock แต่ไม่ให้ค่าติดลบ
-            conn.execute('''
-                UPDATE products
-                SET stock = CASE WHEN stock >= ? THEN stock - ? ELSE 0 END
-                WHERE id = ?
-            ''', (lot_qty, lot_qty, product_id))
-
+        product_before = conn.execute(
+            'SELECT COALESCE(stock, 0) AS stock FROM products WHERE id = ?',
+            (product_id,)
+        ).fetchone() if product_id else None
+        stock_before = int(product_before['stock'] or 0) if product_before else 0
+        lot_total_before = get_product_lot_total(conn, product_id) if product_id else 0
         # บันทึก Transaction Log สำหรับการลบ/ตัดสต็อกโดยแอดมิน
         try:
             admin_name = session.get('admin_name', 'Unknown')
@@ -8020,12 +8175,28 @@ def delete_product_lot(lot_id):
             # Lot ถูกอ้างอิงใน transaction_logs แล้ว จึงไม่สามารถลบแถวได้โดยตรง
             # ทำเครื่องหมายเป็นถูกลบออกจากคลัง (qty=0) เพื่อเก็บประวัติไว้
             conn.execute('UPDATE product_lots SET qty = 0, lot_number = NULL, received_date = NULL, expiry_date = NULL WHERE id = ?', (lot_id,))
+            if product_id:
+                sync_product_stock_from_lots(
+                    conn,
+                    product_id,
+                    previous_stock=stock_before,
+                    previous_lot_total=lot_total_before
+                )
+                restore_zero_stock_from_remaining_lots(conn, product_id, deleted_lot_qty=lot_qty)
             conn.commit()
             conn.close()
             return jsonify({'success': True, 'message': 'Lot นี้ถูกทำเครื่องหมายว่าไม่อยู่ในคลังแล้ว และยอดรวมถูกอัปเดตแล้ว'}), 200
 
         # ไม่มีการอ้างอิง สามารถลบแถวได้เลย
         conn.execute('DELETE FROM product_lots WHERE id = ?', (lot_id,))
+        if product_id:
+            sync_product_stock_from_lots(
+                conn,
+                product_id,
+                previous_stock=stock_before,
+                previous_lot_total=lot_total_before
+            )
+            restore_zero_stock_from_remaining_lots(conn, product_id, deleted_lot_qty=lot_qty)
         conn.commit()
         conn.close()
         return jsonify({'success': True, 'message': 'ลบ Lot เรียบร้อยและยอดรวมถูกอัปเดตแล้ว'})
@@ -8106,6 +8277,10 @@ def edit_product():
             SET name=?, unit=?, base_unit=?, package_unit=?, conversion_rate=?, base_unit_to_tablet_rate=?, package_tablet_total=?, safety_stock=?, stock=?, expiry_date=?
             WHERE code=?
         ''', (name, unit, base_unit, package_unit, conversion_rate, base_unit_to_tablet_rate, package_tablet_total, safety_stock, stock, expiry_date, code))
+
+        product_for_sync = conn.execute('SELECT * FROM products WHERE code=?', (code,)).fetchone()
+        if product_for_sync and not is_split_tablet_medicine(product_for_sync):
+            sync_product_stock_from_lots(conn, product_for_sync['id'])
 
         # อัปเดต open_packages ถ้าเป็นสินค้าแยกหน่วยย่อย
         if package_unit and base_unit and conversion_rate > 1:
@@ -8882,12 +9057,14 @@ def add_product_ajax():
     conn = get_db_connection()
     try:
         product = conn.execute('''
-            SELECT id, code, name, category, unit, base_unit, package_unit, conversion_rate
+            SELECT id, code, name, stock, category, unit, base_unit, package_unit, conversion_rate
             FROM products WHERE id = ?
         ''', (product_id,)).fetchone()
         if not product:
             return jsonify({'success': False, 'message': 'ไม่พบรายการสินค้า'}), 404
 
+        stock_before = int(product['stock'] or 0) if 'stock' in product.keys() else 0
+        lot_total_before = get_product_lot_total(conn, product_id)
         is_split_med = is_split_tablet_medicine(product)
         if not is_split_med:
             qty_unit = 'package'
@@ -8927,8 +9104,15 @@ def add_product_ajax():
                 ''', (product_id, lot_number, lot_qty_to_add, receive_date, expire_date))
 
         # 2. อัปเดตยอดรวม Stock ใน Table products
-        if stock_qty_to_add > 0:
+        if is_split_med and stock_qty_to_add > 0:
             conn.execute('UPDATE products SET stock = stock + ? WHERE id = ?', (stock_qty_to_add, product_id))
+        elif not is_split_med and lot_qty_to_add > 0:
+            sync_product_stock_from_lots(
+                conn,
+                product_id,
+                previous_stock=stock_before,
+                previous_lot_total=lot_total_before
+            )
 
         if open_base_to_add > 0:
             existing_open = conn.execute('''
