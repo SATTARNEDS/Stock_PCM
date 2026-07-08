@@ -123,6 +123,7 @@ SENSITIVE_POST_ENDPOINTS = {
     'add_to_cart', 'remove_from_cart', 'update_cart_qty', 'confirm_withdrawal',
     'approve_request', 'reject_request', 'cancel_scheduled_withdrawal', 'reschedule_withdrawal', 'confirm_scheduled_pickup', 'import_excel', 'clear_system_data',
     'toggle_product_status', 'add_product', 'edit_product', 'add_product_ajax',
+    'create_fifo_lot_from_stock', 'update_product_lot', 'delete_product_lot',
     'write_off_ajax', 'unlock_user_ajax', 'unlock_user', 'add_user_ajax', 'delete_user',
     'update_user_ajax', 'save_alert_time', 'daily_alert', 'reset_lock',
     'email_settings', 'email_settings_test',
@@ -684,6 +685,7 @@ def enrich_products_for_display(conn, products_list):
 
     product_ids = [item['id'] for item in products_list]
     placeholders = ','.join(['?'] * len(product_ids))
+    lot_total_map = get_product_lot_totals(conn, product_ids)
     cart_rows = conn.execute(f'''
         SELECT product_id, COALESCE(SUM(qty), 0) AS reserved_qty
         FROM carts
@@ -715,6 +717,9 @@ def enrich_products_for_display(conn, products_list):
         open_base_qty = open_qty_map.get(item['id'], 0)
         open_extra_tablet_qty = open_extra_tablet_map.get(item['id'], 0)
         package_stock = int(item.get('stock') or 0)
+        lot_total_qty = lot_total_map.get(item['id'], 0)
+        has_lot_stock = (not split_medicine) and lot_total_qty > 0
+        display_package_stock = lot_total_qty if has_lot_stock else package_stock
         total_base_qty = (package_stock * conversion_rate) + open_base_qty
         base_to_tablet_rate = int(item.get('base_unit_to_tablet_rate') or 0)
         package_remainder_tablets = 0
@@ -734,7 +739,7 @@ def enrich_products_for_display(conn, products_list):
         if split_medicine:
             available_base = max(0, total_base_qty - reserved_stock)
         else:
-            available_base = max(0, package_stock - reserved_stock)
+            available_base = max(0, display_package_stock - reserved_stock)
 
         item['is_split_tablet_medicine'] = split_medicine
         item['split_unit_hint_label'] = split_hint_text
@@ -752,6 +757,9 @@ def enrich_products_for_display(conn, products_list):
         item['open_base_qty'] = open_base_qty
         item['open_extra_tablet_qty'] = open_extra_tablet_qty
         item['package_remainder_tablets'] = package_remainder_tablets
+        item['lot_total_qty'] = lot_total_qty
+        item['stock_source'] = 'lot' if has_lot_stock else 'product'
+        item['display_stock'] = display_package_stock if not split_medicine else package_stock
 
         extra_bundles_from_open_remainder = 0
         true_tablet_remainder = 0
@@ -767,7 +775,7 @@ def enrich_products_for_display(conn, products_list):
                 true_tablet_remainder = open_extra_tablet_qty % base_to_tablet_rate
                 effective_base_for_withdraw = available_base + extra_bundles_from_open_remainder
 
-        item['stock_base_total'] = effective_base_for_withdraw if split_medicine else total_base_qty
+        item['stock_base_total'] = effective_base_for_withdraw if split_medicine else display_package_stock
         item['effective_stock'] = effective_base_for_withdraw if split_medicine else available_base
 
         if split_medicine:
@@ -781,7 +789,7 @@ def enrich_products_for_display(conn, products_list):
             item['backend_stock_text'] = backend_stock_text
         else:
             item['frontend_stock_text'] = f"{available_base} {item.get('unit', '')}".strip()
-            item['backend_stock_text'] = f"{package_stock} {item.get('unit', '')}".strip()
+            item['backend_stock_text'] = f"{display_package_stock} {item.get('unit', '')}".strip()
 
         item['max_withdraw_qty'] = effective_base_for_withdraw if split_medicine else available_base
         if split_medicine and base_to_tablet_rate > 0:
@@ -1174,7 +1182,42 @@ def get_product_lot_total(conn, product_id):
     return int(row['lot_total'] or 0) if row else 0
 
 
-def sync_product_stock_from_lots(conn, product_id, *, previous_stock=None, previous_lot_total=None, force=False):
+def get_product_lot_totals(conn, product_ids):
+    if not product_ids:
+        return {}
+    placeholders = ','.join(['?'] * len(product_ids))
+    rows = conn.execute(f'''
+        SELECT product_id,
+               COALESCE(SUM(CASE WHEN COALESCE(qty, 0) > 0 THEN qty ELSE 0 END), 0) AS lot_total
+        FROM product_lots
+        WHERE product_id IN ({placeholders})
+        GROUP BY product_id
+    ''', product_ids).fetchall()
+    return {row['product_id']: int(row['lot_total'] or 0) for row in rows}
+
+
+def create_fifo_seed_lot_for_missing_stock(conn, product, *, reason='AUTO'):
+    """เติม Lot ตั้งต้นจาก stock ส่วนที่ยังไม่มี Lot เพื่อให้ FIFO ตัดจาก product_lots ได้ครบ"""
+    if not product or is_split_tablet_medicine(product):
+        return {'created': False, 'qty': 0, 'lot_id': None}
+
+    product_id = product['id']
+    product_stock = int(product['stock'] or 0)
+    lot_total = get_product_lot_total(conn, product_id)
+    missing_qty = max(0, product_stock - lot_total)
+    if missing_qty <= 0:
+        return {'created': False, 'qty': 0, 'lot_id': None}
+
+    lot_number = f"FIFO-{reason}-{get_thailand_time().strftime('%Y%m%d')}"
+    received_date = get_thailand_time().strftime('%d/%m/%Y')
+    cursor = conn.execute('''
+        INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (product_id, lot_number, missing_qty, received_date, product['expiry_date'] if 'expiry_date' in product.keys() else ''))
+    return {'created': True, 'qty': missing_qty, 'lot_id': cursor.lastrowid}
+
+
+def sync_product_stock_from_lots(conn, product_id, *, previous_stock=None, previous_lot_total=None, force=False, zero_when_no_lots=False):
     """ให้ product_lots เป็นแหล่งความจริงหลังการแก้ Lot โดยตรง"""
     product = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
     if not product:
@@ -1189,6 +1232,12 @@ def sync_product_stock_from_lots(conn, product_id, *, previous_stock=None, previ
         (product_id,)
     ).fetchone()
     if not lot_exists:
+        if force and zero_when_no_lots:
+            conn.execute(
+                'UPDATE products SET stock = 0 WHERE id = ?',
+                (product_id,)
+            )
+            return 0
         return int(product['stock'] or 0)
 
     lot_total = get_product_lot_total(conn, product_id)
@@ -1224,6 +1273,72 @@ def restore_zero_stock_from_remaining_lots(conn, product_id, *, deleted_lot_qty=
         )
         return lot_total
     return current_stock
+
+
+def adjust_fifo_lots_to_stock(conn, product_id, target_stock, *, fallback_expiry_date=''):
+    """ปรับยอด Lot เก่าสุดตาม FIFO ให้ยอดรวม Lot ตรงกับ stock ที่แก้จากหน้าหลัก"""
+    target_stock = max(0, int(target_stock or 0))
+    lot_total = get_product_lot_total(conn, product_id)
+    delta = target_stock - lot_total
+    if delta == 0:
+        return {'delta': 0, 'created_lot': False, 'adjusted_lot_ids': []}
+
+    fifo_lot_order = '''
+        ORDER BY
+            CASE
+                WHEN received_date IS NULL OR trim(received_date) = '' THEN '9999-12-31'
+                WHEN received_date LIKE '%/%/%' THEN substr(received_date, 7, 4) || '-' || substr(received_date, 4, 2) || '-' || substr(received_date, 1, 2)
+                ELSE received_date
+            END ASC,
+            id ASC
+    '''
+    adjusted_lot_ids = []
+
+    if delta > 0:
+        oldest_lot = conn.execute(f'''
+            SELECT id
+            FROM product_lots
+            WHERE product_id = ?
+            {fifo_lot_order}
+            LIMIT 1
+        ''', (product_id,)).fetchone()
+        if oldest_lot:
+            conn.execute(
+                'UPDATE product_lots SET qty = COALESCE(qty, 0) + ? WHERE id = ?',
+                (delta, oldest_lot['id'])
+            )
+            adjusted_lot_ids.append(oldest_lot['id'])
+            return {'delta': delta, 'created_lot': False, 'adjusted_lot_ids': adjusted_lot_ids}
+
+        lot_number = f"FIFO-EDIT-{get_thailand_time().strftime('%Y%m%d')}"
+        received_date = get_thailand_time().strftime('%d/%m/%Y')
+        cursor = conn.execute('''
+            INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (product_id, lot_number, delta, received_date, fallback_expiry_date or ''))
+        adjusted_lot_ids.append(cursor.lastrowid)
+        return {'delta': delta, 'created_lot': True, 'adjusted_lot_ids': adjusted_lot_ids}
+
+    remaining_to_reduce = abs(delta)
+    lots = conn.execute(f'''
+        SELECT id, COALESCE(qty, 0) AS qty
+        FROM product_lots
+        WHERE product_id = ? AND COALESCE(qty, 0) > 0
+        {fifo_lot_order}
+    ''', (product_id,)).fetchall()
+
+    for lot in lots:
+        if remaining_to_reduce <= 0:
+            break
+        take = min(int(lot['qty'] or 0), remaining_to_reduce)
+        conn.execute(
+            'UPDATE product_lots SET qty = MAX(0, COALESCE(qty, 0) - ?) WHERE id = ?',
+            (take, lot['id'])
+        )
+        remaining_to_reduce -= take
+        adjusted_lot_ids.append(lot['id'])
+
+    return {'delta': delta, 'created_lot': False, 'adjusted_lot_ids': adjusted_lot_ids}
 
 
 def queue_device_notification(conn, *, target_ip, event_type, title, message, emp_id=None, log_id=None, batch_token=None, target_device_token=None):
@@ -6420,11 +6535,23 @@ def approve_request(log_id):
         # ยาแบบ split: ตัดสต็อกจริงตอน approve (ตาม flow จอง -> อนุมัติค่อยตัดจริง)
         # รายการทั่วไป: ตัดจาก lot + products.stock ตอน approve
         if not is_split_med:
+            create_fifo_seed_lot_for_missing_stock(conn, product_info_for_approve, reason='APPROVE')
+            sync_product_stock_from_lots(conn, product_id, force=True, zero_when_no_lots=True)
+            product_info_for_approve = conn.execute(
+                'SELECT * FROM products WHERE id = ?', (product_id,)
+            ).fetchone()
+            product_stock_before = int(product_info_for_approve['stock'] or 0) if product_info_for_approve else product_stock_before
             lot_withdraw_qty = qty_to_withdraw
             lots = conn.execute('''
                 SELECT * FROM product_lots 
                 WHERE product_id = ? AND qty > 0 
-                ORDER BY received_date ASC, id ASC
+                ORDER BY
+                    CASE
+                        WHEN received_date IS NULL OR trim(received_date) = '' THEN '9999-12-31'
+                        WHEN received_date LIKE '%/%/%' THEN substr(received_date, 7, 4) || '-' || substr(received_date, 4, 2) || '-' || substr(received_date, 1, 2)
+                        ELSE received_date
+                    END ASC,
+                    id ASC
             ''', (product_id,)).fetchall()
 
             total_lot_qty = sum(int(l['qty'] or 0) for l in lots)
@@ -8037,9 +8164,12 @@ def get_product(code):
                 'total_tablet_qty': int(total_tablet_qty or 0),
                 'lot_total_qty': int(lot_total_qty or 0)
             }
-    conn.close()
     if product:
         payload = dict(product)
+        lot_total_qty = get_product_lot_total(conn, product['id'])
+        conn.close()
+        payload['raw_stock'] = int(payload.get('stock') or 0)
+        payload['lot_total_qty'] = int(lot_total_qty or 0)
         conversion_rate = int(payload.get('conversion_rate') or 1)
         base_unit = str(payload.get('base_unit') or '').strip().lower()
         base_to_tablet_rate = int(payload.get('base_unit_to_tablet_rate') or 0)
@@ -8053,8 +8183,11 @@ def get_product(code):
         else:
             payload['split_mode'] = 'single'
             payload['package_tablet_total'] = int(payload.get('package_tablet_total') or 0)
+        if not is_split_tablet_medicine(product) and lot_total_qty > 0:
+            payload['stock'] = int(lot_total_qty or 0)
         payload['split_summary'] = split_summary
         return jsonify(payload)
+    conn.close()
     return jsonify({'error': 'Product not found'}), 404
 
 
@@ -8064,20 +8197,103 @@ def get_product_lots(product_id):
         return jsonify({'error': 'Unauthorized'}), 401
 
     conn = get_db_connection()
+    product = conn.execute(
+        'SELECT * FROM products WHERE id = ?',
+        (product_id,)
+    ).fetchone()
+    if not product:
+        conn.close()
+        return jsonify({'error': 'Product not found'}), 404
+
     lots = conn.execute('''
         SELECT id, COALESCE(lot_number, '') AS lot_number, COALESCE(qty, 0) AS qty,
                COALESCE(received_date, '') AS received_date, COALESCE(expiry_date, '') AS expiry_date
         FROM product_lots
         WHERE product_id = ?
           AND COALESCE(qty, 0) > 0
-        ORDER BY received_date ASC, id ASC
+        ORDER BY
+            CASE
+                WHEN received_date IS NULL OR trim(received_date) = '' THEN '9999-12-31'
+                WHEN received_date LIKE '%/%/%' THEN substr(received_date, 7, 4) || '-' || substr(received_date, 4, 2) || '-' || substr(received_date, 1, 2)
+                ELSE received_date
+            END ASC,
+            id ASC
     ''', (product_id,)).fetchall()
+    lot_total_qty = get_product_lot_total(conn, product_id)
+    product_stock = int(product['stock'] or 0)
+    supports_fifo_seed = not is_split_tablet_medicine(product)
+    missing_fifo_qty = max(0, product_stock - int(lot_total_qty or 0)) if supports_fifo_seed else 0
     conn.close()
 
     return jsonify({
         'product_id': product_id,
-        'lots': [dict(lot) for lot in lots]
+        'lots': [dict(lot) for lot in lots],
+        'product_stock': product_stock,
+        'lot_total_qty': int(lot_total_qty or 0),
+        'missing_fifo_qty': missing_fifo_qty,
+        'supports_fifo_seed': supports_fifo_seed
     })
+
+
+@app.route('/admin/create_fifo_lot_from_stock', methods=['POST'])
+def create_fifo_lot_from_stock():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    product_id = request.form.get('product_id', type=int)
+    if not product_id:
+        return jsonify({'success': False, 'message': 'ไม่พบสินค้าที่ต้องสร้าง Lot'}), 400
+
+    lot_number = normalize_lot_number(request.form.get('lot_number', ''))
+    if not lot_number:
+        lot_number = f"FIFO-START-{get_thailand_time().strftime('%Y%m%d')}"
+    received_date = standardize_date(request.form.get('received_date', '')) or get_thailand_time().strftime('%d/%m/%Y')
+    expiry_date = standardize_date(request.form.get('expiry_date', ''))
+
+    conn = get_db_connection()
+    try:
+        start_write_transaction(conn)
+        product = conn.execute('SELECT * FROM products WHERE id = ?', (product_id,)).fetchone()
+        if not product:
+            conn.rollback()
+            return jsonify({'success': False, 'message': 'ไม่พบสินค้าในระบบ'}), 404
+
+        if is_split_tablet_medicine(product):
+            conn.rollback()
+            return jsonify({'success': False, 'message': 'รายการยาแบบแตกหน่วยต้องจัดการ Lot ผ่านการรับเข้า/ตัดจำหน่ายตามหน่วยยา'}), 400
+
+        product_stock = int(product['stock'] or 0)
+        lot_total_qty = get_product_lot_total(conn, product_id)
+        missing_fifo_qty = max(0, product_stock - int(lot_total_qty or 0))
+        if missing_fifo_qty <= 0:
+            conn.rollback()
+            return jsonify({'success': False, 'message': 'ยอดคงเหลือมี Lot รองรับครบแล้ว ไม่ต้องสร้าง Lot ตั้งต้น'}), 400
+
+        conn.execute('''
+            INSERT INTO product_lots (product_id, lot_number, qty, received_date, expiry_date)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (product_id, lot_number, missing_fifo_qty, received_date, expiry_date))
+
+        sync_product_stock_from_lots(conn, product_id, force=True, zero_when_no_lots=True)
+
+        admin_name = session.get('admin_name', 'Unknown')
+        conn.execute('''
+            INSERT INTO transaction_logs (emp_id, product_id, action, qty, status)
+            VALUES (?, ?, ?, ?, 'Completed')
+        ''', (f"ADMIN:{admin_name}", product_id, f"สร้าง Lot ตั้งต้นสำหรับ FIFO: {lot_number}", missing_fifo_qty))
+
+        conn.commit()
+        return jsonify({
+            'success': True,
+            'message': f'สร้าง Lot ตั้งต้นสำหรับ FIFO จำนวน {missing_fifo_qty} เรียบร้อยแล้ว',
+            'created_qty': missing_fifo_qty
+        })
+    except Exception as e:
+        conn.rollback()
+        print(f'Create FIFO lot from stock error: {e}')
+        return jsonify({'success': False, 'message': 'ไม่สามารถสร้าง Lot ตั้งต้นสำหรับ FIFO ได้'}), 500
+    finally:
+        conn.close()
 
 
 @app.route('/admin/update_product_lot', methods=['POST'])
@@ -8128,7 +8344,8 @@ def update_product_lot():
             conn,
             existing['product_id'],
             previous_stock=stock_before,
-            previous_lot_total=lot_total_before
+            previous_lot_total=lot_total_before,
+            force=True
         )
 
     conn.commit()
@@ -8180,7 +8397,9 @@ def delete_product_lot(lot_id):
                     conn,
                     product_id,
                     previous_stock=stock_before,
-                    previous_lot_total=lot_total_before
+                    previous_lot_total=lot_total_before,
+                    force=True,
+                    zero_when_no_lots=True
                 )
                 restore_zero_stock_from_remaining_lots(conn, product_id, deleted_lot_qty=lot_qty)
             conn.commit()
@@ -8194,7 +8413,9 @@ def delete_product_lot(lot_id):
                 conn,
                 product_id,
                 previous_stock=stock_before,
-                previous_lot_total=lot_total_before
+                previous_lot_total=lot_total_before,
+                force=True,
+                zero_when_no_lots=True
             )
             restore_zero_stock_from_remaining_lots(conn, product_id, deleted_lot_qty=lot_qty)
         conn.commit()
@@ -8272,6 +8493,12 @@ def edit_product():
 
     conn = get_db_connection()
     try:
+        start_write_transaction(conn)
+        product_before = conn.execute('SELECT * FROM products WHERE code=?', (code,)).fetchone()
+        if not product_before:
+            conn.rollback()
+            return jsonify({'success': False, 'message': 'ไม่พบข้อมูลของที่จะแก้ไข'}), 404
+
         conn.execute('''
             UPDATE products 
             SET name=?, unit=?, base_unit=?, package_unit=?, conversion_rate=?, base_unit_to_tablet_rate=?, package_tablet_total=?, safety_stock=?, stock=?, expiry_date=?
@@ -8280,7 +8507,22 @@ def edit_product():
 
         product_for_sync = conn.execute('SELECT * FROM products WHERE code=?', (code,)).fetchone()
         if product_for_sync and not is_split_tablet_medicine(product_for_sync):
-            sync_product_stock_from_lots(conn, product_for_sync['id'])
+            lot_adjustment = adjust_fifo_lots_to_stock(
+                conn,
+                product_for_sync['id'],
+                stock,
+                fallback_expiry_date=expiry_date
+            )
+            sync_product_stock_from_lots(conn, product_for_sync['id'], force=True, zero_when_no_lots=True)
+            if lot_adjustment['delta'] != 0:
+                admin_name = session.get('admin_name', 'Unknown')
+                action_text = 'ปรับ Lot เก่าสุดตาม FIFO จากปุ่มแก้ไขสินค้า'
+                if lot_adjustment['created_lot']:
+                    action_text = 'สร้าง/ปรับ Lot ตาม FIFO จากปุ่มแก้ไขสินค้า'
+                conn.execute('''
+                    INSERT INTO transaction_logs (emp_id, product_id, action, qty, status)
+                    VALUES (?, ?, ?, ?, 'Completed')
+                ''', (f"ADMIN:{admin_name}", product_for_sync['id'], action_text, abs(int(lot_adjustment['delta']))))
 
         # อัปเดต open_packages ถ้าเป็นสินค้าแยกหน่วยย่อย
         if package_unit and base_unit and conversion_rate > 1:
@@ -9016,7 +9258,13 @@ def withdraw_fifo_logic(product_id, qty_to_withdraw, emp_id):
     lots = conn.execute('''
         SELECT * FROM product_lots 
         WHERE product_id = ? AND qty > 0 
-        ORDER BY received_date ASC, id ASC
+        ORDER BY
+            CASE
+                WHEN received_date IS NULL OR trim(received_date) = '' THEN '9999-12-31'
+                WHEN received_date LIKE '%/%/%' THEN substr(received_date, 7, 4) || '-' || substr(received_date, 4, 2) || '-' || substr(received_date, 1, 2)
+                ELSE received_date
+            END ASC,
+            id ASC
     ''', (product_id,)).fetchall()
 
     remaining = qty_to_withdraw
@@ -9111,7 +9359,8 @@ def add_product_ajax():
                 conn,
                 product_id,
                 previous_stock=stock_before,
-                previous_lot_total=lot_total_before
+                previous_lot_total=lot_total_before,
+                force=True
             )
 
         if open_base_to_add > 0:
@@ -9267,11 +9516,6 @@ def write_off_ajax():
             FROM product_lots
             WHERE product_id = ? AND qty > 0
             ORDER BY
-                CASE
-                    WHEN expiry_date IS NULL OR trim(expiry_date) = '' THEN '9999-12-31'
-                    WHEN expiry_date LIKE '%/%/%' THEN substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2)
-                    ELSE expiry_date
-                END ASC,
                 CASE
                     WHEN received_date IS NULL OR trim(received_date) = '' THEN '9999-12-31'
                     WHEN received_date LIKE '%/%/%' THEN substr(received_date, 7, 4) || '-' || substr(received_date, 4, 2) || '-' || substr(received_date, 1, 2)

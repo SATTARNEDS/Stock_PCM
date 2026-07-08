@@ -1,4 +1,6 @@
 {% for item in low_stock %}
+{% set display_stock = item['display_stock'] if 'display_stock' in item.keys() else item['stock'] %}
+{% set effective_stock = item['effective_stock'] if 'effective_stock' in item.keys() else display_stock %}
 <tr class="align-middle" data-category="{{ item['category'] or '' }}" data-name="{{ item['name']|lower }}">
     <td class="ps-4 code-column"><code>{{ item['code'] }}</code></td>
     
@@ -14,13 +16,16 @@
             <span class="fw-medium text-danger">{{ item['backend_stock_text'] }}</span>
             <br><small class="text-muted">หน้าเบิก: {{ item['frontend_stock_text'] }}</small>
         {% else %}
-            <span class="fw-medium text-danger">{{ item['stock'] }}</span> 
+            <span class="fw-medium text-danger">{{ display_stock }}</span>
             <small class="text-muted">/ {{ item['unit'] }}</small>
+            {% if item['stock_source'] == 'lot' and display_stock != item['stock'] %}
+            <br><small class="text-muted">รวมจาก Lot / stock หลัก {{ item['stock'] }}</small>
+            {% endif %}
         {% endif %}
     </td>
     
     <td class="text-center">
-        {% if item['stock'] <= 0 %}
+        {% if effective_stock <= 0 %}
             <span class="badge bg-dark">ของหมด</span>
         {% else %}
             <span class="badge bg-danger">ต้องสั่งซื้อ</span>

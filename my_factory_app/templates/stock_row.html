@@ -1,5 +1,7 @@
 {% for item in items %}
-<tr data-product-id="{{ item['id'] }}" class="align-middle {% if item['stock'] <= 0 %}table-danger{% elif item['is_active'] == 0 %}table-secondary opacity-75 text-muted{% endif %}">
+{% set display_stock = item['display_stock'] if 'display_stock' in item.keys() else item['stock'] %}
+{% set effective_stock = item['effective_stock'] if 'effective_stock' in item.keys() else display_stock %}
+<tr data-product-id="{{ item['id'] }}" class="align-middle {% if effective_stock <= 0 %}table-danger{% elif item['is_active'] == 0 %}table-secondary opacity-75 text-muted{% endif %}">
     <td class="ps-4 code-column"><code>{{ item['code'] }}</code></td>
     <td class="fw-medium {% if item['is_active'] == 0 %}text-muted{% endif %}">
         {{ item['name'] }}
@@ -9,17 +11,20 @@
         {% if item['is_active'] == 0 %}
         <span class="badge bg-danger ms-1" style="font-size: 0.6rem;">ปิดใช้งาน</span>
         {% endif %}
-        {% if item['stock'] <= 0 %}
+        {% if effective_stock <= 0 %}
         <span class="badge bg-danger ms-1" style="font-size: 0.6rem;">หมดสต็อก</span>
         {% endif %}
     </td>
     <td><span class="badge bg-light text-dark border">{{ item['category'] }}</span></td>
-    <td class="text-center fw-medium {{ 'text-danger' if item['stock'] <= item['safety_stock'] else 'text-success' }}">
+    <td class="text-center fw-medium {{ 'text-danger' if effective_stock <= item['safety_stock'] else 'text-success' }}">
         {% if item['is_split_tablet_medicine'] %}
         <div>{{ item['backend_stock_text'] }}</div>
         <small class="text-muted">แสดงหน้าเบิก: {{ item['frontend_stock_text'] }}</small>
         {% else %}
-        {{ item['stock'] }}
+        <div>{{ display_stock }}</div>
+        {% if item['stock_source'] == 'lot' and display_stock != item['stock'] %}
+        <small class="text-muted">รวมจาก Lot / stock หลัก {{ item['stock'] }}</small>
+        {% endif %}
         {% endif %}
     </td>
     <td class="text-center text-muted">{{ item['safety_stock'] }}</td>

@@ -1854,8 +1854,10 @@
                         </thead>
                         <tbody id="stockTableBody">
                             {% for item in items %}
+                            {% set display_stock = item['display_stock'] if 'display_stock' in item.keys() else item['stock'] %}
+                            {% set effective_stock = item['effective_stock'] if 'effective_stock' in item.keys() else display_stock %}
                             <tr
-                                class="align-middle {% if item['stock'] <= 0 %}table-danger{% elif item['is_active'] == 0 %}table-secondary opacity-75{% endif %}">
+                                class="align-middle {% if effective_stock <= 0 %}table-danger{% elif item['is_active'] == 0 %}table-secondary opacity-75{% endif %}">
                                 <td class="ps-4"><code>{{ item['code'] }}</code></td>
                                 <td class="fw-medium {% if item['is_active'] == 0 %}text-muted{% endif %}">
                                     {{ item['name'] }}
@@ -1865,18 +1867,21 @@
                                     {% if item['is_active'] == 0 %}
                                     <span class="badge bg-danger ms-1 tiny-status-badge">ปิดใช้งาน</span>
                                     {% endif %}
-                                    {% if item['stock'] <= 0 %}
+                                    {% if effective_stock <= 0 %}
                                     <span class="badge bg-danger ms-1 tiny-status-badge">หมดสต็อก</span>
                                     {% endif %}
                                 </td>
                                 <td><span class="badge bg-light text-dark border">{{ item['category'] }}</span></td>
                                 <td
-                                    class="text-center fw-medium {{ 'text-danger' if item['stock'] <= item['safety_stock'] else 'text-success' }}">
+                                    class="text-center fw-medium {{ 'text-danger' if effective_stock <= item['safety_stock'] else 'text-success' }}">
                                     {% if item['is_split_tablet_medicine'] %}
                                     <div>{{ item['backend_stock_text'] }}</div>
                                     <small class="text-muted">แสดงหน้าเบิก: {{ item['frontend_stock_text'] }}</small>
                                     {% else %}
-                                    {{ item['stock'] }}
+                                    <div>{{ display_stock }}</div>
+                                    {% if item['stock_source'] == 'lot' and display_stock != item['stock'] %}
+                                    <small class="text-muted">รวมจาก Lot / stock หลัก {{ item['stock'] }}</small>
+                                    {% endif %}
                                     {% endif %}
                                 </td>
                                 <td class="text-center text-muted">{{ item['safety_stock'] }}</td>
@@ -4661,14 +4666,15 @@
                 const lotRows = (data.lots || []).map(lot => {
                     return `
                         <tr onclick="selectLot(${lot.id})" class="lot-row" data-lot-id="${lot.id}">
-                            <td>${lot.lot_number || '-'}</td>
+                            <td>${escapeHtml(lot.lot_number || '-')}</td>
                             <td class="text-center">${lot.qty}</td>
-                            <td>${lot.received_date || '-'}</td>
-                            <td>${lot.expiry_date || '-'}</td>
+                            <td>${escapeHtml(lot.received_date || '-')}</td>
+                            <td>${escapeHtml(lot.expiry_date || '-')}</td>
                             <td class="text-center"><button type="button" class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); selectLot(${lot.id});">เลือก</button></td>
                         </tr>`;
                 }).join('');
-                const rows = [openStockRow, lotRows].filter(Boolean).join('');
+                const fifoSeedRow = getEditLotFifoSeedRow(data);
+                const rows = [openStockRow, fifoSeedRow, lotRows].filter(Boolean).join('');
                 body.innerHTML = rows.length ? rows : `<tr><td colspan="5" class="text-center text-muted py-4">ไม่มี Lot สำหรับสินค้านี้</td></tr>`;
             }).catch(() => {
                 body.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">ไม่สามารถโหลดข้อมูล Lot ได้</td></tr>`;
@@ -4689,6 +4695,25 @@
                     <td>สต็อกเปิด</td>
                     <td class="text-center">-</td>
                     <td colspan="3">${parts.join(' + ')}</td>
+                </tr>`;
+        }
+
+        function getEditLotFifoSeedRow(data) {
+            const missingQty = parseInt((data || {}).missing_fifo_qty || 0, 10) || 0;
+            if (!data || !data.supports_fifo_seed || missingQty <= 0) return '';
+            const productStock = parseInt(data.product_stock || 0, 10) || 0;
+            const lotTotal = parseInt(data.lot_total_qty || 0, 10) || 0;
+            return `
+                <tr class="table-warning">
+                    <td colspan="4">
+                        <div class="fw-medium">ยอดคงเหลือ ${productStock} แต่ยอดใน Lot มี ${lotTotal}</div>
+                        <div class="small text-muted">ต้องสร้าง Lot ตั้งต้น ${missingQty} เพื่อให้ FIFO มีวันที่รับเข้า/หมดอายุสำหรับเรียงตัดสต็อก</div>
+                    </td>
+                    <td class="text-center">
+                        <button type="button" class="btn btn-sm btn-warning" onclick="event.stopPropagation(); createFifoLotFromStock(${data.product_id});">
+                            สร้าง Lot FIFO
+                        </button>
+                    </td>
                 </tr>`;
         }
 
@@ -4782,6 +4807,43 @@
                         document.getElementById('deleteLotButton').disabled = true;
                     }
                 });
+        }
+
+        function createFifoLotFromStock(productId) {
+            const ctx = window.editLotContext || {};
+            const formData = new FormData();
+            const lotNumberInput = document.getElementById('editLot_number');
+            const receivedInput = document.getElementById('editLot_received_date');
+            const expiryInput = document.getElementById('editLot_expiry_date');
+            formData.append('product_id', productId);
+            formData.append('lot_number', lotNumberInput?.value || '');
+            formData.append('received_date', receivedInput?.value || '');
+            formData.append('expiry_date', expiryInput?.value || '');
+            formData.append('csrf_token', adminCsrfToken);
+
+            Swal.fire({
+                title: 'สร้าง Lot ตั้งต้นสำหรับ FIFO?',
+                text: 'ระบบจะนำยอดคงเหลือที่ยังไม่มี Lot มาสร้างเป็น Lot ใหม่ เพื่อให้การตัดสต็อกเรียง FIFO ได้',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'สร้าง Lot',
+                cancelButtonText: 'ยกเลิก'
+            }).then(result => {
+                if (!result.isConfirmed) return;
+                fetch('/admin/create_fifo_lot_from_stock', { method: 'POST', body: formData, headers: { 'X-CSRF-Token': adminCsrfToken } })
+                    .then(checkAuth).then(res => res.json()).then(data => {
+                        if (data.success) {
+                            showToast('success', data.message || 'สร้าง Lot FIFO แล้ว');
+                            if (ctx.id) window.pendingHighlightProductId = ctx.id;
+                            loadProductLots(productId);
+                            if (typeof loadStock === 'function') loadStock();
+                        } else {
+                            showToast('error', data.message || 'ไม่สามารถสร้าง Lot FIFO ได้');
+                        }
+                    }).catch(() => {
+                        showToast('error', 'ไม่สามารถติดต่อเซิร์ฟเวอร์');
+                    });
+            });
         }
 
         function confirmDeleteLot() {
