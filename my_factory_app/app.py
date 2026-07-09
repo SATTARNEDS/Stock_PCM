@@ -6774,7 +6774,10 @@ def reject_request(log_id):
         return redirect(url_for('index'))
 
     role = session.get('admin_role', 'superadmin')
-    rejection_reason = clean_input_text(request.form.get('rejection_reason'), 500)
+    rejection_reason = clean_input_text(
+        request.form.get('rejection_reason') or request.form.get('reject_reason'),
+        500
+    )
     if not rejection_reason:
         flash('❌ กรุณาระบุเหตุผลในการปฏิเสธ', 'danger')
         return redirect(url_for('admin_dashboard', module='stock'))
@@ -6791,6 +6794,7 @@ def reject_request(log_id):
                 WHERE l.id = ? AND (u.location LIKE '%PC1%' OR u.department LIKE '%PC1%')
             ''', (log_id,)).fetchone()
             if not permission_check:
+                conn.rollback()
                 flash('❌ คุณไม่มีสิทธิ์ปฏิเสธรายการนี้', 'danger')
                 return redirect(url_for('admin_dashboard', module='stock'))
         elif role == 'admin_cc':
@@ -6800,11 +6804,13 @@ def reject_request(log_id):
                 WHERE l.id = ? AND (u.location LIKE '%Coil Center%' OR u.location LIKE '%CC%')
             ''', (log_id,)).fetchone()
             if not permission_check:
+                conn.rollback()
                 flash('❌ คุณไม่มีสิทธิ์ปฏิเสธรายการนี้', 'danger')
                 return redirect(url_for('admin_dashboard', module='stock'))
 
         log = conn.execute('SELECT * FROM transaction_logs WHERE id=? AND status = "Pending"', (log_id,)).fetchone()
         if not log:
+            conn.rollback()
             flash('⚠️ รายการนี้ถูกดำเนินการไปแล้วหรือไม่พบข้อมูล', 'warning')
             return redirect(url_for('admin_dashboard', module='stock'))
 
@@ -6849,37 +6855,17 @@ def reject_request(log_id):
             f"🕒 เวลาปฏิเสธ: {rejected_at}"
         )
 
-        conn.commit()
-
-        send_smart_notification(
-            notification_type='rejection',
-            message=rejection_message,
-            location=(user_info['location'] if user_info else ''),
-            role=role,
-            email_body=build_rejection_email_body({
-                'requester_name': user_info['name'] if user_info else log['emp_id'],
-                'department': user_info['department'] if user_info else '-',
-                'location': user_info['location'] if user_info else '-',
-                'product_name': product_info['name'] if product_info else log['product_id'],
-                'qty': rejected_qty,
-                'unit': rejected_unit,
-                'approver': admin_label,
-                'rejected_at': rejected_at,
-                'reason': rejection_reason,
-            }),
-            html_body=build_rejection_email_html({
-                'requester_name': user_info['name'] if user_info else log['emp_id'],
-                'department': user_info['department'] if user_info else '-',
-                'location': user_info['location'] if user_info else '-',
-                'product_name': product_info['name'] if product_info else log['product_id'],
-                'qty': rejected_qty,
-                'unit': rejected_unit,
-                'approver': admin_label,
-                'rejected_at': rejected_at,
-                'reason': rejection_reason,
-            }),
-            admin_id='superadmin'
-        )
+        rejection_email_payload = {
+            'requester_name': user_info['name'] if user_info else log['emp_id'],
+            'department': user_info['department'] if user_info else '-',
+            'location': user_info['location'] if user_info else '-',
+            'product_name': product_info['name'] if product_info else log['product_id'],
+            'qty': rejected_qty,
+            'unit': rejected_unit,
+            'approver': admin_label,
+            'rejected_at': rejected_at,
+            'reason': rejection_reason,
+        }
 
         target_ip = str(log['requester_ip'] or '').strip() if 'requester_ip' in log.keys() else ''
         if not target_ip:
@@ -6897,18 +6883,34 @@ def reject_request(log_id):
 
         batch_token = str(log['batch_token'] or '').strip() if 'batch_token' in log.keys() else ''
         target_device_token = str(log['requester_device_token'] or '').strip() if 'requester_device_token' in log.keys() else ''
-        queue_device_notification(
-            conn,
-            target_ip=target_ip,
-            event_type='rejection',
-            title='รายการเบิกถูกปฏิเสธ',
-            message=f"{product_info['name'] if product_info else log['product_id']} จำนวน {rejected_qty} {rejected_unit} | เหตุผล: {rejection_reason}",
-            emp_id=log['emp_id'],
-            log_id=log_id,
-            batch_token=batch_token or None,
-            target_device_token=target_device_token or None,
-        )
+        try:
+            queue_device_notification(
+                conn,
+                target_ip=target_ip,
+                event_type='rejection',
+                title='รายการเบิกถูกปฏิเสธ',
+                message=f"{product_info['name'] if product_info else log['product_id']} จำนวน {rejected_qty} {rejected_unit} | เหตุผล: {rejection_reason}",
+                emp_id=log['emp_id'],
+                log_id=log_id,
+                batch_token=batch_token or None,
+                target_device_token=target_device_token or None,
+            )
+        except Exception as notify_queue_error:
+            app.logger.error(f'Queue rejection device notification failed: {notify_queue_error}', exc_info=True)
         conn.commit()
+
+        try:
+            send_smart_notification(
+                notification_type='rejection',
+                message=rejection_message,
+                location=(user_info['location'] if user_info else ''),
+                role=role,
+                email_body=build_rejection_email_body(rejection_email_payload),
+                html_body=build_rejection_email_html(rejection_email_payload),
+                admin_id='superadmin'
+            )
+        except Exception as notify_error:
+            app.logger.error(f'Rejection notification failed: {notify_error}', exc_info=True)
 
         flash('❌ ปฏิเสธรายการเรียบร้อยแล้ว', 'warning')
         return redirect(url_for('admin_dashboard', module='stock'))
