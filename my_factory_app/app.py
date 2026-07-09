@@ -561,6 +561,11 @@ def get_thailand_time():
     tz = pytz.timezone(THAILAND_TZ)
     return datetime.now(tz)
 
+
+def current_thailand_timestamp():
+    """ใช้บันทึก transaction log ให้เป็นเวลาไทยเหมือนกันทุกจุด"""
+    return get_thailand_time().strftime('%Y-%m-%d %H:%M:%S')
+
 def is_medicine_product(product_row):
     """True เมื่อของเป็นกลุ่มยา โดยหลีกเลี่ยง false positive เช่น น้ำยาล้างจาน"""
     category = str(product_row['category'] or '').strip().lower() if product_row else ''
@@ -7311,8 +7316,8 @@ def add_product():
             # 4. บันทึกประวัติ
             conn.execute('''
                 INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp)
-                VALUES (?, ?, ?, ?, 'Approved', datetime('now', '+7 hours'))
-            ''', (admin_name, product_id, f'รับเข้า Lot แรก: {lot_number}', stock))
+                VALUES (?, ?, ?, ?, 'Approved', ?)
+            ''', (admin_name, product_id, f'รับเข้า Lot แรก: {lot_number}', stock, current_thailand_timestamp()))
 
         conn.commit()
         return jsonify({'success': True})
@@ -8278,9 +8283,9 @@ def create_fifo_lot_from_stock():
 
         admin_name = session.get('admin_name', 'Unknown')
         conn.execute('''
-            INSERT INTO transaction_logs (emp_id, product_id, action, qty, status)
-            VALUES (?, ?, ?, ?, 'Completed')
-        ''', (f"ADMIN:{admin_name}", product_id, f"สร้าง Lot ตั้งต้นสำหรับ FIFO: {lot_number}", missing_fifo_qty))
+            INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp)
+            VALUES (?, ?, ?, ?, 'Completed', ?)
+        ''', (f"ADMIN:{admin_name}", product_id, f"สร้าง Lot ตั้งต้นสำหรับ FIFO: {lot_number}", missing_fifo_qty, current_thailand_timestamp()))
 
         conn.commit()
         return jsonify({
@@ -8380,9 +8385,9 @@ def delete_product_lot(lot_id):
             lot_number_text = existing.get('lot_number') or str(lot_id)
             action_text = f"ลบ/ตัดสต็อก Lot: {lot_number_text}"
             conn.execute('''
-                INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, status)
-                VALUES (?, ?, ?, ?, ?, 'Completed')
-            ''', (f"ADMIN:{admin_name}", product_id, lot_id, action_text, lot_qty))
+                INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, status, timestamp)
+                VALUES (?, ?, ?, ?, ?, 'Completed', ?)
+            ''', (f"ADMIN:{admin_name}", product_id, lot_id, action_text, lot_qty, current_thailand_timestamp()))
         except Exception:
             # ไม่ให้การ log ทำให้กระบวนการหลักล้มเหลว
             pass
@@ -8520,9 +8525,9 @@ def edit_product():
                 if lot_adjustment['created_lot']:
                     action_text = 'สร้าง/ปรับ Lot ตาม FIFO จากปุ่มแก้ไขสินค้า'
                 conn.execute('''
-                    INSERT INTO transaction_logs (emp_id, product_id, action, qty, status)
-                    VALUES (?, ?, ?, ?, 'Completed')
-                ''', (f"ADMIN:{admin_name}", product_for_sync['id'], action_text, abs(int(lot_adjustment['delta']))))
+                    INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp)
+                    VALUES (?, ?, ?, ?, 'Completed', ?)
+                ''', (f"ADMIN:{admin_name}", product_for_sync['id'], action_text, abs(int(lot_adjustment['delta'])), current_thailand_timestamp()))
 
         # อัปเดต open_packages ถ้าเป็นสินค้าแยกหน่วยย่อย
         if package_unit and base_unit and conversion_rate > 1:
@@ -9278,9 +9283,9 @@ def withdraw_fifo_logic(product_id, qty_to_withdraw, emp_id):
         
         # บันทึก Transaction แยกตาม Lot เพื่อความแม่นยำ
         conn.execute('''
-            INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, status)
-            VALUES (?, ?, ?, 'เบิกของ (FIFO)', ?, 'Approved')
-        ''', (emp_id, product_id, lot['id'], take))
+            INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, status, timestamp)
+            VALUES (?, ?, ?, 'เบิกของ (FIFO)', ?, 'Approved', ?)
+        ''', (emp_id, product_id, lot['id'], take, current_thailand_timestamp()))
 
     # อัปเดตยอดรวมในตารางหลัก
     conn.execute('UPDATE products SET stock = stock - ? WHERE id = ?', (qty_to_withdraw, product_id))
@@ -9396,9 +9401,9 @@ def add_product_ajax():
             else:
                 action_text = f"รับเข้า Lot: {lot_number} ({qty} {package_unit})"
         conn.execute('''
-            INSERT INTO transaction_logs (emp_id, product_id, action, qty, status) 
-            VALUES (?, ?, ?, ?, 'Completed')
-        ''', (f"ADMIN:{admin_name}", product_id, action_text, log_qty))
+            INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp)
+            VALUES (?, ?, ?, ?, 'Completed', ?)
+        ''', (f"ADMIN:{admin_name}", product_id, action_text, log_qty, current_thailand_timestamp()))
 
         conn.commit()
         return jsonify({'success': True, 'message': 'เพิ่ม Lot ของสำเร็จ!'})
@@ -9483,6 +9488,7 @@ def write_off_ajax():
             lot_qty_to_cut = int(lot_qty_to_cut)
 
         remaining_qty = lot_qty_to_cut
+        log_timestamp = current_thailand_timestamp()
 
         # Allow admin to choose a specific lot to cut first. If provided, consume from it first,
         # then continue with FIFO for any remainder.
@@ -9501,13 +9507,13 @@ def write_off_ajax():
                     qty_package = cut_qty / conv
                     conn.execute('''
                         INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 'Approved', datetime('now', '+7 hours'))
-                    ''', (admin_name, product_id, sel['id'], action_text, qty_package, cut_qty, qty_package))
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'Approved', ?)
+                    ''', (admin_name, product_id, sel['id'], action_text, qty_package, cut_qty, qty_package, log_timestamp))
                 else:
                     conn.execute('''
                         INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, status, timestamp)
-                        VALUES (?, ?, ?, ?, ?, 'Approved', datetime('now', '+7 hours'))
-                    ''', (admin_name, product_id, sel['id'], action_text, cut_qty))
+                        VALUES (?, ?, ?, ?, ?, 'Approved', ?)
+                    ''', (admin_name, product_id, sel['id'], action_text, cut_qty, log_timestamp))
                 remaining_qty -= cut_qty
 
         # --- 1. ไล่ตัดสต็อกจากตาราง Lot แบบ FIFO ---
@@ -9540,13 +9546,13 @@ def write_off_ajax():
                 qty_package = cut_qty / conv
                 conn.execute('''
                     INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, qty_base_unit, qty_package_unit, status, timestamp)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'Approved', datetime('now', '+7 hours'))
-                ''', (admin_name, product_id, lot['id'], action_text, qty_package, cut_qty, qty_package))
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'Approved', ?)
+                ''', (admin_name, product_id, lot['id'], action_text, qty_package, cut_qty, qty_package, log_timestamp))
             else:
                 conn.execute('''
                     INSERT INTO transaction_logs (emp_id, product_id, lot_id, action, qty, status, timestamp)
-                    VALUES (?, ?, ?, ?, ?, 'Approved', datetime('now', '+7 hours'))
-                ''', (admin_name, product_id, lot['id'], action_text, cut_qty))
+                    VALUES (?, ?, ?, ?, ?, 'Approved', ?)
+                ''', (admin_name, product_id, lot['id'], action_text, cut_qty, log_timestamp))
 
             remaining_qty -= cut_qty
 
