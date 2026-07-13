@@ -548,8 +548,14 @@ def handle_before_request():
 
 @app.after_request
 def add_header(response):
-    # ป้องกัน Cache เพื่อความปลอดภัย
-    response.headers.update(NO_CACHE_HEADERS)
+    # ไฟล์ vendor เป็นไฟล์คงที่และไม่มีข้อมูลผู้ใช้ จึง cache ได้เพื่อลดเวลาโหลดใน LAN
+    if request.path.startswith('/static/vendor/'):
+        response.headers['Cache-Control'] = 'public, max-age=86400, stale-while-revalidate=604800'
+        response.headers.pop('Pragma', None)
+        response.headers.pop('Expires', None)
+    else:
+        # หน้าเว็บและ API อาจมีข้อมูลสำคัญ จึงไม่เก็บ cache
+        response.headers.update(NO_CACHE_HEADERS)
     response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
     response.headers.setdefault('X-Content-Type-Options', 'nosniff')
     response.headers.setdefault('Referrer-Policy', 'same-origin')

@@ -155,8 +155,8 @@ def main():
 <head>
 <meta charset="UTF-8">
 <title>FLOW DIAGRAM - Stock PCM</title>
-<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<link href="static/vendor/fonts/fonts.css" rel="stylesheet">
+<script src="static/vendor/mermaid/mermaid.min.js"></script>
 <script>
   mermaid.initialize({{
     startOnLoad: true,
