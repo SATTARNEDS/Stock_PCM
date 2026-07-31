@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="th" data-bs-theme="light">
+<head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>ระบบจัดการ MU</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.css') }}">
+    <style>
+        :root{--sidebar-width:256px;--sidebar-collapsed-width:72px;--nav:#fff;--mu:#168766;--cyan:#2878c8;--page:#f5f7fa;--border:#dfe5ec;--muted:#667085}
+        html{background:var(--page)}body{font-family:"Mitr",sans-serif;background:var(--page);color:#26364d;min-height:100vh}body:before{content:"";position:fixed;inset:72px 0 0 var(--sidebar-collapsed-width);pointer-events:none;background:radial-gradient(circle at 88% 8%,rgba(37,119,201,.08),transparent 24%),radial-gradient(circle at 12% 92%,rgba(22,135,102,.07),transparent 25%);z-index:0}
+        .topbar{background:#fff;color:#243047;position:fixed;top:0;right:0;left:var(--sidebar-width);height:72px;z-index:1020;border-bottom:1px solid var(--border);box-shadow:0 1px 5px rgba(24,39,75,.08)}
+        .topbar>.container-fluid{height:100%;padding-top:6px!important;padding-bottom:6px!important;flex-wrap:nowrap!important}
+        .topbar .small{color:var(--muted);opacity:1!important}.topbar .btn{color:#344054;border-color:var(--border)}.topbar .text-dark{color:#243047!important}.topbar .btn:hover{color:#1f2a44;background:#f2f4f7}
+        .admin-profile-menu{height:56px;display:flex;align-items:center;flex:0 0 auto}.admin-profile-menu>.dropdown-toggle{height:56px;min-height:56px;padding:4px 10px!important;border:1px solid var(--border)!important;border-radius:8px;line-height:1.15}.admin-profile-menu .side-badge{width:42px;height:42px;flex:0 0 42px}
+        .header-tool{width:38px;height:38px;display:grid;place-items:center;border:0!important;border-radius:50%!important;background:transparent;color:#4f5d73!important;position:relative}.header-tool:hover{background:#ebedef!important}.header-tool-dot{position:absolute;width:7px;height:7px;border-radius:50%;right:7px;top:6px;background:#e55353;border:1px solid #fff}
+        main.container-fluid{margin-left:var(--sidebar-width);width:calc(100% - var(--sidebar-width));padding-top:96px!important;position:relative;z-index:1}
+        .admin-shell{display:block}
+        .admin-sidebar{position:fixed;inset:0 auto 0 0;width:var(--sidebar-width);z-index:1030;background:var(--nav);color:#26364d;border-right:1px solid var(--border);border-radius:0;padding:0;box-shadow:2px 0 12px rgba(44,62,80,.08);overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
+        .admin-sidebar::-webkit-scrollbar{display:none;width:0;height:0}
+        .admin-sidebar{transition:width .18s cubic-bezier(.4,0,.2,1)!important;will-change:width}.topbar,main.container-fluid{transition:none!important}
+        .admin-sidebar .side-title{height:72px;min-height:72px;margin-bottom:0!important;padding:0 16px!important;border-bottom:1px solid var(--border);box-sizing:border-box;overflow:hidden}
+        .nav-title{padding:22px 20px 8px;color:#8a97a8;font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+        .admin-sidebar .nav-link{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;color:#526175;border-left:4px solid transparent;border-radius:0;padding:11px 20px;white-space:nowrap;margin:0}
+        .admin-sidebar .nav-link i{width:24px;flex:0 0 24px;margin:0!important;text-align:center}
+        .admin-sidebar .nav-link{transition:color .16s ease,background-color .16s ease}.admin-sidebar .nav-link:hover{color:#12684f;background:#edf8f4;padding-left:20px}.admin-sidebar .nav-link i{transition:color .16s ease}
+        .admin-sidebar .nav-link.active{color:#0f6b50;background:#e0f3ec;border-left-color:var(--mu);box-shadow:inset 4px 0 0 var(--mu);font-weight:600}
+        .side-badge{width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,var(--mu),var(--cyan));display:grid;place-items:center;font-size:1.15rem;box-shadow:0 3px 10px rgba(11,122,90,.28)}
+        .workspace{min-width:0;max-width:1600px;margin:0 auto;animation:workspaceIn .35s ease both}
+        .workspace-head{position:relative;padding:0 0 4px;margin-bottom:18px}
+        .workspace-head:after{display:none}
+        .workspace-kicker{color:var(--mu);font-size:.77rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+        .metric,.panel{background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 3px 12px rgba(24,39,75,.06);animation:panelRise .3s ease both}
+        .metric{position:relative;overflow:hidden;min-height:128px;color:#26364d;border:1px solid var(--metric-border,#cae7dc);background:var(--metric-color,#eaf7f2);transition:transform .2s,box-shadow .2s}
+        .metric:hover{transform:translateY(-3px);box-shadow:0 5px 14px rgba(60,75,100,.14)}.metric:hover .metric-icon{transform:scale(1.08) rotate(-3deg)}.metric-icon{transition:transform .2s ease}
+        .metric:after{content:"";position:absolute;width:140px;height:140px;border-radius:50%;right:-48px;bottom:-70px;background:rgba(255,255,255,.48)}
+        .metric:before{content:"";position:absolute;left:0;right:0;bottom:0;height:34px;background:linear-gradient(90deg,rgba(255,255,255,.34),transparent)}
+        .metric strong{font-size:1.8rem;color:#25344a}.metric .text-muted{color:#526175!important}.metric-icon{position:absolute;right:18px;top:18px;width:auto;height:auto;color:var(--metric-accent,#168766);background:transparent;font-size:2.2rem;opacity:.42;box-shadow:none;z-index:1}
+        .metric-products{--metric-color:#efefff;--metric-border:#d9d8fa;--metric-accent:#5856d6}.metric-stock{--metric-color:#eaf5ff;--metric-border:#cfe6fb;--metric-accent:#2878c8}.metric-completed{--metric-color:#fff6df;--metric-border:#f5dfaa;--metric-accent:#bd7600}.metric-cancelled{--metric-color:#fff0f0;--metric-border:#f2cece;--metric-accent:#c94343}
+        .widget-progress{position:absolute;left:16px;right:16px;bottom:15px;height:3px;border-radius:99px;background:rgba(82,97,117,.14);overflow:hidden}.widget-progress:after{content:"";display:block;width:var(--progress,65%);height:100%;background:var(--metric-accent,#168766);opacity:.55}
+        .row .col-6:nth-child(2) .metric{animation-delay:.06s}.row .col-6:nth-child(3) .metric{animation-delay:.12s}.row .col-6:nth-child(4) .metric{animation-delay:.18s}.panel{animation-delay:.12s}
+        .table{--bs-table-bg:transparent;--bs-table-color:#344054;--bs-table-border-color:#e4e7ec;--bs-table-hover-bg:#f8fafc}.table thead th{background:#f2f4f7;color:#475467;font-size:.83rem;letter-spacing:.01em;border-bottom:1px solid var(--border)}
+        .table tbody tr{transition:background .12s}.table tbody tr:hover{background:#f8fafc}
+        .table-responsive{border:1px solid var(--border);border-radius:6px}.form-control,.form-select,.btn{min-height:42px;border-radius:6px}
+        .data-table-scroll{max-height:64vh;overflow:auto}.data-table-scroll .table thead{position:sticky;top:0;z-index:6}.data-table-scroll .table thead th{box-shadow:0 1px 0 var(--border)}
+        .stock-row-low>*{background:#fff8dc!important}.stock-row-low{box-shadow:inset 5px 0 0 #e6a700}.stock-row-out>*{background:#fde7e9!important;color:#8f1d28!important}.stock-row-out{box-shadow:inset 5px 0 0 #dc3545}.stock-alert{font-weight:700}
+        #monthlyReportMonth{width:190px;min-width:190px;height:48px;min-height:48px}.monthly-report-actions{align-items:center}.monthly-report-actions form{align-items:center}.monthly-report-actions .btn{height:48px;min-height:48px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:0 16px;line-height:1;white-space:nowrap}.monthly-report-actions form .btn{min-width:112px}.monthly-report-actions>a.btn{min-width:150px}.monthly-report-actions .btn i{margin:0!important;line-height:1}
+        .monthly-table-wrap{max-height:68vh;overflow:auto;border:1px solid #9ba8b8}.monthly-table{min-width:1900px;--bs-table-border-color:#aeb9c6}.monthly-table th,.monthly-table td{text-align:center;vertical-align:middle;white-space:nowrap;border:1px solid #aeb9c6!important}.monthly-table thead{position:sticky;top:0;z-index:20}.monthly-table thead th{background:#263d8f!important;color:#fff!important;font-weight:700;box-shadow:0 2px 0 #17275f}.monthly-table th:nth-child(-n+9),.monthly-table td:nth-child(-n+9){position:sticky;z-index:12}.monthly-table th:nth-child(1),.monthly-table td:nth-child(1){left:0;min-width:54px;width:54px}.monthly-table th:nth-child(2),.monthly-table td:nth-child(2){left:54px;min-width:120px;width:120px}.monthly-table th:nth-child(3),.monthly-table td:nth-child(3){left:174px;min-width:260px;width:260px;text-align:left}.monthly-table th:nth-child(4),.monthly-table td:nth-child(4){left:434px;min-width:72px;width:72px}.monthly-table th:nth-child(5),.monthly-table td:nth-child(5){left:506px;min-width:82px;width:82px}.monthly-table th:nth-child(6),.monthly-table td:nth-child(6){left:588px;min-width:82px;width:82px}.monthly-table th:nth-child(7),.monthly-table td:nth-child(7){left:670px;min-width:105px;width:105px}.monthly-table th:nth-child(8),.monthly-table td:nth-child(8){left:775px;min-width:82px;width:82px}.monthly-table th:nth-child(9),.monthly-table td:nth-child(9){left:857px;min-width:82px;width:82px;border-right:3px solid #667085!important;box-shadow:4px 0 7px rgba(31,45,61,.14)}.monthly-table tbody td:nth-child(-n+9){background:#fff}.monthly-table thead th:nth-child(-n+9){z-index:24;background:#263d8f!important}.monthly-table tbody tr:nth-child(even):not(.monthly-row-low):not(.monthly-row-out)>*{background:#f7f9fc}.monthly-table tbody tr:hover>*{filter:brightness(.97)}.monthly-row-low>*{background:#fff3c4!important}.monthly-row-out>*{background:#f8d7da!important;color:#8f1d28!important}
+        .lot-table-wrap{max-height:360px;overflow:auto}.lot-table thead{position:sticky;top:0;z-index:3}.lot-table tbody tr{cursor:pointer}.lot-table tbody tr.is-selected>*{background:#e8f2ff!important;box-shadow:inset 0 1px #8bb8f5,inset 0 -1px #8bb8f5}.lot-table tbody tr.is-depleted>*{background:#f8fafc;color:#667085}.lot-editor{background:#f8fafc;border:1px solid var(--border);border-radius:8px}.lot-filter-bar{background:#f8fafc;border:1px solid var(--border);border-radius:8px}
+        .flatpickr-calendar{font-family:"Mitr",sans-serif;border:1px solid #d8e0ea;border-radius:12px;box-shadow:0 16px 40px rgba(31,45,61,.18);overflow:hidden}.flatpickr-months{background:linear-gradient(135deg,#168766,#2577c9);padding:7px 4px}.flatpickr-months .flatpickr-month,.flatpickr-current-month,.flatpickr-current-month .flatpickr-monthDropdown-months,.flatpickr-current-month input.cur-year,.flatpickr-months .flatpickr-prev-month,.flatpickr-months .flatpickr-next-month{color:#fff;fill:#fff}.flatpickr-weekdays{background:#edf7f3}.flatpickr-weekday{color:#316150;font-weight:600}.flatpickr-day{border-radius:8px}.flatpickr-day:hover{background:#e4f3ed;border-color:#e4f3ed}.flatpickr-day.selected,.flatpickr-day.startRange,.flatpickr-day.endRange{background:#168766;border-color:#168766}.flatpickr-day.today{border-color:#2577c9}.mu-confirm-icon{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;background:#fff0f1;color:#dc3545;font-size:1.35rem}.modal.fade .modal-dialog{transform:translateY(12px) scale(.985);transition:transform .2s ease-out}.modal.show .modal-dialog{transform:none}.btn{position:relative;overflow:hidden}.mu-ripple{position:absolute;border-radius:50%;background:rgba(255,255,255,.38);transform:scale(0);animation:muRipple .5s ease-out;pointer-events:none}.btn-outline-dark .mu-ripple,.btn-light .mu-ripple{background:rgba(37,119,201,.18)}#muActionAlert:not(.d-none):after{content:"";position:absolute;left:0;bottom:0;height:3px;background:currentColor;animation:alertCountdown 3.2s linear forwards}
+        .transaction-action-button{transition:transform .18s ease,box-shadow .18s ease,background-color .18s ease}.transaction-action-button:hover{transform:translateY(-2px);box-shadow:0 6px 14px rgba(37,119,201,.18)}.transaction-action-choice{border:1px solid var(--border);border-radius:9px;padding:14px;background:#f8fafc;transition:opacity .18s ease,transform .18s ease}.transaction-action-choice.is-switching{opacity:0;transform:translateY(5px)}.transaction-action-row>td{background:#f8fafc!important}.transaction-inline-editor{background:#f2f6fa;border:1px solid var(--border);border-radius:9px;box-shadow:inset 0 1px 0 rgba(255,255,255,.75)}.monthly-report-panel.mu-panel-loading{opacity:.52;pointer-events:none}.monthly-report-panel.mu-panel-refresh{animation:monthlyPanelIn .24s ease both}
+        .panel>h2:first-child,.panel>.d-flex:first-child{padding-bottom:14px;border-bottom:1px solid var(--border)}.panel h2{color:#243047;font-weight:600}
+        .section-eyebrow{display:block;color:var(--muted);font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px}
+        .mu-sidebar-toggle{width:40px;height:40px;display:grid;place-items:center;border:0;border-radius:50%;background:transparent;color:#475467}.mu-sidebar-toggle:hover{background:#f2f4f7}
+        @media(min-width:992px){body.mu-sidebar-collapsed .admin-sidebar{width:var(--sidebar-collapsed-width)}body.mu-sidebar-collapsed .topbar{left:var(--sidebar-collapsed-width)}body.mu-sidebar-collapsed main.container-fluid{margin-left:var(--sidebar-collapsed-width);width:calc(100% - var(--sidebar-collapsed-width))}body.mu-sidebar-collapsed .admin-sidebar .side-title>div:last-child,body.mu-sidebar-collapsed .admin-sidebar .nav-title{display:none}body.mu-sidebar-collapsed .admin-sidebar .side-title{width:var(--sidebar-collapsed-width);justify-content:center!important;gap:0!important;padding:0!important}body.mu-sidebar-collapsed .admin-sidebar .nav-link{width:var(--sidebar-collapsed-width);height:48px;padding:0;border-left:0;justify-content:center;gap:0;font-size:0;overflow:hidden}body.mu-sidebar-collapsed .admin-sidebar .nav-link.active{box-shadow:inset 4px 0 0 var(--mu)}body.mu-sidebar-collapsed .admin-sidebar .nav-link i{width:24px;flex-basis:24px;margin:0!important;font-size:1.1rem}body.mu-sidebar-collapsed .admin-sidebar:hover{width:var(--sidebar-width);box-shadow:8px 0 24px rgba(44,62,80,.12)}body.mu-sidebar-collapsed .admin-sidebar:hover .side-title>div:last-child,body.mu-sidebar-collapsed .admin-sidebar:hover .nav-title{display:block}body.mu-sidebar-collapsed .admin-sidebar:hover .side-title{width:var(--sidebar-width);justify-content:flex-start!important;gap:1rem!important;padding-left:20px!important;padding-right:20px!important}body.mu-sidebar-collapsed .admin-sidebar:hover .nav-link{width:var(--sidebar-width);height:auto;padding:11px 20px;border-left:4px solid transparent;justify-content:flex-start;gap:8px;font-size:.95rem}body.mu-sidebar-collapsed .admin-sidebar:hover .nav-link.active{border-left-color:var(--mu)}body.mu-sidebar-collapsed .admin-sidebar:hover .nav-link i{width:24px;flex-basis:24px;margin:0!important}}
+        .stock-layout{display:grid;grid-template-columns:1fr;gap:20px}
+        .workspace.mu-workspace-loading{opacity:.58;pointer-events:none}.workspace.mu-workspace-refresh{animation:none!important}
+        .stock-table-panel.mu-panel-loading{opacity:.55;pointer-events:none}.stock-table-panel.mu-panel-refresh{animation:none!important}
+        .stock-create-panel .form-label{font-size:.8rem;color:var(--muted);font-weight:600}.stock-table-panel{min-width:0}
+        .table>:not(caption)>*>*{padding:.8rem}.action-form{min-width:250px}.muted-row{opacity:.58}
+        @keyframes workspaceIn{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:none}}@keyframes panelRise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}@keyframes monthlyPanelIn{from{opacity:.35;transform:translateY(8px)}to{opacity:1;transform:none}}@keyframes orbFloat{50%{transform:translate(-10px,9px) scale(1.08)}}@keyframes muRipple{to{transform:scale(4);opacity:0}}@keyframes alertCountdown{from{width:100%}to{width:0}}
+        @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+        @media(min-width:768px){.stock-create-panel form{display:grid;grid-template-columns:1fr 2fr 1fr 1fr auto;gap:12px;align-items:end}.stock-create-panel form>*{width:100%}.stock-create-panel form .col-12:last-child{min-width:150px}}
+        @media(max-width:991px){.topbar{position:sticky;left:0;height:auto}.topbar>.container-fluid{min-height:68px}.admin-shell{display:block}.admin-sidebar{position:static;width:100%;border-radius:6px;padding:8px 0;margin-bottom:16px}.admin-sidebar .side-title{display:none}.admin-sidebar nav{display:flex;overflow:auto;gap:2px}.admin-sidebar .nav-link{border-left:0;border-bottom:3px solid transparent;padding:11px 14px}.admin-sidebar .nav-link:hover{padding-left:14px}.admin-sidebar .nav-link.active{border-bottom-color:#6ee7b7;box-shadow:none}main.container-fluid{margin-left:0;width:100%;padding-top:20px!important}}
+        @media(max-width:575px){.metric{min-height:118px}.monthly-report-actions,.monthly-report-actions form{width:100%}#monthlyReportMonth{width:auto;min-width:0;flex:1}.monthly-report-actions>a.btn{width:100%}}
+        @media(max-width:767px){.topbar .container-fluid{align-items:flex-start!important}.table{font-size:.86rem}.action-form{min-width:220px}}
+    </style>
+</head>
+<body>
+<header class="topbar"><div class="container-fluid px-3 px-lg-4 py-3 d-flex flex-wrap justify-content-between align-items-center gap-3">
+    <div class="d-flex align-items-center gap-3"><button type="button" class="mu-sidebar-toggle d-none d-lg-grid" id="muSidebarToggle" aria-label="ย่อหรือขยายเมนูด้านข้าง" aria-expanded="true"><i class="fas fa-bars"></i></button><div><div class="small">PCM / Admin / Manufacturing Unit</div><h1 class="h5 mb-0">MU Stock Administration</h1></div></div>
+    <div class="dropdown admin-profile-menu">
+        <button class="btn btn-link text-decoration-none dropdown-toggle d-flex align-items-center gap-2 px-2" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="เปิดเมนูบัญชี Admin MU">
+            <span class="side-badge text-white" aria-hidden="true"><i class="fas fa-user-shield"></i></span>
+            <span class="d-none d-md-block lh-sm text-start"><span class="d-block small fw-semibold text-dark">{{ session.get('admin_name') or 'MU Admin' }}</span><span class="d-block small">ADMIN MU</span></span>
+        </button>
+        <div class="dropdown-menu dropdown-menu-end shadow border-0 mt-2 p-2" style="min-width:230px">
+            <div class="px-3 py-2 border-bottom mb-2"><div class="small fw-semibold text-dark">{{ session.get('admin_name') or 'MU Admin' }}</div><div class="small text-muted">{{ session.get('admin_username') }}</div></div>
+            <a class="dropdown-item rounded py-2" href="{{ url_for('mu.admin_dashboard', tab='profile') }}"><i class="fas fa-id-card me-2 text-primary"></i>จัดการโปรไฟล์</a>
+            <form method="post" action="{{ url_for('mu.admin_logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="dropdown-item rounded py-2 text-danger"><i class="fas fa-right-from-bracket me-2"></i>ออกจากระบบ</button></form>
+        </div>
+    </div>
+</div></header>
+<main class="container-fluid px-3 px-lg-4 py-4">
+    {% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="alert alert-{{ category }} border-0 shadow-sm">{{ message }}</div>{% endfor %}{% endwith %}
+    <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <div class="side-title d-flex align-items-center gap-3 px-2 mb-4"><div class="side-badge"><i class="fas fa-industry"></i></div><div><strong>PCM · MU</strong><div class="small opacity-50">Manufacturing Console</div></div></div>
+      <nav class="nav flex-column" aria-label="เมนูจัดการ MU">
+        <div class="nav-title">MU Operations</div>
+        <a class="nav-link {% if tab=='stock' %}active{% endif %}" href="?tab=stock"><i class="fas fa-boxes-stacked me-2"></i>จัดการสต็อก</a>
+        <a class="nav-link {% if tab=='history' %}active{% endif %}" href="?tab=history"><i class="fas fa-clock-rotate-left me-2"></i>ประวัติทำรายการ</a>
+        <div class="nav-title">Management</div>
+        <a class="nav-link {% if tab=='audit' %}active{% endif %}" href="?tab=audit"><i class="fas fa-clipboard-check me-2"></i>Stock Audit</a>
+        <a class="nav-link {% if tab=='monthly' %}active{% endif %}" href="?tab=monthly"><i class="fas fa-calendar-days me-2"></i>รายงานสต็อกรายเดือน</a>
+        <a class="nav-link {% if tab=='employees' %}active{% endif %}" href="?tab=employees"><i class="fas fa-users-gear me-2"></i>จัดการพนักงาน MU</a>
+        <a class="nav-link {% if tab=='admins' %}active{% endif %}" href="?tab=admins"><i class="fas fa-user-shield me-2"></i>สิทธิ์ Admin MU</a>
+        <div class="nav-title">Account</div>
+        <a class="nav-link {% if tab=='profile' %}active{% endif %}" href="?tab=profile"><i class="fas fa-id-card me-2"></i>โปรไฟล์ของฉัน</a>
+      </nav>
+    </aside>
+    <div class="workspace">
+    <section class="workspace-head">
+      <div class="workspace-kicker">Admin Panel · Manufacturing Unit</div>
+      {% if tab=='stock' %}<h2 class="h4 mb-1">จัดการสต็อกและ FIFO Lots</h2><div class="text-muted">รับสินค้า เพิ่มรายการ และตรวจลำดับ Lot ในพื้นที่เดียว</div>
+      {% elif tab=='history' %}<h2 class="h4 mb-1">ประวัติทำรายการ</h2><div class="text-muted">ตรวจสอบ แก้ไข หรือยกเลิกรายการ พร้อมบันทึกผู้ดำเนินการ</div>
+      {% elif tab=='audit' %}<h2 class="h4 mb-1">Stock Audit Report</h2><div class="text-muted">ลำดับเหตุการณ์สำคัญแบบกระชับและตรวจสอบย้อนหลังได้</div>
+      {% elif tab=='monthly' %}<h2 class="h4 mb-1">รายงานสต็อกรายเดือน</h2><div class="text-muted">สรุปยอดเบิกแยกรายวัน พร้อมยอดคงเหลือและสถานะสต็อก</div>
+      {% elif tab=='employees' %}<h2 class="h4 mb-1">จัดการพนักงาน Manufacturing</h2><div class="text-muted">ตั้งและเปลี่ยนรหัสผ่านหน้าเบิกแบบรายบุคคล</div>
+      {% elif tab=='admins' %}<h2 class="h4 mb-1">สิทธิ์ผู้ดูแล MU</h2><div class="text-muted">เพิ่มและตรวจสอบบัญชีที่เข้าถึงหลังบ้าน Manufacturing</div>
+      {% else %}<h2 class="h4 mb-1">โปรไฟล์ของฉัน</h2><div class="text-muted">แก้ไขชื่อที่แสดงและเปลี่ยนรหัสผ่านอย่างปลอดภัย</div>{% endif %}
+    </section>
+    <div class="row g-3 mb-4 mu-summary-row">
+        <div class="col-12 col-sm-6 col-xl-3"><div class="metric metric-products p-3"><div class="metric-icon"><i class="fas fa-boxes-stacked"></i></div><span class="text-muted small">สินค้าทั้งหมด</span><br><strong>{{ summary.products }}</strong><div class="widget-progress" style="--progress:72%" aria-hidden="true"></div></div></div>
+        <div class="col-12 col-sm-6 col-xl-3"><div class="metric metric-stock p-3"><div class="metric-icon"><i class="fas fa-box-open"></i></div><span class="text-muted small">สินค้าหมดสต็อก</span><br><strong>{{ summary.out_of_stock }}</strong><div class="widget-progress" style="--progress:58%" aria-hidden="true"></div></div></div>
+        <div class="col-12 col-sm-6 col-xl-3"><div class="metric metric-completed p-3"><div class="metric-icon"><i class="fas fa-circle-check"></i></div><span class="text-muted small">รายการสำเร็จ</span><br><strong>{{ summary.completed }}</strong><div class="widget-progress" style="--progress:84%" aria-hidden="true"></div></div></div>
+        <div class="col-12 col-sm-6 col-xl-3"><div class="metric metric-cancelled p-3"><div class="metric-icon"><i class="fas fa-ban"></i></div><span class="text-muted small">รายการยกเลิก</span><br><strong>{{ summary.cancelled }}</strong><div class="widget-progress" style="--progress:24%" aria-hidden="true"></div></div></div>
+    </div>
+    {% if tab=='stock' %}
+    <div class="stock-layout">
+    <section class="panel stock-table-panel p-3 p-lg-4"><div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3"><div><span class="section-eyebrow">Inventory workspace</span><h2 class="h5 mb-0">รายการสต็อก MU</h2></div><div class="d-flex flex-wrap gap-2"><div class="input-group" style="min-width:280px"><span class="input-group-text bg-white"><i class="fas fa-search text-muted"></i></span><input class="form-control" id="muStockLiveSearch" type="search" placeholder="ค้นหารหัส ชื่อสินค้า หรือหน่วย..." autocomplete="off"></div><span class="badge bg-success-subtle text-success border border-success-subtle align-self-center">FIFO จากวันที่รับ</span><button class="btn btn-primary" type="button" onclick="openAddProductModal()"><i class="fas fa-plus me-2"></i>เพิ่มของใหม่</button></div></div>
+        <div class="table-responsive data-table-scroll"><table class="table align-middle mb-0"><thead><tr><th>สินค้า</th><th>สถานะ</th><th>คงเหลือ</th><th>Safety</th><th>รับ Lot เข้า</th><th>จัดการ</th></tr></thead><tbody>
+        {% for row in products %}<tr class="mu-stock-row {% if row['stock'] <= 0 %}stock-row-out{% elif row['stock'] <= row['safety_stock'] %}stock-row-low{% endif %} {% if not row['is_active'] %}muted-row{% endif %}" data-search="{{ (row['code'] ~ ' ' ~ row['name'] ~ ' ' ~ row['unit'])|lower }}"><td><div class="fw-semibold">{{ row['code'] }}</div><div>{{ row['name'] }}</div></td><td>{% if row['stock'] <= 0 %}<span class="badge bg-danger stock-alert">ของหมด</span>{% elif row['stock'] <= row['safety_stock'] %}<span class="badge bg-warning text-dark stock-alert">Low Stock</span>{% elif row['is_active'] %}<span class="badge bg-success">เปิดใช้งาน</span>{% else %}<span class="badge bg-secondary">ปิดใช้งาน</span>{% endif %}</td><td class="fw-semibold">{{ row['stock'] }} {{ row['unit'] }}</td><td>{{ row['safety_stock'] }}</td>
+            <td><button class="btn btn-sm btn-success" type="button" {% if not row['is_active'] %}disabled{% endif %} onclick='openReceiveStock({{ row["id"] }},{{ row["code"]|tojson }},{{ row["name"]|tojson }},{{ row["unit"]|tojson }})'><i class="fas fa-box-open me-1"></i>รับเข้าสต็อก</button></td>
+            <td><div class="d-flex flex-wrap gap-1"><button class="btn btn-sm btn-outline-dark" type="button" onclick='showLotsTable({{ row["id"] }}, {{ row["name"]|tojson }})'><i class="fas fa-layer-group"></i> {{ row['lot_count'] }} Lot</button><button class="btn btn-sm btn-outline-primary" type="button" onclick='openProductEdit({{ row["id"] }},{{ row["code"]|tojson }},{{ row["name"]|tojson }},{{ row["unit"]|tojson }},{{ row["safety_stock"] }})'><i class="fas fa-pen"></i></button><form class="mu-ajax-form" method="post" action="{{ url_for('mu.toggle_product', product_id=row['id']) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm {% if row['is_active'] %}btn-outline-secondary{% else %}btn-outline-success{% endif %}" title="{% if row['is_active'] %}ปิดใช้งาน{% else %}เปิดใช้งาน{% endif %}"><i class="fas {% if row['is_active'] %}fa-toggle-off{% else %}fa-toggle-on{% endif %}"></i></button></form><button class="btn btn-sm btn-outline-danger" type="button" {% if not row['is_active'] or row['stock'] <= 0 %}disabled{% endif %} onclick='openWriteOff({{ row["id"] }},{{ row["code"]|tojson }},{{ row["name"]|tojson }},{{ row["stock"] }},{{ row["unit"]|tojson }})' title="ตัดจำหน่าย"><i class="fas fa-trash-can"></i></button></div></td></tr>{% endfor %}
+        </tbody></table></div>
+        {% if pagination is defined and pagination.pages > 1 %}
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 pt-3">
+            <div class="small text-muted">แสดง {{ pagination.start }}–{{ pagination.end }} จาก {{ pagination.total }} รายการ · หน้าละ {{ pagination.per_page }}</div>
+            <nav aria-label="เปลี่ยนหน้ารายการสต็อก MU">
+                <ul class="pagination pagination-sm mb-0">
+                    <li class="page-item {% if pagination.page == 1 %}disabled{% endif %}"><a class="page-link mu-pagination-link" href="{{ url_for('mu.admin_dashboard', tab='stock', page=pagination.page-1) }}" aria-label="หน้าก่อนหน้า"><i class="fas fa-chevron-left"></i></a></li>
+                    {% for page_number in range(1, pagination.pages + 1) %}
+                    <li class="page-item {% if page_number == pagination.page %}active{% endif %}"><a class="page-link mu-pagination-link" href="{{ url_for('mu.admin_dashboard', tab='stock', page=page_number) }}" {% if page_number == pagination.page %}aria-current="page"{% endif %}>{{ page_number }}</a></li>
+                    {% endfor %}
+                    <li class="page-item {% if pagination.page == pagination.pages %}disabled{% endif %}"><a class="page-link mu-pagination-link" href="{{ url_for('mu.admin_dashboard', tab='stock', page=pagination.page+1) }}" aria-label="หน้าถัดไป"><i class="fas fa-chevron-right"></i></a></li>
+                </ul>
+            </nav>
+        </div>
+        {% endif %}
+    </section>
+    </div>
+    {% elif tab=='history' %}
+    <section class="panel p-3 p-lg-4"><h2 class="h5">ประวัติทำรายการ</h2><p class="text-muted small">แก้ไขหรือยกเลิกได้เฉพาะรายการ Completed ทุกการเปลี่ยนแปลงจะบันทึกผู้ดำเนินการ</p>
+        <div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>วันเวลา</th><th>ผู้เบิก</th><th>สินค้า</th><th>ยอด/สถานะ</th><th>ผู้แก้ไข</th><th>จัดการ</th></tr></thead><tbody>
+        {% for row in history %}
+        <tr class="{% if row['status']=='Cancelled' %}muted-row{% endif %}">
+          <td class="text-nowrap">{{ row['created_at'] }}</td>
+          <td>{{ row['requester_name'] }}<div class="small text-muted">{{ row['emp_id'] }}</div></td>
+          <td>{{ row['code'] }} · {{ row['name'] }}</td>
+          <td>{{ row['qty'] }} {{ row['unit'] }}<div><span class="badge {% if row['status']=='Cancelled' %}bg-secondary{% else %}bg-success{% endif %}">{{ row['status'] }}</span></div></td>
+          <td>{{ row['edited_by'] or row['cancelled_by'] or '-' }}</td>
+          <td>
+            {% if row['status']=='Completed' %}
+            <button class="btn btn-sm btn-outline-primary transaction-action-button" type="button" data-bs-toggle="collapse" data-bs-target="#transactionAction{{ row['id'] }}" aria-expanded="false" aria-controls="transactionAction{{ row['id'] }}">
+              <i class="fas fa-pen-to-square me-1"></i>แก้ไข/ยกเลิก
+            </button>
+            {% else %}-{% endif %}
+          </td>
+        </tr>
+        {% if row['status']=='Completed' %}
+        <tr class="transaction-action-row">
+          <td colspan="6" class="p-0 border-0">
+            <div class="collapse" id="transactionAction{{ row['id'] }}">
+              <div class="transaction-inline-editor m-2 m-lg-3 p-3">
+                <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+                  <strong>{{ row['code'] }} · {{ row['name'] }}</strong>
+                  <span class="badge bg-light text-dark border">ยอดปัจจุบัน {{ row['qty'] }} {{ row['unit'] }}</span>
+                </div>
+                <div class="row g-3">
+                  <div class="col-12 col-lg-6">
+                    <form class="mu-ajax-form h-100 border rounded p-3 bg-white" method="post" action="{{ url_for('mu.edit_transaction', transaction_id=row['id']) }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <div class="fw-semibold text-primary mb-2"><i class="fas fa-pen me-1"></i>แก้ไขยอดเบิก</div>
+                      <div class="row g-2">
+                        <div class="col-4"><label class="form-label small" for="editQty{{ row['id'] }}">จำนวนใหม่</label><input class="form-control" id="editQty{{ row['id'] }}" name="qty" type="number" min="1" value="{{ row['qty'] }}" required></div>
+                        <div class="col-8"><label class="form-label small" for="editReason{{ row['id'] }}">เหตุผลการแก้ไข</label><input class="form-control" id="editReason{{ row['id'] }}" name="reason" maxlength="300" required></div>
+                        <div class="col-12"><button class="btn btn-primary w-100" type="submit"><i class="fas fa-floppy-disk me-1"></i>บันทึกยอดใหม่</button></div>
+                      </div>
+                    </form>
+                  </div>
+                  <div class="col-12 col-lg-6">
+                    <form class="mu-ajax-form h-100 border border-danger-subtle rounded p-3 bg-white" method="post" action="{{ url_for('mu.cancel_transaction', transaction_id=row['id']) }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <div class="fw-semibold text-danger mb-2"><i class="fas fa-ban me-1"></i>ยกเลิกรายการและคืน Lot</div>
+                      <label class="form-label small" for="cancelReason{{ row['id'] }}">เหตุผลการยกเลิก</label>
+                      <input class="form-control mb-2" id="cancelReason{{ row['id'] }}" name="reason" maxlength="300" required>
+                      <button class="btn btn-danger w-100" type="submit"><i class="fas fa-rotate-left me-1"></i>ยืนยันยกเลิกและคืนสต็อก</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+        {% endif %}
+        {% else %}<tr><td colspan="6" class="text-center py-4">ยังไม่มีรายการ</td></tr>{% endfor %}
+        </tbody></table></div>
+    </section>
+    {% elif tab=='monthly' %}
+    <section class="panel p-3 p-lg-4 monthly-report-panel">
+      <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3">
+        <div><span class="section-eyebrow">Monthly stock ledger</span><h2 class="h5 mb-0">ตารางสต็อกประจำเดือน {{ monthly_report.month }}</h2></div>
+        <div class="d-flex flex-wrap gap-2 monthly-report-actions">
+          <form class="d-flex gap-2 mu-monthly-form" method="get"><input type="hidden" name="tab" value="monthly"><label class="visually-hidden" for="monthlyReportMonth">เลือกเดือน</label><input class="form-control" id="monthlyReportMonth" name="month" type="month" value="{{ monthly_report.month }}"><button class="btn btn-primary"><i class="fas fa-filter"></i><span>แสดงผล</span></button></form>
+          <a class="btn btn-success" href="{{ url_for('mu.export_audit_excel', month=monthly_report.month) }}"><i class="fas fa-file-excel"></i><span>Export Excel</span></a>
+        </div>
+      </div>
+      <div class="d-flex flex-wrap gap-3 small mb-3"><span><span class="badge bg-danger me-1">ของหมด</span> คงเหลือ 0</span><span><span class="badge bg-warning text-dark me-1">Low Stock</span> คงเหลือไม่เกิน Safety Stock</span><span class="text-muted">ตารางล็อกหัวข้อและ 3 คอลัมน์แรกไว้ขณะเลื่อน</span></div>
+      <div class="table-responsive monthly-table-wrap">
+        <table class="table table-bordered monthly-table mb-0">
+          <thead><tr><th>No.</th><th>รหัสสินค้า</th><th>รายการ / List</th><th>รวม</th><th>ยอดเบิก</th><th>คงเหลือ</th><th>Safety Stock</th><th>สั่งซื้อ</th><th>หน่วย</th>{% for day in monthly_report.days %}<th>{{ day }}</th>{% endfor %}</tr></thead>
+          <tbody>{% for row in monthly_report.rows %}<tr class="{% if row.stock <= 0 %}monthly-row-out{% elif row.stock <= row.safety_stock %}monthly-row-low{% endif %}"><td>{{ row.number }}</td><td><span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">{{ row.code }}</span></td><td><strong>{{ row.name }}</strong></td><td>{{ row.total }}</td><td>{{ row.issued }}</td><td class="fw-bold">{{ row.stock }}</td><td>{{ row.safety_stock }}</td><td class="{% if row.order_qty > 0 %}fw-bold text-danger{% endif %}">{{ row.order_qty }}</td><td>{{ row.unit }}</td>{% for day in monthly_report.days %}<td>{{ row.daily.get(day, '') }}</td>{% endfor %}</tr>{% else %}<tr><td colspan="{{ 9 + monthly_report.days|length }}" class="text-center py-5">ยังไม่มีข้อมูลสินค้า</td></tr>{% endfor %}</tbody>
+        </table>
+      </div>
+    </section>
+    {% elif tab=='audit' %}
+    <section class="panel p-3 p-lg-4 mb-4"><div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3"><div><span class="section-eyebrow">Withdrawal trace</span><h2 class="h5 mb-0">รายละเอียดรายการเบิก</h2></div><div class="d-flex gap-2"><span class="badge bg-primary align-self-center">FIFO Trace</span><a class="btn btn-success" href="{{ url_for('mu.export_audit_excel') }}"><i class="fas fa-file-excel me-2"></i>Export Excel</a></div></div><div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>วันที่เบิก</th><th>ผู้เบิก</th><th>สินค้า</th><th>จำนวน</th><th>Lot ที่ตัด</th><th>รายละเอียด</th></tr></thead><tbody>{% for row in audit if row['action'] in ('withdraw','edit','cancel') and row['transaction_date'] %}<tr><td class="text-nowrap">{{ row['transaction_date'] }}</td><td>{{ row['requester_name'] }}<div class="small text-muted">{{ row['emp_id'] }}</div></td><td><strong>{{ row['product_code'] }}</strong><div class="small">{{ row['product_name'] }}</div></td><td>{{ row['transaction_qty'] }} {{ row['product_unit'] }}</td><td>{{ row['lot_detail'] or 'คืน Lot แล้ว/ไม่มีข้อมูล' }}</td><td><span class="badge {% if row['action']=='cancel' %}bg-danger{% elif row['action']=='edit' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ row['action'] }}</span><div class="small text-muted mt-1">{{ row['detail'] }}</div></td></tr>{% else %}<tr><td colspan="6" class="text-center py-4">ยังไม่มีรายการเบิก</td></tr>{% endfor %}</tbody></table></div></section>
+    <section class="panel p-3 p-lg-4 mb-4"><div class="d-flex justify-content-between align-items-center mb-3"><div><span class="section-eyebrow">Stock movement</span><h2 class="h5 mb-0">การปรับยอดและตัดจำหน่าย</h2></div></div><div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>วันเวลา</th><th>สินค้า/Lot</th><th>ประเภท</th><th>จำนวน</th><th>ก่อน → หลัง</th><th>เหตุผล/ผู้ดำเนินการ</th></tr></thead><tbody>{% for row in stock_events %}<tr><td class="text-nowrap">{{ row['created_at'] }}</td><td><strong>{{ row['code'] }}</strong> {{ row['name'] }}<div class="small text-muted">Lot {{ row['lot_number'] or '-' }}</div></td><td><span class="badge {% if row['event_type']=='write_off' %}bg-danger{% else %}bg-warning text-dark{% endif %}">{{ row['event_type'] }}</span></td><td>{{ row['qty'] }} {{ row['unit'] }}</td><td>{{ row['stock_before'] }} → {{ row['stock_after'] }}</td><td>{{ row['reason'] }}<div class="small text-muted">{{ row['actor_id'] }}</div></td></tr>{% else %}<tr><td colspan="6" class="text-center py-4">ยังไม่มีการปรับยอดหรือตัดจำหน่าย</td></tr>{% endfor %}</tbody></table></div></section>
+    <section class="panel p-3 p-lg-4"><h2 class="h5">Audit Log ทั้งหมด</h2><div class="table-responsive"><table class="table table-hover mb-0"><thead><tr><th>วันเวลา</th><th>ผู้ดำเนินการ</th><th>เหตุการณ์</th><th>รายละเอียด</th></tr></thead><tbody>{% for row in audit %}<tr><td class="text-nowrap">{{ row['created_at'] }}</td><td>{{ row['actor_id'] }}<div class="small text-muted">{{ row['actor_type'] }}</div></td><td><span class="badge bg-dark">{{ row['action'] }}</span></td><td>{{ row['detail'] }}</td></tr>{% else %}<tr><td colspan="4" class="text-center py-4">ยังไม่มี Audit Log</td></tr>{% endfor %}</tbody></table></div></section>
+    {% elif tab=='employees' %}
+    <section class="panel p-3 p-lg-4"><h2 class="h5">จัดการพนักงาน Manufacturing</h2><p class="text-muted small">แสดงเฉพาะพนักงาน Department = Manufacturing และตั้งรหัสผ่านหน้าเบิกแยกรายบุคคล</p><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>รหัสพนักงาน</th><th>ชื่อ</th><th>Location</th><th>สถานะรหัส</th><th>ตั้ง/เปลี่ยนรหัส</th></tr></thead><tbody>{% for row in employees %}<tr><td class="fw-semibold">{{ row['emp_id'] }}</td><td>{{ row['name'] }}</td><td>{{ row['location'] }}</td><td>{% if row['has_mu_password'] %}<span class="badge bg-success">ตั้งแล้ว</span><div class="small text-muted">{{ row['updated_by'] }} · {{ row['updated_at'] }}</div>{% else %}<span class="badge bg-warning text-dark">ยังไม่ตั้ง</span>{% endif %}</td><td><form class="d-flex gap-2 action-form" method="post" action="{{ url_for('mu.change_employee_password', emp_id=row['emp_id']) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input class="form-control" name="password" type="password" minlength="8" maxlength="128" required placeholder="รหัสใหม่ 8+ ตัว" autocomplete="new-password"><button class="btn btn-success text-nowrap">บันทึก</button></form></td></tr>{% endfor %}</tbody></table></div></section>
+    {% elif tab=='admins' %}
+    <div class="row g-4"><div class="col-xl-4"><section class="panel p-3 p-lg-4"><span class="section-eyebrow">Admin access</span><h2 class="h5">เพิ่มสิทธิ์ Admin MU</h2><form method="post" action="{{ url_for('mu.add_mu_admin') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="mb-3"><label class="form-label">Username</label><input class="form-control" name="username" maxlength="50" required autocomplete="off"></div><div class="mb-3"><label class="form-label">ชื่อที่แสดง</label><input class="form-control" name="display_name" maxlength="100" required></div><div class="mb-3"><label class="form-label">รหัสผ่านเริ่มต้น</label><input class="form-control" name="password" type="password" minlength="8" maxlength="128" required autocomplete="new-password"></div><button class="btn btn-primary w-100"><i class="fas fa-user-plus me-2"></i>เพิ่มสิทธิ์</button></form></section></div><div class="col-xl-8"><section class="panel p-3 p-lg-4"><h2 class="h5">บัญชี Admin MU</h2><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>Username</th><th>ชื่อ</th><th>สิทธิ์</th><th></th></tr></thead><tbody>{% for row in mu_admins %}<tr><td class="fw-semibold">{{ row['username'] }}</td><td>{{ row['name'] }}</td><td><span class="badge bg-primary">ADMIN MU</span></td><td class="text-end">{% if row['username'] != session.get('admin_username') %}<form method="post" action="{{ url_for('mu.delete_mu_admin', admin_id=row['id']) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger" type="button" onclick="confirmNativeForm(this,'ลบสิทธิ์ Admin MU','ยืนยันลบสิทธิ์บัญชีนี้หรือไม่?')"><i class="fas fa-user-minus me-1"></i>ลบสิทธิ์</button></form>{% else %}<span class="badge bg-success">บัญชีปัจจุบัน</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div></section></div></div>
+    {% elif tab=='profile' %}
+    <div class="row g-4"><div class="col-lg-4"><section class="panel p-4 h-100"><div class="text-center mb-4"><div class="side-badge text-white mx-auto mb-3" style="width:72px;height:72px;font-size:1.6rem"><i class="fas fa-user-shield"></i></div><h2 class="h5 mb-1">{{ admin_profile['name'] if admin_profile else session.get('admin_name') }}</h2><div class="text-muted">{{ admin_profile['username'] if admin_profile else session.get('admin_username') }}</div><span class="badge bg-success mt-2">บัญชีพร้อมใช้งาน</span></div><div class="border-top pt-3"><div class="small text-muted mb-1">สิทธิ์การใช้งาน</div><div class="fw-semibold mb-3">ADMIN MU</div><div class="small text-muted mb-2">ขอบเขต</div><ul class="small ps-3 mb-0"><li>จัดการสินค้าและ FIFO Lot</li><li>Stock Audit และ Export</li><li>จัดการพนักงาน Manufacturing</li><li>จัดการบัญชี Admin MU</li></ul></div></section></div><div class="col-lg-8"><section class="panel p-4"><span class="section-eyebrow">Account settings</span><h2 class="h5 mb-3">ข้อมูลโปรไฟล์และความปลอดภัย</h2><div class="alert alert-info small"><i class="fas fa-shield-halved me-2"></i>ทุกการแก้ไขต้องยืนยันรหัสผ่านปัจจุบันและป้องกันด้วย CSRF</div><form method="post" action="{{ url_for('mu.update_admin_profile') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="row g-3 mb-3"><div class="col-md-6"><label class="form-label">Username</label><input class="form-control" value="{{ admin_profile['username'] if admin_profile else session.get('admin_username') }}" readonly></div><div class="col-md-6"><label class="form-label">Role</label><input class="form-control" value="ADMIN MU" readonly></div></div><div class="mb-3"><label class="form-label">ชื่อที่แสดง</label><input class="form-control" name="display_name" value="{{ admin_profile['name'] if admin_profile else session.get('admin_name') }}" maxlength="100" required></div><div class="mb-3"><label class="form-label">รหัสผ่านปัจจุบัน</label><input class="form-control" name="current_password" type="password" required autocomplete="current-password"></div><div class="mb-3"><label class="form-label">รหัสผ่านใหม่ <span class="text-muted">(เว้นว่างหากไม่เปลี่ยน)</span></label><input class="form-control" name="new_password" type="password" minlength="8" maxlength="128" autocomplete="new-password"></div><button class="btn btn-primary"><i class="fas fa-floppy-disk me-2"></i>บันทึกโปรไฟล์</button></form></section></div></div>
+    {% endif %}
+    </div>
+    </div>
+</main>
+<div class="position-fixed top-0 start-50 translate-middle-x p-3" style="z-index:2000;width:min(92vw,520px)"><div id="muActionAlert" class="alert d-none shadow" role="status"></div></div>
+<div class="modal fade" id="lotModal" tabindex="-1" aria-labelledby="lotModalTitle" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title fs-5" id="lotModalTitle">FIFO Lots</h2><button class="btn-close" data-bs-dismiss="modal" aria-label="ปิด"></button></div><div class="modal-body" id="lotModalBody"></div></div></div></div>
+<div class="modal fade" id="addProductModal" tabindex="-1" aria-labelledby="addProductTitle" aria-hidden="true"><div class="modal-dialog modal-lg"><div class="modal-content"><form id="addProductForm" class="mu-ajax-form" method="post" action="{{ url_for('mu.add_product') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="modal-header bg-primary text-white"><h2 class="modal-title fs-5" id="addProductTitle">เพิ่มสินค้า MU พร้อมสต็อกตั้งต้น</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="ปิด"></button></div><div class="modal-body"><div class="mb-3"><label class="form-label">รหัสสินค้าอัตโนมัติ</label><div class="input-group"><input class="form-control" id="addProductCode" name="code" readonly><span class="input-group-text"><i class="fas fa-wand-magic-sparkles"></i></span></div></div><div class="mb-3"><label class="form-label">ชื่อสินค้า</label><input class="form-control" name="name" maxlength="150" required></div><div class="row g-3"><div class="col-6"><label class="form-label">หน่วย</label><input class="form-control" name="unit" maxlength="30" required></div><div class="col-6"><label class="form-label">Safety Stock</label><input class="form-control" name="safety_stock" type="number" min="0" value="0" required></div></div><hr class="my-4"><div class="small text-primary fw-semibold mb-2"><i class="fas fa-layer-group me-2"></i>Lot ตั้งต้น · เลข Lot สร้างอัตโนมัติ</div><div class="row g-3"><div class="col-md-4"><label class="form-label">จำนวนตั้งต้น</label><input class="form-control" id="addProductInitialQty" name="initial_qty" type="number" min="0" value="0" required></div><div class="col-md-4"><label class="form-label">วันที่รับเข้า</label><input class="form-control" id="addProductReceivedDate" name="received_date" type="date" required></div><div class="col-md-4"><label class="form-label">วันหมดอายุ <span class="text-muted">(ถ้ามี)</span></label><input class="form-control" id="addProductExpiryDate" name="expiry_date" type="date"></div></div><div class="alert alert-info small mt-3 mb-0"><i class="fas fa-circle-info me-2"></i>หากจำนวนตั้งต้นเป็น 0 ระบบจะสร้างเฉพาะสินค้าและยังไม่สร้าง Lot</div></div><div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">ยกเลิก</button><button class="btn btn-primary"><i class="fas fa-plus me-2"></i>เพิ่มสินค้าและสต็อก</button></div></form></div></div></div>
+<div class="modal fade" id="receiveStockModal" tabindex="-1" aria-labelledby="receiveStockTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form id="receiveStockForm" class="mu-ajax-form auto-lot-form" method="post" action="{{ url_for('mu.add_lot') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" id="receiveProductId" name="product_id"><div class="modal-header bg-success text-white"><div><h2 class="modal-title fs-5" id="receiveStockTitle">รับเข้าสต็อก MU</h2><div class="small text-white-50" id="receiveProductSummary"></div></div><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="ปิด"></button></div><div class="modal-body"><div class="alert alert-info small"><i class="fas fa-circle-info me-2"></i>FIFO จะเรียงจากวันที่รับสินค้า แล้วใช้ลำดับบันทึกกรณีวันที่เดียวกัน</div><div class="mb-3"><label class="form-label">เลข Lot อัตโนมัติ</label><div class="input-group"><input class="form-control auto-lot-number" name="lot_number" readonly><span class="input-group-text"><i class="fas fa-wand-magic-sparkles"></i></span></div></div><div class="row g-3"><div class="col-6"><label class="form-label">จำนวนรับเข้า</label><div class="input-group"><input class="form-control" name="qty" type="number" min="1" required><span class="input-group-text" id="receiveUnitLabel">หน่วย</span></div></div><div class="col-6"><label class="form-label">วันที่รับ</label><input class="form-control auto-lot-date" name="received_date" type="date" required></div><div class="col-12"><label class="form-label">วันหมดอายุ <span class="text-muted">(ถ้ามี)</span></label><input class="form-control" name="expiry_date" type="date"></div></div></div><div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">ยกเลิก</button><button class="btn btn-success"><i class="fas fa-box-open me-2"></i>ยืนยันรับเข้า</button></div></form></div></div></div>
+<div class="modal fade" id="productEditModal" tabindex="-1" aria-labelledby="productEditTitle" aria-hidden="true"><div class="modal-dialog"><div class="modal-content"><form id="productEditForm" class="mu-ajax-form" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="modal-header"><h2 class="modal-title fs-5" id="productEditTitle">แก้ไขสินค้า MU</h2><button class="btn-close" data-bs-dismiss="modal" aria-label="ปิด"></button></div><div class="modal-body"><div class="mb-3"><label class="form-label">รหัสสินค้า</label><input class="form-control" id="editProductCode" name="code" maxlength="30" required></div><div class="mb-3"><label class="form-label">ชื่อสินค้า</label><input class="form-control" id="editProductName" name="name" maxlength="150" required></div><div class="row g-3"><div class="col-6"><label class="form-label">หน่วย</label><input class="form-control" id="editProductUnit" name="unit" maxlength="30" required></div><div class="col-6"><label class="form-label">Safety Stock</label><input class="form-control" id="editProductSafety" name="safety_stock" type="number" min="0" required></div></div></div><div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">ยกเลิก</button><button class="btn btn-primary">บันทึก</button></div></form></div></div></div>
+<div class="modal fade" id="writeOffModal" tabindex="-1" aria-labelledby="writeOffTitle" aria-hidden="true"><div class="modal-dialog"><div class="modal-content"><form id="writeOffForm" class="mu-ajax-form" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="modal-header bg-danger text-white"><h2 class="modal-title fs-5" id="writeOffTitle">ตัดจำหน่ายสินค้า</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="ปิด"></button></div><div class="modal-body"><div id="writeOffSummary" class="alert alert-warning"></div><div class="mb-3"><label class="form-label">จำนวนตัดจำหน่าย</label><input class="form-control" id="writeOffQty" name="qty" type="number" min="1" required></div><div><label class="form-label">เหตุผล</label><textarea class="form-control" name="reason" maxlength="300" rows="3" required></textarea></div><div class="small text-muted mt-2">ระบบจะหักจาก Lot เก่าสุดก่อนตาม FIFO และบันทึก Audit</div></div><div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">ยกเลิก</button><button class="btn btn-danger">ยืนยันตัดจำหน่าย</button></div></form></div></div></div>
+<div class="modal fade" id="transactionActionModal" tabindex="-1" aria-labelledby="transactionActionTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 shadow-lg"><div class="modal-header"><div><h2 class="modal-title fs-5" id="transactionActionTitle">แก้ไขรายการเบิก</h2><div class="small text-muted" id="transactionActionSummary"></div></div><button class="btn-close" data-bs-dismiss="modal" aria-label="ปิด"></button></div><div class="modal-body"><div class="d-flex gap-2 mb-3" role="tablist" aria-label="เลือกการจัดการรายการ"><button class="btn btn-primary flex-fill transaction-mode-button" id="transactionEditMode" type="button" onclick="switchTransactionAction('edit')"><i class="fas fa-pen me-1"></i>แก้ไขยอด</button><button class="btn btn-outline-danger flex-fill transaction-mode-button" id="transactionCancelMode" type="button" onclick="switchTransactionAction('cancel')"><i class="fas fa-ban me-1"></i>ยกเลิกรายการ</button></div><div class="transaction-action-choice" id="transactionEditPanel"><form id="transactionEditForm" class="mu-ajax-form" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="mb-3"><label class="form-label" for="transactionEditQty">จำนวนใหม่</label><div class="input-group"><input class="form-control" id="transactionEditQty" name="qty" type="number" min="1" required><span class="input-group-text" id="transactionEditUnit"></span></div></div><div class="mb-3"><label class="form-label" for="transactionEditReason">เหตุผลการแก้ไข</label><textarea class="form-control" id="transactionEditReason" name="reason" rows="3" maxlength="300" required></textarea></div><button class="btn btn-primary w-100"><i class="fas fa-floppy-disk me-2"></i>บันทึกยอดใหม่</button></form></div><div class="transaction-action-choice d-none" id="transactionCancelPanel"><form id="transactionCancelForm" class="mu-ajax-form" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="alert alert-danger small"><i class="fas fa-triangle-exclamation me-2"></i>การยกเลิกจะคืนสินค้าเข้า Lot เดิมตามประวัติ FIFO</div><div class="mb-3"><label class="form-label" for="transactionCancelReason">เหตุผลการยกเลิก</label><textarea class="form-control" id="transactionCancelReason" name="reason" rows="3" maxlength="300" required></textarea></div><button class="btn btn-danger w-100"><i class="fas fa-ban me-2"></i>ยืนยันยกเลิกรายการ</button></form></div></div></div></div></div>
+<div class="modal fade" id="muConfirmModal" tabindex="-1" aria-labelledby="muConfirmTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content border-0 shadow-lg"><div class="modal-body p-4"><div class="d-flex gap-3 align-items-start"><div class="mu-confirm-icon flex-shrink-0"><i class="fas fa-triangle-exclamation"></i></div><div><h2 class="h5 mb-2" id="muConfirmTitle">ยืนยันการทำรายการ</h2><p class="text-muted mb-0" id="muConfirmMessage"></p></div></div></div><div class="modal-footer border-0 pt-0 px-4 pb-4"><button class="btn btn-light" type="button" data-bs-dismiss="modal"><i class="fas fa-xmark me-1"></i>ยกเลิก</button><button class="btn btn-danger" id="muConfirmButton" type="button"><i class="fas fa-check me-1"></i>ยืนยัน</button></div></div></div></div>
+<script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/flatpickr/l10n/th.js') }}"></script>
+<script>
+const muCsrfToken={{ csrf_token()|tojson }};
+const muSidebarToggle=document.getElementById('muSidebarToggle');
+function applyMuSidebarState(collapsed){document.body.classList.toggle('mu-sidebar-collapsed',collapsed);if(muSidebarToggle)muSidebarToggle.setAttribute('aria-expanded',String(!collapsed))}
+try{applyMuSidebarState(localStorage.getItem('pcmMuSidebarCollapsed')==='1')}catch(error){applyMuSidebarState(false)}
+if(muSidebarToggle)muSidebarToggle.addEventListener('click',()=>{const collapsed=!document.body.classList.contains('mu-sidebar-collapsed');applyMuSidebarState(collapsed);try{localStorage.setItem('pcmMuSidebarCollapsed',collapsed?'1':'0')}catch(error){/* เมนูยังทำงานได้แม้บันทึกสถานะไม่ได้ */}});
+function showMuAlert(message,success=true){const alert=document.getElementById('muActionAlert');alert.textContent=message;alert.className=`alert alert-${success?'success':'danger'} shadow`;window.clearTimeout(showMuAlert.timer);showMuAlert.timer=window.setTimeout(()=>alert.className='alert d-none shadow',3200)}
+function requestMuConfirmation(title,message){return new Promise(resolve=>{const modalElement=document.getElementById('muConfirmModal');const modal=bootstrap.Modal.getOrCreateInstance(modalElement);document.getElementById('muConfirmTitle').textContent=title;document.getElementById('muConfirmMessage').textContent=message;const confirmButton=document.getElementById('muConfirmButton');let settled=false;const finish=value=>{if(settled)return;settled=true;resolve(value)};confirmButton.onclick=()=>{finish(true);modal.hide()};modalElement.addEventListener('hidden.bs.modal',()=>finish(false),{once:true});modal.show()})}
+async function confirmNativeForm(button,title,message){if(await requestMuConfirmation(title,message))button.closest('form')?.submit()}
+function initializeMuCalendars(root=document){if(typeof flatpickr!=='function')return;if(flatpickr.l10ns?.th)flatpickr.localize(flatpickr.l10ns.th);root.querySelectorAll('input[type="date"]:not([data-flatpickr-bound])').forEach(input=>{input.dataset.flatpickrBound='1';flatpickr(input,{dateFormat:'Y-m-d',altInput:true,altFormat:'j F Y',allowInput:true,disableMobile:true})})}
+function animateMuMetrics(root=document){if(window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;root.querySelectorAll('.metric strong:not([data-counted])').forEach(element=>{const target=Number(element.textContent.trim());if(!Number.isFinite(target))return;element.dataset.counted='1';const started=performance.now();const duration=480;function frame(now){const progress=Math.min(1,(now-started)/duration);const eased=1-Math.pow(1-progress,3);element.textContent=String(Math.round(target*eased));if(progress<1)requestAnimationFrame(frame)}requestAnimationFrame(frame)})}
+document.addEventListener('pointerdown',event=>{const button=event.target.closest('.btn');if(!button||button.disabled||window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;const rect=button.getBoundingClientRect();const size=Math.max(rect.width,rect.height);const ripple=document.createElement('span');ripple.className='mu-ripple';ripple.style.width=ripple.style.height=`${size}px`;ripple.style.left=`${event.clientX-rect.left-size/2}px`;ripple.style.top=`${event.clientY-rect.top-size/2}px`;button.appendChild(ripple);ripple.addEventListener('animationend',()=>ripple.remove(),{once:true})});
+async function readMuJson(response){const contentType=response.headers.get('content-type')||'';if(response.redirected)throw new Error('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่แล้วลองอีกครั้ง');if(!contentType.includes('application/json')){if(response.status===400||response.status===403)throw new Error('ข้อมูลยืนยันความปลอดภัยหมดอายุ กรุณารีเฟรชหน้าแล้วลองอีกครั้ง');throw new Error(`Server ตอบกลับไม่ถูกต้อง (HTTP ${response.status}) กรุณารีเฟรชหน้าแล้วลองอีกครั้ง`)}return response.json()}
+async function openAddProductModal(){const form=document.getElementById('addProductForm');form.reset();const receivedDate=document.getElementById('addProductReceivedDate');const expiryDate=document.getElementById('addProductExpiryDate');const localToday=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);receivedDate.value=localToday;receivedDate._flatpickr?.setDate(localToday,true);expiryDate._flatpickr?.clear();expiryDate.min=localToday;expiryDate._flatpickr?.set('minDate',localToday);if(!receivedDate.dataset.expiryBound){receivedDate.dataset.expiryBound='1';receivedDate.addEventListener('change',()=>{expiryDate.min=receivedDate.value;expiryDate._flatpickr?.set('minDate',receivedDate.value);if(expiryDate.value&&expiryDate.value<receivedDate.value)expiryDate._flatpickr?.clear()})}try{const response=await fetch('/mu/admin/next-product-code');const data=await response.json();if(!response.ok||!data.success)throw new Error(data.message||'ไม่สามารถสร้างรหัสได้');document.getElementById('addProductCode').value=data.next_code;bootstrap.Modal.getOrCreateInstance(document.getElementById('addProductModal')).show()}catch(error){showMuAlert(error.message,false)}}
+function openReceiveStock(productId,code,name,unit){const form=document.getElementById('receiveStockForm');form.reset();form.dataset.productId=String(productId);document.getElementById('receiveProductId').value=productId;document.getElementById('receiveProductSummary').textContent=`${code} · ${name}`;document.getElementById('receiveUnitLabel').textContent=unit;const dateInput=form.querySelector('.auto-lot-date');if(dateInput&&!dateInput.dataset.autoBound){dateInput.dataset.autoBound='1';dateInput.addEventListener('change',()=>loadAutoLot(form))}loadAutoLot(form);bootstrap.Modal.getOrCreateInstance(document.getElementById('receiveStockModal')).show()}
+async function loadAutoLot(form){const dateInput=form.querySelector('.auto-lot-date');const lotInput=form.querySelector('.auto-lot-number');if(!dateInput||!lotInput)return;if(!dateInput.value)dateInput.value=new Date().toISOString().slice(0,10);try{const response=await fetch(`/mu/admin/product/${form.dataset.productId}/next-lot?received_date=${encodeURIComponent(dateInput.value)}`);const data=await response.json();if(response.ok&&data.success)lotInput.value=data.next_lot}catch(error){lotInput.value='AUTO'}}
+function initializeMuWorkspace(root=document){initializeMuCalendars(root);animateMuMetrics(root);root.querySelectorAll('.auto-lot-form[data-product-id]').forEach(form=>{loadAutoLot(form);const dateInput=form.querySelector('.auto-lot-date');if(dateInput&&!dateInput.dataset.autoBound){dateInput.dataset.autoBound='1';dateInput.addEventListener('change',()=>loadAutoLot(form))}});const search=root.querySelector('#muStockLiveSearch');if(search&&!search.dataset.bound){search.dataset.bound='1';search.addEventListener('input',()=>{const keyword=search.value.trim().toLocaleLowerCase('th');root.querySelectorAll('.mu-stock-row').forEach(row=>row.hidden=keyword&&!row.dataset.search.includes(keyword))})}}
+let muWorkspaceController=null;
+function updateMuNavigationState(targetUrl){
+  const targetTab=new URL(targetUrl,window.location.origin).searchParams.get('tab')||'stock';
+  document.querySelectorAll('.admin-sidebar .nav-link').forEach(link=>{
+    const isActive=(new URL(link.href,window.location.origin).searchParams.get('tab')||'stock')===targetTab;
+    link.classList.toggle('active',isActive);
+    if(isActive)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
+  });
+}
+async function refreshMuWorkspace(targetUrl=window.location.href){
+  const current=document.querySelector('.workspace');
+  if(!current)throw new Error('ไม่พบพื้นที่แสดงข้อมูล');
+  muWorkspaceController?.abort();
+  const controller=new AbortController();
+  muWorkspaceController=controller;
+  current.classList.add('mu-workspace-loading');
+  try{
+    const response=await fetch(targetUrl,{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'},signal:controller.signal});
+    if(response.redirected||!response.ok||!(response.headers.get('content-type')||'').includes('text/html'))throw new Error('Session หมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง');
+    const parsed=new DOMParser().parseFromString(await response.text(),'text/html');
+    const replacement=parsed.querySelector('.workspace');
+    if(!replacement)throw new Error('ไม่สามารถอัปเดตหน้าจอได้');
+    replacement.classList.add('mu-workspace-refresh');
+    current.replaceWith(replacement);
+    updateMuNavigationState(targetUrl);
+    initializeMuWorkspace(replacement);
+  }catch(error){
+    if(error.name==='AbortError')return false;
+    current.classList.remove('mu-workspace-loading');
+    throw error;
+  }finally{
+    if(muWorkspaceController===controller)muWorkspaceController=null;
+  }
+  return true;
+}
+async function refreshMuStockPanel(targetUrl,includeSummary=false){const current=document.querySelector('.stock-table-panel');if(!current)throw new Error('ไม่พบตารางสต็อก MU');const savedScrollY=window.scrollY;const savedScrollX=window.scrollX;const currentTableScroll=current.querySelector('.data-table-scroll');const savedTableScrollTop=currentTableScroll?.scrollTop||0;const savedTableScrollLeft=currentTableScroll?.scrollLeft||0;current.classList.add('mu-panel-loading');try{const response=await fetch(targetUrl,{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}});if(response.redirected||!response.ok||!(response.headers.get('content-type')||'').includes('text/html'))throw new Error('Session หมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง');const html=await response.text();const parsed=new DOMParser().parseFromString(html,'text/html');const replacement=parsed.querySelector('.stock-table-panel');if(!replacement)throw new Error('ไม่สามารถโหลดหน้ารายการสต็อกได้');replacement.classList.add('mu-panel-refresh');current.replaceWith(replacement);if(includeSummary){const currentSummary=document.querySelector('.mu-summary-row');const replacementSummary=parsed.querySelector('.mu-summary-row');if(currentSummary&&replacementSummary){currentSummary.replaceWith(replacementSummary);animateMuMetrics(replacementSummary)}}initializeMuWorkspace(replacement);const replacementTableScroll=replacement.querySelector('.data-table-scroll');if(replacementTableScroll){replacementTableScroll.scrollTop=savedTableScrollTop;replacementTableScroll.scrollLeft=savedTableScrollLeft}window.scrollTo({top:savedScrollY,left:savedScrollX,behavior:'auto'})}catch(error){current.classList.remove('mu-panel-loading');throw error}}
+document.addEventListener('click',async event=>{
+  const link=event.target.closest('.admin-sidebar .nav-link');
+  if(!link||event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
+  const targetUrl=new URL(link.href,window.location.origin);
+  if(targetUrl.origin!==window.location.origin)return;
+  event.preventDefault();
+  try{
+    if(await refreshMuWorkspace(targetUrl.href))history.pushState({muNavigation:true},'',targetUrl.href);
+  }catch(error){
+    showMuAlert(error.message,false);
+    window.location.assign(targetUrl.href);
+  }
+});
+document.addEventListener('click',async event=>{const link=event.target.closest('.mu-pagination-link');if(!link)return;event.preventDefault();if(link.closest('.page-item')?.classList.contains('disabled')||link.getAttribute('aria-current')==='page')return;try{await refreshMuStockPanel(link.href);history.pushState({muPage:true},'',link.href)}catch(error){showMuAlert(error.message,false)}});
+document.addEventListener('submit',async event=>{const form=event.target.closest('.mu-monthly-form');if(!form)return;event.preventDefault();const url=new URL(form.action||window.location.href,window.location.origin);new FormData(form).forEach((value,key)=>url.searchParams.set(key,String(value)));try{await refreshMonthlyReport(url.href);history.pushState({muMonth:true},'',url.href)}catch(error){showMuAlert(error.message,false)}});
+window.addEventListener('popstate',async()=>{try{await refreshMuWorkspace(window.location.href)}catch(error){showMuAlert(error.message,false);window.location.reload()}});
+document.addEventListener('submit',async event=>{const form=event.target.closest('.mu-ajax-form');if(!form)return;event.preventDefault();const submitter=event.submitter;const targetUrl=submitter&&submitter.hasAttribute('formaction')?submitter.formAction:form.action;const button=submitter||form.querySelector('button[type="submit"],button:not([type])');if(button)button.disabled=true;try{const response=await fetch(targetUrl,{method:'POST',credentials:'same-origin',body:new FormData(form),headers:{'X-Requested-With':'XMLHttpRequest','X-CSRF-Token':muCsrfToken}});const data=await readMuJson(response);if(!response.ok||!data.success)throw new Error(data.message||'ไม่สามารถบันทึกข้อมูลได้');const modal=form.closest('.modal');if(modal)bootstrap.Modal.getInstance(modal)?.hide();showMuAlert(data.message,true);if(document.querySelector('.stock-table-panel'))await refreshMuStockPanel(window.location.href,true);else await refreshMuWorkspace()}catch(error){showMuAlert(error.message,false)}finally{if(button)button.disabled=false}});
+updateMuNavigationState(window.location.href);
+initializeMuWorkspace(document);
+function openProductEdit(id,code,name,unit,safety){const form=document.getElementById('productEditForm');form.action=`/mu/admin/product/${id}/edit`;document.getElementById('editProductCode').value=code;document.getElementById('editProductName').value=name;document.getElementById('editProductUnit').value=unit;document.getElementById('editProductSafety').value=safety;bootstrap.Modal.getOrCreateInstance(document.getElementById('productEditModal')).show()}
+function openWriteOff(id,code,name,stock,unit){const form=document.getElementById('writeOffForm');form.action=`/mu/admin/product/${id}/write-off`;document.getElementById('writeOffSummary').textContent=`${code} · ${name} | คงเหลือ ${stock} ${unit}`;const qty=document.getElementById('writeOffQty');qty.max=stock;qty.value='';bootstrap.Modal.getOrCreateInstance(document.getElementById('writeOffModal')).show()}
+function switchTransactionAction(mode){
+  const editPanel=document.getElementById('transactionEditPanel');
+  const cancelPanel=document.getElementById('transactionCancelPanel');
+  const editButton=document.getElementById('transactionEditMode');
+  const cancelButton=document.getElementById('transactionCancelMode');
+  const outgoing=mode==='edit'?cancelPanel:editPanel;
+  const incoming=mode==='edit'?editPanel:cancelPanel;
+  outgoing.classList.add('is-switching');
+  window.setTimeout(()=>{
+    outgoing.classList.add('d-none');
+    outgoing.classList.remove('is-switching');
+    incoming.classList.remove('d-none');
+    requestAnimationFrame(()=>incoming.classList.remove('is-switching'));
+    incoming.querySelector('input:not([type="hidden"]),textarea')?.focus();
+  },120);
+  incoming.classList.add('is-switching');
+  editButton.className=`btn ${mode==='edit'?'btn-primary':'btn-outline-primary'} flex-fill transaction-mode-button`;
+  cancelButton.className=`btn ${mode==='cancel'?'btn-danger':'btn-outline-danger'} flex-fill transaction-mode-button`;
+  document.getElementById('transactionActionTitle').textContent=mode==='edit'?'แก้ไขรายการเบิก':'ยกเลิกรายการเบิก';
+}
+function openTransactionAction(id,code,name,unit,qty){
+  const editForm=document.getElementById('transactionEditForm');
+  const cancelForm=document.getElementById('transactionCancelForm');
+  editForm.reset();
+  cancelForm.reset();
+  editForm.action=`/mu/admin/transaction/${id}/edit`;
+  cancelForm.action=`/mu/admin/transaction/${id}/cancel`;
+  document.getElementById('transactionActionSummary').textContent=`${code} · ${name} | ยอดปัจจุบัน ${qty} ${unit}`;
+  document.getElementById('transactionEditQty').value=qty;
+  document.getElementById('transactionEditUnit').textContent=unit;
+  document.getElementById('transactionEditPanel').classList.remove('d-none','is-switching');
+  document.getElementById('transactionCancelPanel').classList.add('d-none');
+  switchTransactionAction('edit');
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('transactionActionModal')).show();
+}
+document.addEventListener('click',event=>{
+  const button=event.target.closest('[data-transaction-action]');
+  if(!button)return;
+  openTransactionAction(
+    Number(button.dataset.transactionId),
+    button.dataset.code||'',
+    button.dataset.name||'',
+    button.dataset.unit||'',
+    Number(button.dataset.qty)
+  );
+});
+async function refreshMonthlyReport(targetUrl){
+  const current=document.querySelector('.monthly-report-panel');
+  if(!current)throw new Error('ไม่พบตารางรายงานรายเดือน');
+  current.classList.add('mu-panel-loading');
+  try{
+    const response=await fetch(targetUrl,{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}});
+    if(response.redirected||!response.ok||!(response.headers.get('content-type')||'').includes('text/html'))throw new Error('Session หมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง');
+    const parsed=new DOMParser().parseFromString(await response.text(),'text/html');
+    const replacement=parsed.querySelector('.monthly-report-panel');
+    if(!replacement)throw new Error('ไม่สามารถโหลดรายงานรายเดือนได้');
+    replacement.classList.add('mu-panel-refresh');
+    current.replaceWith(replacement);
+    initializeMuWorkspace(replacement);
+  }catch(error){
+    current.classList.remove('mu-panel-loading');
+    throw error;
+  }
+}
+function createLotInput(name,value,type='text'){const input=document.createElement('input');input.className='form-control form-control-sm';input.name=name;input.type=type;input.value=value??'';if(name!=='expiry_date')input.required=true;if(type==='number')input.min='0';return input}
+async function showLotsTable(productId,productName){
+  const body=document.getElementById('lotModalBody');
+  document.getElementById('lotModalTitle').textContent=`จัดการ FIFO Lots · ${productName}`;
+  body.textContent='กำลังโหลดข้อมูล Lot...';
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('lotModal')).show();
+  try{
+    const response=await fetch(`/mu/admin/product/${productId}/lots`,{credentials:'same-origin'});
+    if(!response.ok)throw new Error('ไม่สามารถโหลดข้อมูล Lot ได้');
+    const lots=await response.json();
+    if(!lots.length){body.innerHTML='<div class="text-center text-muted py-5"><i class="fas fa-layer-group fs-1 mb-3 d-block"></i>ยังไม่มี Lot สำหรับสินค้านี้</div>';return}
+    const activeLots=lots.filter(lot=>Number(lot.qty)>0);
+    const depletedLots=lots.filter(lot=>Number(lot.qty)<=0);
+    const filterBar=document.createElement('div');
+    filterBar.className='lot-filter-bar d-flex flex-wrap justify-content-between align-items-center gap-2 p-2 mb-3';
+    const filterStatus=document.createElement('span');
+    filterStatus.className='small text-muted';
+    filterStatus.setAttribute('role','status');
+    filterStatus.setAttribute('aria-live','polite');
+    const historyButton=document.createElement('button');
+    historyButton.type='button';
+    historyButton.className='btn btn-sm btn-outline-secondary';
+    historyButton.setAttribute('aria-pressed','false');
+    historyButton.innerHTML=`<i class="fas fa-clock-rotate-left me-1" aria-hidden="true"></i>แสดง Lot หมดแล้ว/ประวัติ <span class="badge text-bg-secondary ms-1">${depletedLots.length}</span>`;
+    filterBar.append(filterStatus,historyButton);
+    const tableWrap=document.createElement('div');
+    tableWrap.className='table-responsive lot-table-wrap';
+    const table=document.createElement('table');
+    table.className='table table-hover align-middle lot-table mb-0';
+    table.innerHTML='<thead><tr><th>FIFO</th><th>เลข Lot</th><th>คงเหลือ</th><th>วันที่รับ</th><th>วันหมดอายุ</th><th>ผู้สร้าง</th><th class="text-end">เลือก</th></tr></thead>';
+    const tbody=document.createElement('tbody');
+    const editor=document.createElement('div');
+    editor.className='mt-3';
+    const emptyEditor=document.createElement('div');
+    emptyEditor.className='text-center text-muted border rounded py-4';
+    emptyEditor.innerHTML='<i class="fas fa-hand-pointer me-2"></i>กดเลือก Lot จากตารางเพื่อแก้ไขหรือลบ';
+    editor.appendChild(emptyEditor);
+    function selectLot(lot,index,row){
+      tbody.querySelectorAll('tr').forEach(item=>item.classList.remove('is-selected'));
+      row.classList.add('is-selected');
+      const form=document.createElement('form');
+      form.method='post';
+      form.action=`/mu/admin/lot/${lot.id}/edit`;
+      form.className='lot-editor p-3 mu-ajax-form';
+      const csrf=document.createElement('input');
+      csrf.type='hidden';csrf.name='csrf_token';csrf.value=muCsrfToken;
+      const heading=document.createElement('div');
+      heading.className='d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3';
+      const title=document.createElement('strong');
+      title.textContent=`แก้ไข FIFO #${index+1} · ${lot.lot_number}`;
+      const actor=document.createElement('span');
+      actor.className='badge bg-secondary-subtle text-secondary-emphasis';
+      actor.textContent=`สร้างโดย ${lot.created_by}`;
+      heading.append(title,actor);
+      const grid=document.createElement('div');
+      grid.className='row g-3';
+      [['lot_number',lot.lot_number,'text','Lot No.'],['qty',lot.qty,'number','คงเหลือ'],['received_date',lot.received_date,'date','วันที่รับ'],['expiry_date',lot.expiry_date||'','date','หมดอายุ'],['reason','','text','เหตุผลการแก้ไข/ลบ']].forEach(([name,value,type,label])=>{
+        const col=document.createElement('div');
+        col.className=name==='reason'?'col-12':'col-6 col-lg-3';
+        const fieldLabel=document.createElement('label');
+        fieldLabel.className='form-label small fw-semibold';
+        fieldLabel.textContent=label;
+        col.append(fieldLabel,createLotInput(name,value,type));
+        grid.appendChild(col);
+      });
+      const actions=document.createElement('div');
+      actions.className='col-12 d-flex flex-wrap justify-content-end gap-2';
+      const deleteButton=document.createElement('button');
+      deleteButton.className='btn btn-outline-danger';
+      deleteButton.type='submit';
+      deleteButton.setAttribute('formaction',`/mu/admin/lot/${lot.id}/delete`);
+      deleteButton.innerHTML='<i class="fas fa-trash me-1"></i>ลบ Lot';
+      deleteButton.addEventListener('click',async event=>{if(deleteButton.dataset.confirmed==='1'){delete deleteButton.dataset.confirmed;return}event.preventDefault();if(await requestMuConfirmation('ยืนยันลบ Lot',`ต้องการลบ ${lot.lot_number} หรือไม่? Lot ที่มีประวัติการเบิกจะลบไม่ได้`)){deleteButton.dataset.confirmed='1';form.requestSubmit(deleteButton)}});
+      const saveButton=document.createElement('button');
+      saveButton.className='btn btn-primary';
+      saveButton.type='submit';
+      saveButton.innerHTML='<i class="fas fa-floppy-disk me-1"></i>บันทึก Lot';
+      actions.append(deleteButton,saveButton);
+      grid.appendChild(actions);
+      form.append(csrf,heading,grid);
+      editor.replaceChildren(form);
+      initializeMuCalendars(form);
+      form.querySelector('input[name="lot_number"]')?.focus();
+    }
+    function renderLotRows(showDepleted=false){
+      tbody.replaceChildren();
+      editor.replaceChildren(emptyEditor);
+      const visibleLots=showDepleted?lots:activeLots;
+      filterStatus.textContent=showDepleted
+        ?`แสดงทั้งหมด ${lots.length} Lot · หมดแล้ว ${depletedLots.length} Lot`
+        :`Lot ที่ใช้งานได้ ${activeLots.length} Lot`;
+      if(!visibleLots.length){
+        const emptyRow=document.createElement('tr');
+        const emptyCell=document.createElement('td');
+        emptyCell.colSpan=7;
+        emptyCell.className='text-center text-muted py-4';
+        emptyCell.textContent=depletedLots.length?'ไม่มี Lot ที่มีสต็อกคงเหลือ':'ยังไม่มี Lot สำหรับสินค้านี้';
+        emptyRow.appendChild(emptyCell);
+        tbody.appendChild(emptyRow);
+        return;
+      }
+      let activeIndex=0;
+      visibleLots.forEach(lot=>{
+      const isDepleted=Number(lot.qty)<=0;
+      if(!isDepleted)activeIndex+=1;
+      const fifoLabel=isDepleted?'หมดแล้ว':`#${activeIndex}`;
+      const row=document.createElement('tr');
+      if(isDepleted)row.classList.add('is-depleted');
+      const values=[fifoLabel,lot.lot_number,lot.qty,lot.received_date,lot.expiry_date||'-',lot.created_by];
+      values.forEach((value,columnIndex)=>{
+        const cell=document.createElement('td');
+        cell.textContent=value;
+        if(columnIndex===0)cell.className=isDepleted?'fw-semibold text-secondary':'fw-bold text-primary';
+        if(columnIndex===2)cell.className='fw-semibold';
+        row.appendChild(cell);
+      });
+      const actionCell=document.createElement('td');
+      actionCell.className='text-end';
+      const selectButton=document.createElement('button');
+      selectButton.className='btn btn-sm btn-outline-primary';
+      selectButton.type='button';
+      selectButton.innerHTML='<i class="fas fa-pen-to-square me-1"></i>เลือก';
+      const fifoIndex=isDepleted?lots.indexOf(lot):activeIndex-1;
+      selectButton.addEventListener('click',event=>{event.stopPropagation();selectLot(lot,fifoIndex,row)});
+      actionCell.appendChild(selectButton);
+      row.appendChild(actionCell);
+      row.addEventListener('click',()=>selectLot(lot,fifoIndex,row));
+      tbody.appendChild(row);
+      });
+    }
+    historyButton.addEventListener('click',()=>{
+      const showDepleted=historyButton.getAttribute('aria-pressed')!=='true';
+      historyButton.setAttribute('aria-pressed',String(showDepleted));
+      historyButton.classList.toggle('btn-secondary',showDepleted);
+      historyButton.classList.toggle('btn-outline-secondary',!showDepleted);
+      historyButton.innerHTML=showDepleted
+        ?`<i class="fas fa-boxes-stacked me-1" aria-hidden="true"></i>ซ่อน Lot หมดแล้ว <span class="badge text-bg-light ms-1">${depletedLots.length}</span>`
+        :`<i class="fas fa-clock-rotate-left me-1" aria-hidden="true"></i>แสดง Lot หมดแล้ว/ประวัติ <span class="badge text-bg-secondary ms-1">${depletedLots.length}</span>`;
+      renderLotRows(showDepleted);
+    });
+    renderLotRows(false);
+    table.appendChild(tbody);
+    tableWrap.appendChild(table);
+    body.replaceChildren(filterBar,tableWrap,editor);
+  }catch(error){body.textContent=error.message}
+}
+</script>
+</body>
+</html>

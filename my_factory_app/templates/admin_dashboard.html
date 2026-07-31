@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="th">
+<html lang="th" data-bs-theme="light">
 
 <head>
     <meta charset="UTF-8">
@@ -26,12 +26,15 @@
 
         /* --- 1. โครงสร้าง Sidebar และ Main Content --- */
         :root {
-            --sidebar-width: 260px;
-            --dark-bg: #151d2b;
-            --panel-bg: rgba(255, 255, 255, 0.88);
-            --border-soft: rgba(9, 64, 125, 0.14);
-            --brand: #0d6efd;
-            --brand-dark: #0a4aa4;
+            --sidebar-width: 248px;
+            --sidebar-collapsed-width: 72px;
+            --dark-bg: #212631;
+            --panel-bg: #212631;
+            --border-soft: #323a49;
+            --brand: #321fdb;
+            --brand-dark: #2819ae;
+            --page-bg: #181924;
+            --muted-text: #9da5b1;
             --motion-multiplier: 1;
             --action-primary: #0d6efd;
             --action-primary-dark: #0b57cf;
@@ -46,36 +49,49 @@
         }
 
         body {
-            background:
-                radial-gradient(circle at 9% 10%, #d9ecff 0%, rgba(217, 236, 255, 0) 34%),
-                radial-gradient(circle at 95% 90%, #e3f9ef 0%, rgba(227, 249, 239, 0) 35%),
-                linear-gradient(145deg, #f2f7ff 0%, #f7fbff 52%, #f4faf7 100%);
+            background: var(--page-bg);
+            color: #d8dbe0;
             position: relative;
             min-height: 100vh;
         }
 
         body::before {
-            content: "";
-            position: fixed;
-            inset: 0;
-            pointer-events: none;
-            background-image: linear-gradient(rgba(13, 110, 253, 0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(13, 110, 253, 0.025) 1px, transparent 1px);
-            background-size: 28px 28px;
-            z-index: 0;
+            display: none;
         }
 
         .content-wrapper {
-            margin-left: 260px;
+            margin-left: var(--sidebar-width);
             position: relative;
             z-index: 1;
-            animation: pageRise 0.5s ease;
+            padding-top: 0 !important;
+            animation: pageRise 0.35s ease;
         }
 
         .sidebar {
-            background: linear-gradient(175deg, #101724 0%, #182338 50%, #0f1725 100%);
+            background: #212631 !important;
             min-height: 100vh;
             transition: all 0.3s ease;
             border-right: none;
+        }
+
+        .content-wrapper {
+            transition: width 0.22s ease, margin-left 0.22s ease;
+        }
+
+        .sidebar-toggle-btn {
+            width: 40px;
+            height: 40px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #c4c9d0;
+            border: 0;
+            border-radius: 50%;
+            background: transparent;
+        }
+
+        .sidebar-toggle-btn:hover {
+            background: #323a49;
         }
 
         .offcanvas.sidebar {
@@ -91,13 +107,96 @@
                 left: 0;
                 width: var(--sidebar-width);
                 z-index: 1040;
-                box-shadow: 8px 0 24px rgba(6, 14, 29, 0.25);
+                box-shadow: 2px 0 10px rgba(20, 30, 45, 0.16);
             }
 
             .content-wrapper {
                 margin-left: var(--sidebar-width);
                 width: calc(100% - var(--sidebar-width));
                 min-height: 100vh;
+            }
+
+            body.sidebar-collapsed .sidebar {
+                width: var(--sidebar-collapsed-width);
+            }
+
+            body.sidebar-collapsed .content-wrapper {
+                margin-left: var(--sidebar-collapsed-width);
+                width: calc(100% - var(--sidebar-collapsed-width));
+            }
+
+            body.sidebar-collapsed .sidebar .nav-category,
+            body.sidebar-collapsed .sidebar h5,
+            body.sidebar-collapsed .sidebar small,
+            body.sidebar-collapsed .sidebar .menu-counter-badge,
+            body.sidebar-collapsed .sidebar .px-4.py-3.mt-auto {
+                display: none !important;
+            }
+
+            body.sidebar-collapsed .sidebar .px-4.mb-4 {
+                padding: 0 !important;
+                margin: 4px 0 18px !important;
+            }
+
+            body.sidebar-collapsed .sidebar .px-4.mb-4 .d-flex {
+                justify-content: center;
+            }
+
+            body.sidebar-collapsed .sidebar .nav-link {
+                width: var(--sidebar-collapsed-width);
+                min-height: 48px;
+                padding: 12px 0;
+                justify-content: center;
+                overflow: hidden;
+                white-space: nowrap;
+                font-size: 0;
+            }
+
+            body.sidebar-collapsed .sidebar .nav-link span {
+                font-size: 0;
+            }
+
+            body.sidebar-collapsed .sidebar .nav-link i {
+                width: 28px;
+                margin: 0 !important;
+                font-size: 1.1rem;
+            }
+
+            body.sidebar-collapsed .sidebar:hover {
+                width: var(--sidebar-width);
+                box-shadow: 10px 0 30px rgba(0, 0, 0, 0.34);
+            }
+
+            body.sidebar-collapsed .sidebar:hover .nav-category,
+            body.sidebar-collapsed .sidebar:hover h5,
+            body.sidebar-collapsed .sidebar:hover small,
+            body.sidebar-collapsed .sidebar:hover .menu-counter-badge {
+                display: block !important;
+            }
+
+            body.sidebar-collapsed .sidebar:hover .px-4.mb-4 {
+                padding-left: 1.5rem !important;
+                padding-right: 1.5rem !important;
+            }
+
+            body.sidebar-collapsed .sidebar:hover .px-4.mb-4 .d-flex {
+                justify-content: flex-start;
+            }
+
+            body.sidebar-collapsed .sidebar:hover .nav-link {
+                width: var(--sidebar-width);
+                padding: 10px 20px;
+                justify-content: flex-start;
+                font-size: 0.95rem;
+            }
+
+            body.sidebar-collapsed .sidebar:hover .nav-link span {
+                font-size: 0.95rem;
+            }
+
+            body.sidebar-collapsed .sidebar:hover .nav-link i {
+                width: 25px;
+                margin-right: 10px !important;
             }
         }
 
@@ -125,16 +224,16 @@
         }
 
         .nav-link {
-            color: #ced4da !important;
-            padding: 11px 22px;
+            color: rgba(255, 255, 255, 0.72) !important;
+            padding: 10px 20px;
             font-size: 0.95rem;
             display: flex;
             align-items: center;
             transition: all 0.25s;
             text-decoration: none;
             border-left: 4px solid transparent;
-            border-radius: 0 14px 14px 0;
-            margin-right: 10px;
+            border-radius: 0;
+            margin-right: 0;
         }
 
         .nav-link i {
@@ -145,16 +244,16 @@
 
         .nav-link:hover {
             color: #fff !important;
-            background-color: rgba(115, 170, 255, 0.14);
-            padding-left: 30px;
+            background-color: rgba(255, 255, 255, 0.08);
+            padding-left: 24px;
         }
 
         .nav-link.active {
             color: #fff !important;
-            background: linear-gradient(90deg, rgba(13, 110, 253, 0.22), rgba(13, 110, 253, 0.06));
-            border-left-color: #76adff;
+            background: #321fdb;
+            border-left-color: #8a7cff;
             font-weight: 500;
-            box-shadow: 0 8px 22px rgba(13, 110, 253, 0.18);
+            box-shadow: inset 4px 0 0 #8a7cff;
         }
 
         .navbar-dark.bg-dark {
@@ -167,17 +266,97 @@
         .content-wrapper .card {
             background: var(--panel-bg);
             border: 1px solid var(--border-soft) !important;
-            box-shadow: 0 12px 30px rgba(12, 48, 90, 0.08) !important;
-            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(60, 75, 100, 0.08) !important;
+            border-radius: 6px;
         }
 
         .content-wrapper .card:hover {
-            box-shadow: 0 18px 36px rgba(12, 48, 90, 0.12) !important;
+            box-shadow: 0 4px 14px rgba(60, 75, 100, 0.13) !important;
+        }
+
+        .admin-topbar {
+            min-height: 64px;
+            background: #212631;
+            border-bottom: 1px solid var(--border-soft);
+            box-shadow: 0 1px 4px rgba(60, 75, 100, 0.08);
+        }
+
+        .admin-breadcrumb {
+            color: var(--muted-text);
+            font-size: 0.82rem;
+        }
+
+        .admin-page-title {
+            color: #f0f1f3;
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+
+        .admin-user-chip {
+            min-height: 40px;
+            border-left: 1px solid var(--border-soft);
+            color: #f0f1f3;
+        }
+
+        .admin-avatar {
+            width: 34px;
+            height: 34px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            color: #fff;
+            background: linear-gradient(135deg, #321fdb, #39f);
+            box-shadow: 0 2px 8px rgba(50, 31, 219, 0.25);
+        }
+
+        .admin-header-tool {
+            width: 36px;
+            height: 36px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            color: #4f5d73;
+        }
+
+        .admin-account-menu {
+            min-width: 230px;
+        }
+
+        .admin-user-chip.dropdown-toggle::after {
+            margin-left: 0.35rem;
+            color: var(--muted-text);
+        }
+
+        .dashboard-content {
+            padding-top: 24px;
+            padding-bottom: 32px;
+        }
+
+        .content-wrapper .table {
+            --bs-table-bg: transparent;
+            --bs-table-color: #d8dbe0;
+            --bs-table-border-color: #323a49;
+            --bs-table-hover-bg: rgba(255, 255, 255, 0.035);
+        }
+
+        .content-wrapper .table thead th {
+            background: #1b1f2a !important;
+            color: #c4c9d0 !important;
+        }
+
+        .admin-account-menu {
+            background: #212631;
+            border: 1px solid #323a49 !important;
         }
 
         .stat-card {
             overflow: hidden;
             position: relative;
+            min-height: 128px;
+            color: #fff;
+            border: 0 !important;
             transition: transform 0.25s ease, box-shadow 0.25s ease;
         }
 
@@ -189,7 +368,37 @@
             right: -46px;
             top: -52px;
             border-radius: 50%;
-            background: rgba(13, 110, 253, 0.06);
+            background: rgba(255, 255, 255, 0.12);
+        }
+
+        .stat-card::before {
+            content: "";
+            position: absolute;
+            inset: auto 0 0;
+            height: 34px;
+            background: linear-gradient(90deg, rgba(255, 255, 255, 0.12), transparent);
+        }
+
+        .pending-widget { background: #5856d6 !important; }
+        .low-stock-widget { background: #3399ff !important; }
+        .online-widget { background: #f9b115 !important; }
+        .email-widget { background: #e55353 !important; }
+        .stat-card .text-muted,
+        .stat-card .text-dark { color: #fff !important; }
+        .stat-card .small { color: rgba(255, 255, 255, 0.8) !important; }
+        .stat-card .stat-icon {
+            position: absolute;
+            right: 16px;
+            top: 16px;
+            width: auto;
+            height: auto;
+            padding: 0 !important;
+            color: rgba(255, 255, 255, 0.34) !important;
+            background: transparent !important;
+        }
+        .stat-card .badge {
+            color: #fff !important;
+            background: rgba(255, 255, 255, 0.18) !important;
         }
 
         .stat-card:hover {
@@ -654,6 +863,11 @@
         .menu-counter-badge {
             font-size: 0.7rem;
             min-width: 20px;
+        }
+        /* ไม่มีรายการใหม่ต้องซ่อนเสมอ แม้ Sidebar แบบย่อกำลังถูก hover */
+        .sidebar .menu-counter-badge.is-empty,
+        body.sidebar-collapsed .sidebar:hover .menu-counter-badge.is-empty {
+            display: none !important;
         }
 
         /* ใส่ในส่วน <style> */
@@ -1246,6 +1460,381 @@
         .card-header-scheduled { background: linear-gradient(135deg, #ff6b35, #f7931e); color: #fff; }
         .modal-header-reschedule { background: linear-gradient(135deg, #0b6cc7, #0e91d8); }
         .low-stock-search-input { width: 160px; }
+
+        /* Light admin theme: ลดความเข้มของหน้าสต็อกโดยไม่เปลี่ยนโครงสร้างและฟังก์ชัน */
+        :root {
+            --page-bg: #eef3f8;
+            --panel-bg: #ffffff;
+            --border-soft: #d9e1ea;
+            --muted-text: #66758a;
+        }
+        body {
+            background: var(--page-bg);
+            color: #27364b;
+        }
+        .sidebar {
+            background: #29384d !important;
+            border-right: 1px solid #364960;
+            transition: none !important;
+        }
+        .content-wrapper {
+            transition: none !important;
+        }
+        .sidebar .nav-category {
+            color: #aebdce;
+            font-weight: 500;
+        }
+        .sidebar .nav-link {
+            color: #e0e7ef !important;
+            transition: background-color .12s ease, color .12s ease;
+        }
+        .sidebar .nav-link:hover {
+            color: #ffffff !important;
+            background: #354a63;
+            padding-left: 20px;
+        }
+        .sidebar .nav-link.active {
+            color: #ffffff !important;
+            background: #3867df;
+            border-left-color: #9fc0ff;
+            box-shadow: inset 4px 0 0 #9fc0ff;
+        }
+        .admin-topbar,
+        .navbar-dark.bg-dark {
+            background: #ffffff !important;
+            color: #27364b;
+            border-bottom-color: var(--border-soft);
+            box-shadow: 0 2px 8px rgba(31, 54, 82, .07);
+        }
+        .admin-page-title,
+        .admin-user-chip {
+            color: #27364b;
+        }
+        .sidebar-toggle-btn {
+            color: #52647a;
+        }
+        .sidebar-toggle-btn:hover {
+            color: #254d82;
+            background: #edf2f7;
+        }
+        .content-wrapper .card {
+            background: #ffffff;
+            color: #27364b;
+            border-color: var(--border-soft) !important;
+            box-shadow: 0 3px 12px rgba(31, 54, 82, .07) !important;
+        }
+        .content-wrapper .table {
+            --bs-table-bg: #ffffff;
+            --bs-table-color: #33445a;
+            --bs-table-border-color: #e1e7ee;
+            --bs-table-hover-bg: #f4f8fc;
+            color: #33445a;
+        }
+        .content-wrapper .table thead th {
+            background: #edf2f7 !important;
+            color: #405269 !important;
+            border-bottom-color: #d6dee8;
+        }
+        .content-wrapper .table tbody td {
+            background-color: #ffffff;
+            color: #33445a;
+        }
+        .content-wrapper .table tbody tr:hover > * {
+            background-color: #f4f8fc !important;
+        }
+        .content-wrapper .table tbody tr.table-danger > * {
+            background-color: #fde8ea !important;
+            color: #842029;
+        }
+        .content-wrapper .table tbody tr.table-warning > * {
+            background-color: #fff4d6 !important;
+            color: #664d03;
+        }
+        .content-wrapper .table tbody tr.table-info > * {
+            background-color: #e4f3fb !important;
+            color: #055160;
+        }
+        .content-wrapper .text-muted {
+            color: #6b798c !important;
+        }
+        .content-wrapper .stat-card .text-muted {
+            color: rgba(255, 255, 255, .86) !important;
+        }
+        .content-wrapper .stat-card .text-dark,
+        .content-wrapper .stat-card .h4 {
+            color: #ffffff !important;
+            text-shadow: 0 1px 2px rgba(20, 30, 50, .18);
+        }
+        .content-wrapper .stat-card .stat-icon {
+            color: rgba(255, 255, 255, .48) !important;
+        }
+        .content-wrapper .stat-card .badge {
+            color: #ffffff !important;
+            background: rgba(31, 41, 55, .24) !important;
+            border: 1px solid rgba(255, 255, 255, .22);
+        }
+        .admin-account-menu {
+            background: #ffffff;
+            color: #27364b;
+            border-color: var(--border-soft) !important;
+        }
+        .admin-account-menu .dropdown-item {
+            color: #33445a;
+        }
+        .admin-account-menu .dropdown-item:hover {
+            background: #edf3f8;
+        }
+        @media (min-width: 992px) {
+            body.sidebar-collapsed .sidebar:hover {
+                box-shadow: 8px 0 24px rgba(31, 54, 82, .16);
+            }
+        }
+
+        /* Compact sidebar: เก็บทุกเมนูให้อยู่ในกรอบและลดพื้นที่ว่างที่ไม่จำเป็น */
+        .sidebar {
+            overflow: hidden;
+            transition: width .18s cubic-bezier(.4, 0, .2, 1) !important;
+            will-change: width;
+        }
+        .sidebar > .d-flex {
+            height: 100%;
+            min-height: 0;
+            padding-top: .75rem !important;
+            padding-bottom: .65rem !important;
+            overflow: hidden;
+        }
+        .sidebar > .d-flex > .px-4.mb-4 {
+            margin-top: 0 !important;
+            margin-bottom: .8rem !important;
+            padding-left: 1.15rem !important;
+            padding-right: 1.15rem !important;
+        }
+        .sidebar > .d-flex > .flex-grow-1 {
+            min-height: 0;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            scrollbar-width: thin;
+            scrollbar-color: #718198 transparent;
+        }
+        .sidebar > .d-flex > .flex-grow-1::-webkit-scrollbar {
+            width: 5px;
+        }
+        .sidebar > .d-flex > .flex-grow-1::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .sidebar > .d-flex > .flex-grow-1::-webkit-scrollbar-thumb {
+            background: #718198;
+            border-radius: 999px;
+        }
+        .sidebar .nav-category {
+            padding: .85rem 1rem .28rem;
+            font-size: .66rem;
+            letter-spacing: .065em;
+            line-height: 1.2;
+        }
+        .sidebar-group-toggle {
+            width: 100%;
+            min-height: 38px;
+            display: flex;
+            align-items: center;
+            gap: .55rem;
+            padding: .48rem 1rem;
+            color: #b9c6d6;
+            background: transparent;
+            border: 0;
+            border-top: 1px solid rgba(255,255,255,.055);
+            font-size: .82rem;
+            font-weight: 600;
+            letter-spacing: .02em;
+            text-align: left;
+            position: relative;
+            overflow: hidden;
+            transition: color .18s ease, background-color .18s ease, box-shadow .18s ease;
+        }
+        .sidebar-group-toggle:hover,
+        .sidebar-group-toggle[aria-expanded="true"] {
+            color: #ffffff;
+            background: rgba(255,255,255,.055);
+        }
+        .sidebar-group-toggle:hover {
+            box-shadow: none;
+        }
+        .sidebar-group-toggle .group-icon {
+            width: 20px;
+            color: #8fa8c2;
+            font-size: 1rem;
+            text-align: center;
+            transition: color .18s ease, transform .18s ease;
+        }
+        .sidebar-group-toggle:hover .group-icon {
+            color: #8eb6ff;
+            transform: none;
+        }
+        .sidebar-group-toggle .group-chevron {
+            margin-left: auto;
+            font-size: .68rem;
+            transition: transform .2s ease, color .18s ease;
+        }
+        .sidebar-group-toggle[aria-expanded="true"] .group-chevron {
+            transform: rotate(90deg);
+        }
+        .sidebar-submenu {
+            padding: .18rem 0 .35rem;
+            background: rgba(11, 25, 43, .13);
+        }
+        .sidebar-submenu .nav-link {
+            padding-left: 1.35rem;
+            position: relative;
+            transition: color .18s ease, background-color .18s ease, box-shadow .18s ease, transform .18s ease;
+        }
+        .sidebar-submenu .nav-link:hover {
+            padding-left: 1.35rem;
+            transform: none;
+            box-shadow: none;
+        }
+        .sidebar-submenu .nav-link i {
+            transition: color .18s ease, transform .18s ease;
+        }
+        .sidebar-submenu .nav-link:hover i {
+            transform: none;
+        }
+        .sidebar .nav-link {
+            min-width: 0;
+            min-height: 40px;
+            padding: .48rem 1rem;
+            font-size: .86rem;
+            line-height: 1.2;
+            gap: .2rem;
+        }
+        .sidebar .nav-link:hover {
+            padding-left: 1rem;
+        }
+        .sidebar .nav-link > span:first-child {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .sidebar .nav-link i {
+            width: 22px;
+            margin-right: .35rem !important;
+            font-size: 1rem;
+            flex: 0 0 22px;
+            text-align: center;
+        }
+        .sidebar .menu-counter-badge {
+            flex: 0 0 auto;
+            margin-left: auto;
+        }
+        .sidebar > .d-flex > .px-4.py-3.mt-auto {
+            padding: .7rem 1rem 0 !important;
+            flex: 0 0 auto;
+        }
+        .sidebar > .d-flex > .px-4.py-3.mt-auto .btn {
+            min-height: 36px;
+            padding: .36rem .65rem;
+            font-size: .82rem;
+        }
+        @media (min-width: 992px) {
+            body.sidebar-collapsed .sidebar:hover .nav-link {
+                padding: .48rem 1rem;
+                font-size: .86rem;
+            }
+            body.sidebar-collapsed .sidebar:hover .nav-link span {
+                font-size: .86rem;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-group-toggle {
+                width: var(--sidebar-collapsed-width);
+                min-height: 46px;
+                justify-content: center;
+                padding: .48rem 0;
+                font-size: 0;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-group-toggle .group-icon {
+                display: inline-block;
+                width: 24px;
+                flex: 0 0 24px;
+                color: #c5d3e3;
+                font-size: 1.05rem;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-group-toggle:hover .group-icon {
+                transform: none;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-group-toggle .group-chevron {
+                display: none;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-submenu .nav-link > span:first-child {
+                width: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                overflow: visible;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-submenu .nav-link > span:first-child i {
+                display: inline-block;
+                font-size: 1.05rem;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-submenu .nav-link.with-counter {
+                position: relative;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-submenu .menu-counter-badge {
+                position: absolute;
+                top: 5px;
+                right: 7px;
+                display: inline-flex !important;
+                align-items: center;
+                justify-content: center;
+                min-width: 18px;
+                height: 18px;
+                padding: 0 5px;
+                margin: 0;
+                font-size: .62rem !important;
+                line-height: 1;
+                z-index: 2;
+            }
+            body.sidebar-collapsed .sidebar:hover .sidebar-group-toggle {
+                width: var(--sidebar-width);
+                justify-content: flex-start;
+                padding: .48rem 1rem;
+                font-size: .82rem;
+            }
+            body.sidebar-collapsed .sidebar:hover .sidebar-submenu .nav-link > span:first-child {
+                width: auto;
+                display: inline;
+                overflow: hidden;
+            }
+            body.sidebar-collapsed .sidebar:hover .sidebar-submenu .menu-counter-badge {
+                display: inline-block !important;
+                position: static;
+                min-width: 20px;
+                height: auto;
+                padding: .35em .65em;
+                margin-left: auto;
+                font-size: .7rem !important;
+            }
+            body.sidebar-collapsed .sidebar:hover .sidebar-group-toggle .group-chevron {
+                display: inline-block;
+            }
+            body.sidebar-collapsed .sidebar:hover .px-4.mb-4 {
+                padding-left: 1.15rem !important;
+                padding-right: 1.15rem !important;
+            }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .sidebar-group-toggle,
+            .sidebar-group-toggle .group-icon,
+            .sidebar-group-toggle .group-chevron,
+            .sidebar-submenu .nav-link,
+            .sidebar-submenu .nav-link i {
+                transition: none !important;
+                transform: none !important;
+            }
+        }
+        /* ต้องอยู่ท้ายสุด: ป้องกันกฎ hover ของ Sidebar แสดง Badge เลข 0 กลับขึ้นมา */
+        #navSupportBadge[hidden],
+        #supportInboxBadge[hidden] {
+            display: none !important;
+        }
     </style>
 </head>
 
@@ -1269,97 +1858,106 @@
     <div class="offcanvas-lg offcanvas-start sidebar bg-dark shadow-sm" id="sidebarMenu" tabindex="-1">
         <div class="d-flex flex-column h-100 py-3">
             <div class="px-4 mb-4 mt-2">
-                <h5 class="text-white fw-medium mb-1"><i class="fas fa-shield-alt text-primary me-2"></i>{{ role|upper
-                    }}
-                </h5>
-                <small class="text-white-50">ยินดีต้อนรับ, {{ session.get('admin_name') }}</small>
+                <div class="d-flex align-items-center gap-3">
+                    <span class="admin-avatar"><i class="fas fa-cubes-stacked"></i></span>
+                    <div>
+                        <h5 class="text-white fw-semibold mb-0">PCM Admin</h5>
+                        <small class="text-white-50">{{ role|upper }}</small>
+                    </div>
+                </div>
             </div>
 
             <div class="flex-grow-1 overflow-auto">
-                <div class="nav-category text-white-50">เมนูระบบ</div>
-                <a href="{{ url_for('admin_dashboard', module='stock') }}" class="nav-link with-counter {% if admin_module == 'stock' %}active{% endif %}">
-                    <span><i class="fas fa-boxes-stacked me-2"></i> Stock เบิกของ</span>
-                    {% if stock_pending_count > 0 %}
-                    <span class="badge bg-danger rounded-pill menu-counter-badge">{{ stock_pending_count }}</span>
-                    {% endif %}
-                </a>
-                <a href="{{ url_for('admin_dashboard', module='ga') }}" class="nav-link with-counter {% if admin_module == 'ga' %}active{% endif %}">
-                    <span><i class="fas fa-screwdriver-wrench me-2 text-warning"></i> GA Request</span>
-                    {% if ga_pending_count > 0 %}
-                    <span class="badge bg-danger rounded-pill menu-counter-badge">{{ ga_pending_count }}</span>
-                    {% endif %}
-                </a>
-                <a href="{{ url_for('admin_dashboard', module='vehicle') }}" class="nav-link {% if admin_module == 'vehicle' %}active{% endif %}">
-                    <i class="fas fa-car-side me-2"></i> ระบบจองรถ
-                </a>
-                <a href="{{ url_for('admin_dashboard', module='support') }}" class="nav-link with-counter {% if admin_module == 'support' %}active{% endif %}" id="navSupportLink">
-                    <span><i class="fas fa-headset me-2 text-info"></i> Support Chat</span>
-                <span class="badge bg-danger rounded-pill menu-counter-badge" id="navSupportBadge" style="display: none;">0</span>
-                </a>
+                <button class="sidebar-group-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarApplications" aria-expanded="true" aria-controls="sidebarApplications"><i class="fas fa-cubes-stacked group-icon"></i><span>Applications</span><i class="fas fa-chevron-right group-chevron"></i></button>
+                <div class="collapse show sidebar-submenu" id="sidebarApplications">
+                    <a href="{{ url_for('admin_dashboard', module='stock') }}" class="nav-link with-counter {% if admin_module == 'stock' %}active{% endif %}">
+                        <span><i class="fas fa-boxes-stacked me-2"></i> Stock เบิกของ</span>
+                        {% if stock_pending_count > 0 %}
+                        <span class="badge bg-danger rounded-pill menu-counter-badge">{{ stock_pending_count }}</span>
+                        {% endif %}
+                    </a>
+                    <a href="{{ url_for('admin_dashboard', module='ga') }}" class="nav-link with-counter {% if admin_module == 'ga' %}active{% endif %}">
+                        <span><i class="fas fa-screwdriver-wrench me-2 text-warning"></i> GA Request</span>
+                        {% if ga_pending_count > 0 %}
+                        <span class="badge bg-danger rounded-pill menu-counter-badge">{{ ga_pending_count }}</span>
+                        {% endif %}
+                    </a>
+                    <a href="{{ url_for('admin_dashboard', module='support') }}" class="nav-link with-counter {% if admin_module == 'support' %}active{% endif %}" id="navSupportLink">
+                        <span><i class="fas fa-headset me-2 text-info"></i> Support Chat</span>
+                        <span class="badge bg-danger rounded-pill menu-counter-badge is-empty" id="navSupportBadge" aria-hidden="true" hidden>0</span>
+                    </a>
+                </div>
 
                 {% if admin_module == 'stock' %}
-                <div class="nav-category text-white-50">จัดการ Stock</div>
-                <a href="javascript:void(0)" class="nav-link" data-bs-toggle="modal" data-bs-target="#addProductModal">
-                    <i class="fas fa-plus-circle me-2 text-success"></i> เพิ่มของใหม่
-                </a>
-                <a href="{{ url_for('export_excel') }}" class="nav-link">
-                    <i class="fas fa-file-excel me-2 text-info"></i> Export ข้อมูล
-                </a>
-                <a href="javascript:void(0)" onclick="document.getElementById('importFile').click()" class="nav-link">
-                    <i class="fas fa-file-import me-2 text-info"></i> Import ข้อมูล
-                </a>
+                <button class="sidebar-group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarStockTools" aria-expanded="false" aria-controls="sidebarStockTools"><i class="fas fa-box-open group-icon"></i><span>จัดการ Stock</span><i class="fas fa-chevron-right group-chevron"></i></button>
+                <div class="collapse sidebar-submenu" id="sidebarStockTools">
+                    <a href="javascript:void(0)" class="nav-link" data-bs-toggle="modal" data-bs-target="#addProductModal">
+                        <i class="fas fa-plus-circle me-2 text-success"></i> เพิ่มของใหม่
+                    </a>
+                    <a href="{{ url_for('export_excel') }}" class="nav-link">
+                        <i class="fas fa-file-excel me-2 text-info"></i> Export ข้อมูล
+                    </a>
+                    <a href="javascript:void(0)" onclick="document.getElementById('importFile').click()" class="nav-link">
+                        <i class="fas fa-file-import me-2 text-info"></i> Import ข้อมูล
+                    </a>
+                </div>
                 {% endif %}
 
-                <div class="nav-category text-white-50">รายงาน & การทำรายการ</div>
+                <button class="sidebar-group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarReports" aria-expanded="false" aria-controls="sidebarReports"><i class="fas fa-chart-column group-icon"></i><span>Reports & Operations</span><i class="fas fa-chevron-right group-chevron"></i></button>
+                <div class="collapse sidebar-submenu" id="sidebarReports">
                 {% if admin_module == 'stock' %}
-                <a href="javascript:void(0)" class="nav-link" onclick="toggleReportSection()">
-                    <i class="fas fa-chart-line me-2 text-warning"></i> รายงานประจำเดือน
-                </a>
-                <a href="javascript:void(0)" class="nav-link" onclick="openAdminPopup('stock-audit')">
-                    <i class="fas fa-clipboard-list me-2 text-info"></i> Stock Audit Report
-                </a>
-                <a href="{{ url_for('print_all_qrs') }}" target="_blank" class="nav-link">
-                    <i class="fas fa-qrcode me-2 text-warning"></i> พิมพ์ QR ทั้งหมด
-                </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="toggleReportSection()">
+                        <i class="fas fa-chart-line me-2 text-warning"></i> รายงานประจำเดือน
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openAdminPopup('stock-audit')">
+                        <i class="fas fa-clipboard-list me-2 text-info"></i> Stock Audit Report
+                    </a>
+                    <a href="{{ url_for('print_all_qrs') }}" target="_blank" class="nav-link">
+                        <i class="fas fa-qrcode me-2 text-warning"></i> พิมพ์ QR ทั้งหมด
+                    </a>
                 {% endif %}
+                </div>
 
-                <div class="nav-category text-white-50">ระบบบุคลากร</div>
-                <a href="javascript:void(0)" class="nav-link" onclick="openUserManagementModal()">
-                    <i class="fas fa-users-cog me-2 text-primary"></i> จัดการพนักงาน
-                </a>
-                <a href="javascript:void(0)" class="nav-link" onclick="openZombieModal()">
-                    <i class="fas fa-user-clock me-2 text-primary"></i> ตรวจสอบพนักงานค้าง
-                </a>
+                <button class="sidebar-group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarPeople" aria-expanded="false" aria-controls="sidebarPeople"><i class="fas fa-users group-icon"></i><span>People</span><i class="fas fa-chevron-right group-chevron"></i></button>
+                <div class="collapse sidebar-submenu" id="sidebarPeople">
+                    <a href="javascript:void(0)" class="nav-link" onclick="openUserManagementModal()">
+                        <i class="fas fa-users-cog me-2 text-primary"></i> จัดการพนักงาน
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openZombieModal()">
+                        <i class="fas fa-user-clock me-2 text-primary"></i> ตรวจสอบพนักงานค้าง
+                    </a>
+                </div>
 
                 {% if role == 'superadmin' %}
-                <div class="nav-category text-white-50">ระบบจัดการขั้นสูง</div>
-                <a href="javascript:void(0)" class="nav-link" onclick="openAdminAccountsModal()">
-                    <i class="fas fa-user-shield me-2 text-warning"></i> จัดการบัญชี Admin
-                </a>
-                <a href="javascript:void(0)" class="nav-link" onclick="openAdminPopup('email-settings')">
-                    <i class="fas fa-envelope me-2 text-success"></i> ⚙️ Email Notifications
-                </a>
-                <a href="javascript:void(0)" class="nav-link" onclick="openAlertSettingModal()">
-                    <i class="fas fa-clock me-2 text-warning"></i> ตั้งเวลาแจ้งเตือน Email
-                </a>
-                <a href="javascript:void(0)" class="nav-link" onclick="openGaEmailSettingModal()">
-                    <i class="fas fa-envelope-open-text me-2 text-warning"></i> ตั้งค่าอีเมล GA Request
-                </a>
-                <a href="javascript:void(0)" class="nav-link" onclick="openBackupModal()">
-                    <i class="fas fa-database me-2 text-info"></i> Backup ฐานข้อมูล
-                </a>
-
-                <a href="javascript:void(0)" class="nav-link text-danger" data-bs-toggle="modal"
-                    data-bs-target="#dangerZoneModal">
-                    <i class="fas fa-radiation me-2"></i> ล้างข้อมูลระบบ (Set Zero)
-                </a>
+                <button class="sidebar-group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarSystem" aria-expanded="false" aria-controls="sidebarSystem"><i class="fas fa-gears group-icon"></i><span>System Administration</span><i class="fas fa-chevron-right group-chevron"></i></button>
+                <div class="collapse sidebar-submenu" id="sidebarSystem">
+                    <a href="javascript:void(0)" class="nav-link" onclick="openAdminAccountsModal()">
+                        <i class="fas fa-user-shield me-2 text-warning"></i> จัดการบัญชี Admin
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openAdminPopup('email-settings')">
+                        <i class="fas fa-envelope me-2 text-success"></i> Email Notifications
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openAlertSettingModal()">
+                        <i class="fas fa-clock me-2 text-warning"></i> ตั้งเวลาแจ้งเตือน Email
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openGaEmailSettingModal()">
+                        <i class="fas fa-envelope-open-text me-2 text-warning"></i> ตั้งค่าอีเมล GA Request
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openBackupModal()">
+                        <i class="fas fa-database me-2 text-info"></i> Backup ฐานข้อมูล
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link text-danger" data-bs-toggle="modal"
+                        data-bs-target="#dangerZoneModal">
+                        <i class="fas fa-radiation me-2"></i> ล้างข้อมูลระบบ (Set Zero)
+                    </a>
+                </div>
                 {% endif %}
             </div>
 
             <div class="px-4 py-3 mt-auto border-top border-secondary">
                 <button type="button" class="btn btn-outline-light w-100 rounded-pill fw-medium mb-2"
                     onclick="openChangePasswordModal()">
-                    <i class="fas fa-key me-2"></i> เปลี่ยนรหัสผ่าน
+                    <i class="fas fa-id-card me-2"></i> โปรไฟล์ของฉัน
                 </button>
                 <form id="adminLogoutForm" action="/admin/logout" method="POST" class="mb-0">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -1372,12 +1970,58 @@
     </div>
 
 
-    <main class="content-wrapper py-4">
-        <div class="container-fluid px-3 px-md-4 px-lg-5">
+    <main class="content-wrapper">
+        <header class="admin-topbar d-none d-lg-flex align-items-center justify-content-between px-4" aria-label="ส่วนหัวผู้ดูแลระบบ">
+            <div class="d-flex align-items-center gap-3">
+                <button type="button" class="sidebar-toggle-btn" id="adminSidebarToggle"
+                    aria-label="ย่อหรือขยายเมนูด้านข้าง" aria-controls="sidebarMenu" aria-expanded="true">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div>
+                    <div class="admin-breadcrumb mb-1">PCM / Admin / {{ admin_module|upper }}</div>
+                    <div class="admin-page-title">
+                        {% if admin_module == 'ga' %}
+                        GA Request
+                        {% elif admin_module == 'support' %}
+                        Support Chat
+                        {% else %}
+                        Stock Dashboard
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="dropdown">
+                <button type="button"
+                    class="admin-user-chip btn btn-link text-decoration-none d-flex align-items-center gap-3 ps-4 dropdown-toggle"
+                    data-bs-toggle="dropdown" aria-expanded="false" aria-label="เปิดเมนูบัญชีผู้ดูแล">
+                    <span class="admin-avatar" aria-hidden="true"><i class="fas fa-user"></i></span>
+                    <span class="lh-sm text-start">
+                        <span class="d-block small fw-semibold">{{ session.get('admin_name') }}</span>
+                        <span class="d-block admin-breadcrumb">{{ role|upper }}</span>
+                    </span>
+                </button>
+                <div class="dropdown-menu dropdown-menu-end shadow border-0 mt-2 p-2 admin-account-menu">
+                    <div class="px-3 py-2 border-bottom mb-2">
+                        <div class="small fw-semibold text-dark">{{ session.get('admin_name') }}</div>
+                        <div class="small text-muted">{{ session.get('admin_username') }}</div>
+                    </div>
+                    <button type="button" class="dropdown-item rounded py-2" onclick="openChangePasswordModal()">
+                        <i class="fas fa-id-card me-2 text-primary"></i>จัดการโปรไฟล์
+                    </button>
+                    <form action="/admin/logout" method="POST" class="mb-0">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="dropdown-item rounded py-2 text-danger">
+                            <i class="fas fa-sign-out-alt me-2"></i>ออกจากระบบ
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </header>
+        <div class="container-fluid dashboard-content px-3 px-md-4">
 
             <div class="row g-3 mb-4 dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}">
                 <div class="col-6 col-xl-3">
-                    <div class="card border-0 shadow-sm bg-white h-100 stat-card">
+                    <div class="card border-0 shadow-sm h-100 stat-card pending-widget">
                         <div class="card-body d-flex align-items-center">
                             <div class="flex-shrink-0 bg-warning-subtle text-warning rounded-3 p-3 stat-icon">
                                 <i class="fas fa-clock fa-2x"></i>
@@ -1392,7 +2036,7 @@
                 </div>
 
                 <div class="col-6 col-xl-3">
-                    <div class="card border-0 shadow-sm bg-white h-100 stat-card">
+                    <div class="card border-0 shadow-sm h-100 stat-card low-stock-widget">
                         <div class="card-body d-flex align-items-center">
                             <div class="flex-shrink-0 bg-danger-subtle text-danger rounded-3 p-3 stat-icon">
                                 <i class="fas fa-exclamation-triangle fa-2x"></i>
@@ -1406,7 +2050,7 @@
                 </div>
 
                 <div class="col-6 col-xl-3">
-                    <div class="card border-0 shadow-sm bg-white h-100 stat-card">
+                    <div class="card border-0 shadow-sm h-100 stat-card online-widget">
                         <div class="card-body d-flex align-items-center">
                             <div class="flex-shrink-0 bg-primary-subtle text-primary rounded-3 p-3 stat-icon">
                                 <i class="fas fa-users fa-2x"></i>
@@ -1420,7 +2064,7 @@
                 </div>
 
                 <div class="col-6 col-xl-3">
-                    <div class="card border-0 shadow-sm bg-white h-100 stat-card">
+                    <div class="card border-0 shadow-sm h-100 stat-card email-widget">
                         <div class="card-body d-flex align-items-center">
                             <div class="flex-shrink-0 bg-success-subtle text-success rounded-3 p-3 stat-icon">
                                 <i class="fas fa-envelope fa-2x"></i>
@@ -3158,22 +3802,49 @@
         <i class="fas fa-chevron-up"></i>
     </button>
 
-    <!-- Change Password Modal -->
+    <!-- Admin Profile Modal -->
     <div class="modal fade" id="changePasswordModal" tabindex="-1">
-        <div class="modal-dialog modal-sm">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content border-0 shadow-lg">
                 <div class="modal-header bg-dark text-white border-0">
-                    <h5 class="modal-title fw-medium"><i class="fas fa-key text-warning me-2"></i>เปลี่ยนรหัสผ่าน</h5>
+                    <h5 class="modal-title fw-medium"><i class="fas fa-id-card text-info me-2"></i>โปรไฟล์ของฉัน</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body p-4">
                     <div id="changePwAlert" class="d-none"></div>
+                    <div class="d-flex flex-wrap align-items-center gap-3 p-3 mb-4 rounded border bg-body-tertiary">
+                        <span class="admin-avatar" style="width:54px;height:54px;font-size:1.25rem"><i class="fas fa-user-shield"></i></span>
+                        <div class="flex-grow-1">
+                            <div class="fw-semibold fs-5">{{ session.get('admin_name') }}</div>
+                            <div class="text-muted small">{{ session.get('admin_username') }} · {{ role|upper }}</div>
+                        </div>
+                        <span class="badge bg-success-subtle text-success border border-success">บัญชีพร้อมใช้งาน</span>
+                    </div>
+                    <div class="small fw-semibold text-uppercase text-muted mb-2">ข้อมูลบัญชี</div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium text-muted small">Username</label>
+                            <input type="text" class="form-control shadow-none" value="{{ session.get('admin_username') }}" readonly>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium text-muted small">สิทธิ์</label>
+                            <input type="text" class="form-control shadow-none" value="{{ role|upper }}" readonly>
+                        </div>
+                    </div>
                     <div class="mb-3">
-                        <label class="form-label fw-medium text-muted small">รหัสผ่านเดิม</label>
+                        <label class="form-label fw-medium text-muted small">ชื่อที่แสดง</label>
+                        <input type="text" id="adminProfileName" class="form-control shadow-none" value="{{ session.get('admin_name') }}" maxlength="100">
+                    </div>
+                    <div class="small fw-semibold text-uppercase text-muted mt-4 mb-2">ความปลอดภัย</div>
+                    <div class="alert alert-info small">
+                        <i class="fas fa-shield-halved me-2"></i>การแก้ไขโปรไฟล์ต้องยืนยันรหัสผ่านปัจจุบัน และคำขอถูกป้องกันด้วย CSRF
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-medium text-muted small">รหัสผ่านปัจจุบัน <span class="text-danger">*</span></label>
                         <input type="password" id="oldPassword" class="form-control shadow-none" autocomplete="current-password">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label fw-medium text-muted small">รหัสผ่านใหม่</label>
+                        <label class="form-label fw-medium text-muted small">รหัสผ่านใหม่ <span class="fw-normal">(เว้นว่างหากไม่เปลี่ยน)</span></label>
                         <input type="password" id="newPassword" class="form-control shadow-none" autocomplete="new-password">
                     </div>
                     <div class="mb-1">
@@ -3586,6 +4257,7 @@
             document.getElementById('oldPassword').value = '';
             document.getElementById('newPassword').value = '';
             document.getElementById('confirmPassword').value = '';
+            document.getElementById('adminProfileName').value = {{ session.get('admin_name')|tojson }};
             const alert = document.getElementById('changePwAlert');
             alert.className = 'd-none'; alert.textContent = '';
             new bootstrap.Modal(document.getElementById('changePasswordModal')).show();
@@ -3596,28 +4268,29 @@
             new bootstrap.Modal(modalEl).show();
         }
         function submitChangePassword() {
+            const displayName = document.getElementById('adminProfileName').value.trim();
             const oldPw = document.getElementById('oldPassword').value;
             const newPw = document.getElementById('newPassword').value;
             const confirmPw = document.getElementById('confirmPassword').value;
             const alertEl = document.getElementById('changePwAlert');
             alertEl.className = 'd-none'; alertEl.textContent = '';
-            if (!oldPw || !newPw || !confirmPw) {
-                alertEl.className = 'alert alert-warning small py-2'; alertEl.textContent = 'กรุณากรอกข้อมูลให้ครบ'; return;
+            if (!displayName || !oldPw) {
+                alertEl.className = 'alert alert-warning small py-2'; alertEl.textContent = 'กรุณากรอกชื่อและรหัสผ่านปัจจุบัน'; return;
             }
-            if (newPw !== confirmPw) {
+            if (newPw && newPw !== confirmPw) {
                 alertEl.className = 'alert alert-danger small py-2'; alertEl.textContent = 'รหัสผ่านใหม่ไม่ตรงกัน'; return;
             }
-            if (newPw.length < 8) {
+            if (newPw && newPw.length < 8) {
                 alertEl.className = 'alert alert-warning small py-2'; alertEl.textContent = 'รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร'; return;
             }
-            fetch('/admin/change_password', {
+            fetch('/admin/update_profile', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': adminCsrfToken },
-                body: JSON.stringify({ old_password: oldPw, new_password: newPw, csrf_token: adminCsrfToken })
+                body: JSON.stringify({ display_name: displayName, current_password: oldPw, new_password: newPw })
             }).then(checkAuth).then(r => r.json()).then(data => {
                 if (data.success) {
                     bootstrap.Modal.getInstance(document.getElementById('changePasswordModal')).hide();
-                    Swal.fire({ icon: 'success', title: 'เปลี่ยนรหัสผ่านสำเร็จ', timer: 1800, showConfirmButton: false });
+                    Swal.fire({ icon: 'success', title: 'บันทึกโปรไฟล์สำเร็จ', timer: 1500, showConfirmButton: false }).then(() => window.location.reload());
                 } else {
                     alertEl.className = 'alert alert-danger small py-2';
                     alertEl.textContent = data.message || 'เกิดข้อผิดพลาด';
@@ -3626,6 +4299,28 @@
         }
 
         document.addEventListener('DOMContentLoaded', function () {
+            const sidebarToggle = document.getElementById('adminSidebarToggle');
+            const applySidebarState = (collapsed) => {
+                document.body.classList.toggle('sidebar-collapsed', collapsed);
+                if (sidebarToggle) sidebarToggle.setAttribute('aria-expanded', String(!collapsed));
+            };
+            try {
+                applySidebarState(localStorage.getItem('pcmAdminSidebarCollapsed') === '1');
+            } catch (error) {
+                applySidebarState(false);
+            }
+            if (sidebarToggle) {
+                sidebarToggle.addEventListener('click', () => {
+                    const collapsed = !document.body.classList.contains('sidebar-collapsed');
+                    applySidebarState(collapsed);
+                    try {
+                        localStorage.setItem('pcmAdminSidebarCollapsed', collapsed ? '1' : '0');
+                    } catch (error) {
+                        // บางเบราว์เซอร์อาจปิด localStorage แต่เมนูยังย่อได้ตามปกติ
+                    }
+                });
+            }
+
             const rootStyle = document.documentElement.style;
             const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
             const lowSpecDevice = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4)
@@ -6600,6 +7295,7 @@
                                         <option value="admin_pc1">Admin PC1 (เห็นเฉพาะ PC1)</option>
                                         <option value="admin_cc">Admin CC (เห็นเฉพาะ CC)</option>
                                         <option value="admin_all">Admin All (เห็นทั้ง 2 ฝั่ง)</option>
+                                        <option value="admin_mu">Admin MU (เข้าหลังบ้าน Manufacturing)</option>
                                     </select>
                                 </div>
                             </div>
@@ -6643,6 +7339,7 @@
         'admin_pc1':  '<span class="badge bg-primary">Admin PC1</span>',
         'admin_cc':   '<span class="badge bg-info text-dark">Admin CC</span>',
         'admin_all':  '<span class="badge bg-success">Admin All</span>',
+        'admin_mu':   '<span class="badge bg-warning text-dark">Admin MU</span>',
     };
 
     function openAdminAccountsModal() {
@@ -6817,6 +7514,16 @@
             return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
         }
 
+        function updateSupportBadge(badge, total, suffix) {
+            if (!badge) return;
+            const unreadTotal = Math.max(0, Number(total) || 0);
+            badge.textContent = suffix ? unreadTotal + suffix : unreadTotal;
+            badge.classList.toggle('is-empty', unreadTotal === 0);
+            badge.hidden = unreadTotal === 0;
+            badge.style.display = unreadTotal > 0 ? 'inline-block' : 'none';
+            badge.setAttribute('aria-hidden', String(unreadTotal === 0));
+        }
+
         /* ── Load inbox ── */
         function loadSupportInbox(silent) {
             if (_supInboxLoading) return;
@@ -6827,9 +7534,9 @@
                     const total = data.total_unread || 0;
                     // update nav badge
                     const navBadge = document.getElementById('navSupportBadge');
-                    if (navBadge) { navBadge.textContent = total; navBadge.style.display = total > 0 ? '' : 'none'; }
+                    updateSupportBadge(navBadge, total);
                     const inboxBadge = document.getElementById('supportInboxBadge');
-                    if (inboxBadge) { inboxBadge.textContent = total + ' ใหม่'; inboxBadge.style.display = total > 0 ? '' : 'none'; }
+                    updateSupportBadge(inboxBadge, total, ' ใหม่');
                     const nextConvs = data.conversations || [];
                     const nextSnapshot = JSON.stringify(nextConvs);
                     if (!silent || nextSnapshot !== _supInboxSnapshot) {
@@ -6952,23 +7659,12 @@
 
         /* ── Poll for badge even when not on support tab ── */
         function pollSupportBadge() {
-            console.log('[pollSupportBadge] Starting fetch to /admin/support_notifications');
             fetch('/admin/support_notifications', { headers: { 'X-CSRF-Token': adminCsrfToken } })
-                .then(r => {
-                    console.log('[pollSupportBadge] Got response:', r.status, r.statusText);
-                    return r.json();
-                })
+                .then(r => r.json())
                 .then(data => {
-                    console.log('[pollSupportBadge] Response data:', data);
                     const total = data.total || 0;
-                    console.log('[pollSupportBadge] Unread total:', total);
                     const navBadge = document.getElementById('navSupportBadge');
-                    console.log('[pollSupportBadge] navBadge element:', navBadge ? 'found' : 'NOT FOUND');
-                    if (navBadge) { 
-                        navBadge.textContent = total;
-                        navBadge.style.display = total > 0 ? 'inline-block' : 'none';
-                        console.log('[pollSupportBadge] Updated badge: text=', total, 'display=', navBadge.style.display);
-                    }
+                    updateSupportBadge(navBadge, total);
                 })
                 .catch(err => {
                     console.error('[pollSupportBadge] Error:', err);

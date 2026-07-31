@@ -57,6 +57,23 @@
             background: linear-gradient(130deg, #5f6a7a, #7c8799);
         }
 
+        .service-head.manufacturing {
+            background:
+                radial-gradient(circle at 90% 10%, rgba(255,255,255,.22), transparent 30%),
+                linear-gradient(130deg, #047857, #0891b2);
+        }
+
+        .btn-manufacturing {
+            background: linear-gradient(130deg, #047857, #0891b2);
+            color: #fff;
+            border: 0;
+        }
+
+        .btn-manufacturing:hover {
+            color: #fff;
+            filter: brightness(.94);
+        }
+
         .badge-counter {
             font-size: 0.72rem;
             font-weight: 600;
@@ -190,22 +207,24 @@
                 </div>
             </div>
 
+            {% if user['department']|trim|lower == 'manufacturing' %}
             <div class="col-md-6 col-xl-4">
                 <div class="card service-card border-0 glass h-100">
                     <div class="card-body p-0">
-                        <div class="service-head secondary p-4">
-                            <h2 class="h5 mb-1"><i class="fas fa-car-side me-2"></i>ระบบจองรถ</h2>
-                            <div class="small">ศูนย์กลางงานจองรถภายใน</div>
+                        <div class="service-head manufacturing p-4">
+                            <h2 class="h5 mb-1"><i class="fas fa-industry me-2"></i>MU Manufacturing</h2>
+                            <div class="small">เบิกและตรวจสอบของใช้เฉพาะแผนก MU</div>
                         </div>
                         <div class="p-4">
-                            <p class="text-muted mb-4">ระบบอยู่ในช่วงพัฒนา</p>
-                            <a href="{{ url_for('vehicle_booking_portal', emp_id=user['emp_id']) }}" class="btn btn-secondary rounded-pill px-4">
-                                เข้าใช้งานระบบจองรถ
+                            <p class="text-muted mb-4">ยืนยันรหัสผ่าน MU ก่อนเบิก และตัดสต็อกทันทีด้วย FIFO</p>
+                            <a href="{{ url_for('mu.access', emp_id=user['emp_id']) }}" class="btn btn-manufacturing rounded-pill px-4">
+                                เข้าใช้งานระบบ MU
                             </a>
                         </div>
                     </div>
                 </div>
             </div>
+            {% endif %}
         </div>
     </div>
 

@@ -18,6 +18,17 @@
             --transition: all 0.6s cubic-bezier(0.7, 0, 0.2, 1);
         }
 
+        /* ใช้ปุ่มแสดงรหัสผ่านของระบบเพียงปุ่มเดียว */
+        #adminPasswordInput::-ms-reveal,
+        #adminPasswordInput::-ms-clear {
+            display: none;
+        }
+
+        #adminPasswordInput {
+            appearance: none;
+            -webkit-appearance: none;
+        }
+
         body {
             background:
                 radial-gradient(circle at 12% 10%, #d7ecff 0%, rgba(215, 236, 255, 0) 34%),
@@ -384,7 +395,8 @@
                     </div>
                     <div class="input-group-modern">
                         <span class="input-group-text"><i class="fas fa-key"></i></span>
-                        <input type="password" name="password" class="form-control" placeholder="Password">
+                        <input type="password" name="password" id="adminPasswordInput" class="form-control" placeholder="Password" autocomplete="current-password">
+                        <button type="button" class="btn border-0 text-muted px-3" onclick="toggleAdminPassword()" aria-label="แสดงหรือซ่อนรหัสผ่าน"><i class="fas fa-eye" id="adminPasswordIcon"></i></button>
                     </div>
                     <button type="submit" class="btn-main">ลงชื่อเข้าใช้ระบบ</button>
                 </form>
@@ -399,7 +411,7 @@
                 <div class="d-flex flex-column gap-2 mb-4" style="font-size:0.82rem;">
                     <span><i class="fas fa-screwdriver-wrench me-2 opacity-75"></i>GA Request แจ้งซ่อม / แจ้งปัญหา / SAFETY</span>
                     <span><i class="fas fa-boxes-stacked me-2 opacity-75"></i>Stock เบิกจ่ายพัสดุอุปกรณ์</span>
-                    <span><i class="fas fa-car-side me-2 opacity-75"></i>ระบบจองรถภายใน</span>
+                    <span><i class="fas fa-industry me-2 opacity-75"></i>ระบบเบิกของแผนก MU</span>
                 </div>
                 <button class="btn-outline-white" onclick="toggleMode(true)">แอดมินระบบ?</button>
             </div>
@@ -415,6 +427,14 @@
     </div>
 
     <script>
+        function toggleAdminPassword() {
+            const input = document.getElementById('adminPasswordInput');
+            const icon = document.getElementById('adminPasswordIcon');
+            const show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            icon.className = show ? 'fas fa-eye-slash' : 'fas fa-eye';
+        }
+
         function showGlobalLoading(text) {
             const overlay = document.getElementById('globalLoadingOverlay');
             const label = document.getElementById('globalLoadingText');

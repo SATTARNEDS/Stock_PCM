@@ -26,6 +26,8 @@ $envExample = Join-Path $appDir '.env.server.example'
 $envTarget = Join-Path $appDir '.env'
 $startScript = Join-Path $repoRoot 'start.ps1'
 $backupScript = Join-Path $repoRoot 'backup_factory_db.ps1'
+$watchdogScript = Join-Path $repoRoot 'watchdog.ps1'
+$waitressServer = Join-Path $appDir 'waitress_server.py'
 
 if (-not (Test-Path $appDir)) {
     throw "ไม่พบโฟลเดอร์ my_factory_app: $appDir"
@@ -35,6 +37,12 @@ if (-not (Test-Path $requirementsFile)) {
 }
 if (-not (Test-Path $startScript)) {
     throw "ไม่พบไฟล์ start.ps1: $startScript"
+}
+if (-not (Test-Path $watchdogScript)) {
+    throw "ไม่พบไฟล์ watchdog.ps1: $watchdogScript"
+}
+if (-not (Test-Path $waitressServer)) {
+    throw "ไม่พบไฟล์ waitress_server.py: $waitressServer"
 }
 
 Write-Step "ตรวจสอบและสร้าง Python virtual environment"
@@ -95,8 +103,11 @@ if (-not $SkipTasks) {
 
     $startupTaskName = "PCM-Web-Server-Startup"
     $backupTaskName = "PCM-Database-Backup-Daily"
+    $watchdogTaskName = "PCM-Web-Server-Watchdog"
 
-    $startupAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
+    $startupAction = New-ScheduledTaskAction -Execute $venvPython `
+        -Argument "`"$waitressServer`" --host 0.0.0.0 --port $ListenPort --threads 12" `
+        -WorkingDirectory $appDir
     $startupTrigger = New-ScheduledTaskTrigger -AtStartup
     $startupPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest -LogonType ServiceAccount
     $startupSettings = New-ScheduledTaskSettingsSet `
@@ -115,6 +126,15 @@ if (-not $SkipTasks) {
 
     Register-ScheduledTask -TaskName $backupTaskName -Action $backupAction -Trigger $backupTrigger -Principal $backupPrincipal -Settings $backupSettings -Force | Out-Null
 
+    $watchdogAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$watchdogScript`" -HealthUrl `"http://127.0.0.1:$ListenPort/healthz`""
+    $watchdogTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+        -RepetitionInterval (New-TimeSpan -Minutes 5) `
+        -RepetitionDuration (New-TimeSpan -Days 3650)
+    $watchdogPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest -LogonType ServiceAccount
+    $watchdogSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew
+
+    Register-ScheduledTask -TaskName $watchdogTaskName -Action $watchdogAction -Trigger $watchdogTrigger -Principal $watchdogPrincipal -Settings $watchdogSettings -Force | Out-Null
+
     Write-Host "สร้าง Scheduled Tasks เรียบร้อย" -ForegroundColor Green
 }
 
@@ -126,6 +146,6 @@ Set-Content -Path $shortcutUrl -Value $urlContent -Encoding ASCII
 Write-Host "สร้าง shortcut บน Desktop แล้ว: $shortcutUrl" -ForegroundColor Green
 
 Write-Step "เสร็จสิ้น"
-Write-Host "เริ่มรันทันที: powershell -ExecutionPolicy Bypass -File `"$startScript`"" -ForegroundColor Cyan
+Write-Host "เริ่มรันทันที: powershell -ExecutionPolicy Bypass -File `"$startScript`" -ListenAddress `"0.0.0.0:$ListenPort`"" -ForegroundColor Cyan
 Write-Host "ทดสอบเข้าเว็บ: http://127.0.0.1:$ListenPort" -ForegroundColor Cyan
 Write-Host "ดับเบิลคลิก shortcut `"PCM Stock`" บน Desktop เพื่อเข้าระบบ" -ForegroundColor Cyan

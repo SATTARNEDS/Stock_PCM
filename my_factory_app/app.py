@@ -126,7 +126,7 @@ SENSITIVE_POST_ENDPOINTS = {
     'create_fifo_lot_from_stock', 'update_product_lot', 'delete_product_lot',
     'write_off_ajax', 'unlock_user_ajax', 'unlock_user', 'add_user_ajax', 'delete_user',
     'update_user_ajax', 'save_alert_time', 'daily_alert', 'reset_lock',
-    'email_settings', 'email_settings_test',
+    'email_settings', 'email_settings_test', 'update_admin_profile',
     'ga_request_portal', 'update_ga_request', 'delete_ga_request', 'admin_ga_chat', 'user_ga_chat', 'ga_chat_presence',
     'support_chat_send', 'support_chat_presence', 'admin_support_chat_reply'
 }
@@ -548,6 +548,25 @@ def handle_before_request():
 
 @app.after_request
 def add_header(response):
+    # โหลด Micro-interactions กลางเฉพาะหน้า HTML เต็มหน้า ไม่แตะ API/Partial/ไฟล์พิมพ์
+    if (
+        response.status_code == 200
+        and response.mimetype == 'text/html'
+        and not response.is_streamed
+        and not request.path.startswith(('/api/', '/static/'))
+        and 'print' not in request.path.lower()
+    ):
+        html = response.get_data(as_text=True)
+        marker = 'data-pcm-ui-enhancements'
+        if '</body>' in html.lower() and marker not in html:
+            script = (
+                '<script defer src="/static/ui-enhancements.js" '
+                'data-pcm-ui-enhancements></script>'
+            )
+            body_index = html.lower().rfind('</body>')
+            html = f'{html[:body_index]}{script}{html[body_index:]}'
+            response.set_data(html)
+
     # ไฟล์ vendor เป็นไฟล์คงที่และไม่มีข้อมูลผู้ใช้ จึง cache ได้เพื่อลดเวลาโหลดใน LAN
     if request.path.startswith('/static/vendor/'):
         response.headers['Cache-Control'] = 'public, max-age=86400, stale-while-revalidate=604800'
@@ -561,6 +580,22 @@ def add_header(response):
     response.headers.setdefault('Referrer-Policy', 'same-origin')
     response.headers.setdefault('Permissions-Policy', 'geolocation=(), microphone=()')
     return response
+
+
+@app.route('/healthz', methods=['GET'])
+def health_check():
+    """Health check แบบเบาสำหรับ Windows Watchdog ภายในเครื่อง"""
+    try:
+        conn = get_db_connection()
+        try:
+            conn.execute('SELECT 1').fetchone()
+        finally:
+            conn.close()
+        return jsonify({'status': 'ok'}), 200
+    except Exception:
+        app.logger.exception('Health check failed')
+        return jsonify({'status': 'unhealthy'}), 503
+
 
 # สร้างฟังก์ชันสำหรับดึงเวลาไทย
 def get_thailand_time():
@@ -883,9 +918,8 @@ def normalize_lot_number(value):
 
 def get_db_connection():
     conn = sqlite3.connect(DB_NAME, timeout=20)
-    # ⚠️ สำคัญมาก: ต้องเปิด Journal Mode เป็น WAL
-    conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout = 30000;")
+    conn.execute("PRAGMA foreign_keys = ON;")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -916,6 +950,8 @@ def ensure_application_schema():
     try:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA busy_timeout = 30000;")
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
 
         user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
         if user_columns and 'email' not in user_columns:
@@ -1171,6 +1207,10 @@ def ensure_application_schema():
         conn.close()
 
 ensure_application_schema()
+
+# ระบบสต็อก MU แยกตาราง สิทธิ์ และประวัติออกจาก Stock Systems หลัก
+from mu_module import register_mu_module
+register_mu_module(app, DB_NAME, validate_csrf_token)
 
 def start_write_transaction(conn):
     """ล็อกฐานข้อมูลสำหรับธุรกรรมเขียน เพื่อลด race condition จากหลาย request พร้อมกัน"""
@@ -3763,14 +3803,8 @@ def vehicle_booking_portal():
         flash('⚠️ กรุณาเข้าสู่ระบบใหม่', 'user_error')
         return redirect(url_for('index'))
 
-    conn = get_db_connection()
-    user = conn.execute('SELECT * FROM users WHERE emp_id = ?', (emp_id,)).fetchone()
-    conn.close()
-    if not user:
-        flash('❌ ไม่พบข้อมูลพนักงาน', 'danger')
-        return redirect(url_for('index'))
-
-    return render_template('vehicle_booking.html', user=user)
+    # URL เดิมยังคงไว้เพื่อไม่ให้ bookmark เก่าเสีย แต่พาไปยังระบบ MU ที่มาแทน
+    return redirect(url_for('mu.access', emp_id=emp_id), code=302)
 
 @app.route('/ga-request', methods=['GET', 'POST'])
 def ga_request_portal():
@@ -4850,6 +4884,8 @@ def admin_login():
             session['admin_username'] = admin['username']
             session['admin_role'] = admin['role']
             session.permanent = True
+            if admin['role'] == 'admin_mu':
+                return redirect(url_for('mu.admin_dashboard'))
             return redirect(url_for('admin_dashboard', module='stock'))
         
         register_failed_attempt('admin_login')
@@ -4864,8 +4900,10 @@ def admin_dashboard(module):
     if not session.get('admin_logged_in'): return redirect(url_for('index'))
     
     role = session.get('admin_role', 'superadmin')
+    if role == 'admin_mu':
+        return redirect(url_for('mu.admin_dashboard'))
     admin_module = (module or 'stock').strip().lower()
-    if admin_module not in ('stock', 'ga', 'vehicle', 'support'):
+    if admin_module not in ('stock', 'ga', 'support'):
         admin_module = 'stock'
     
     # --- Filter ตาม Role และการเลือกสถานที่ (คงเดิม) ---
@@ -9132,9 +9170,52 @@ def change_password():
     finally:
         conn.close()
 
+
+@app.route('/admin/update_profile', methods=['POST'])
+def update_admin_profile():
+    if not session.get('admin_logged_in'):
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    display_name = clean_input_text(data.get('display_name', ''), 100)
+    current_password = data.get('current_password', '')
+    new_password = data.get('new_password', '')
+    if not display_name or not current_password:
+        return jsonify({'success': False, 'message': 'กรุณากรอกชื่อและรหัสผ่านปัจจุบัน'}), 400
+    if new_password and (len(new_password) < 8 or len(new_password) > 128):
+        return jsonify({'success': False, 'message': 'รหัสผ่านใหม่ต้องมี 8–128 ตัวอักษร'}), 400
+
+    username = session.get('admin_username', '')
+    conn = get_db_connection()
+    try:
+        admin = conn.execute(
+            'SELECT id, username, password, name FROM admins WHERE username = ?',
+            (username,),
+        ).fetchone()
+        if not admin or not check_password_hash(admin['password'], current_password):
+            return jsonify({'success': False, 'message': 'รหัสผ่านปัจจุบันไม่ถูกต้อง'}), 400
+        if new_password:
+            conn.execute(
+                'UPDATE admins SET name = ?, password = ? WHERE id = ?',
+                (display_name, generate_password_hash(new_password), admin['id']),
+            )
+        else:
+            conn.execute(
+                'UPDATE admins SET name = ? WHERE id = ?',
+                (display_name, admin['id']),
+            )
+        conn.commit()
+        session['admin_name'] = display_name
+        return jsonify({'success': True, 'display_name': display_name})
+    except Exception:
+        conn.rollback()
+        return jsonify({'success': False, 'message': 'ไม่สามารถบันทึกโปรไฟล์ได้'}), 500
+    finally:
+        conn.close()
+
 # ─── Superadmin: Admin Account Management ───────────────────────────────────
 
-ALLOWED_ADMIN_ROLES = ('admin_pc1', 'admin_cc', 'admin_all')
+ALLOWED_ADMIN_ROLES = ('admin_pc1', 'admin_cc', 'admin_all', 'admin_mu')
 
 @app.route('/admin/list_admins_ajax')
 def list_admins_ajax():

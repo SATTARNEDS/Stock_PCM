@@ -5,9 +5,10 @@
 ## ภาพรวม
 
 เมื่อติดตั้งเสร็จ ระบบจะมีองค์ประกอบหลักดังนี้
-- Web app รันที่พอร์ต `5000`
+- Web app รันด้วย Waitress ที่พอร์ต `5000`
 - เปิดรับการเข้าถึงจาก LAN ผ่าน Firewall rule
 - รันอัตโนมัติทุกครั้งที่เครื่องเปิด (Scheduled Task)
+- Watchdog ตรวจทุก 5 นาทีและ Restart เฉพาะ Web Service เมื่อค้าง
 - สำรองฐานข้อมูลอัตโนมัติทุกวันเวลา 02:00
 
 ## 1) เตรียมเครื่องก่อนติดตั้ง
@@ -41,6 +42,7 @@ powershell -ExecutionPolicy Bypass -File .\setup_windows_server.ps1
 - สร้าง Scheduled Task
   - `PCM-Web-Server-Startup`
   - `PCM-Database-Backup-Daily`
+  - `PCM-Web-Server-Watchdog`
 
 ## 5) ปรับค่าคอนฟิกในไฟล์ .env
 
@@ -79,9 +81,10 @@ powershell -ExecutionPolicy Bypass -File .\start.ps1
 
 ## 7) ตรวจสอบ Scheduled Tasks หลังติดตั้ง
 
-เปิด Task Scheduler แล้วตรวจว่ามี 2 งานนี้
+เปิด Task Scheduler แล้วตรวจว่ามี 3 งานนี้
 - `PCM-Web-Server-Startup`
 - `PCM-Database-Backup-Daily`
+- `PCM-Web-Server-Watchdog`
 
 แนะนำคลิก Run เพื่อทดสอบด้วยมืออย่างน้อย 1 ครั้ง
 
@@ -104,6 +107,8 @@ powershell -ExecutionPolicy Bypass -File .\backup_factory_db.ps1 -KeepLatest 60
 
 ตำแหน่งไฟล์ backup
 - `my_factory_app/backups`
+
+ระบบใช้ SQLite Online Backup API และตรวจ `integrity_check` ก่อนยืนยันไฟล์สำรอง
 
 ## 9) ตัวเลือกเพิ่มเติมของสคริปต์ติดตั้ง
 
@@ -171,10 +176,12 @@ powershell -ExecutionPolicy Bypass -File .\start.ps1
 - ติดตั้งผ่าน `setup_windows_server.ps1` สำเร็จ
 - แก้ `.env` แล้วและตั้ง `FLASK_DEBUG=0`
 - เข้าเว็บได้จากเครื่องอื่นใน LAN
-- Scheduled Task 2 ตัวมีอยู่จริงและ Run ได้
+- Scheduled Task ทั้ง 3 ตัวมีอยู่จริงและ Run ได้
 - ทดสอบ backup แล้วพบไฟล์ใน `my_factory_app/backups`
+- เปิด `http://127.0.0.1:5000/healthz` แล้วได้ `{"status":"ok"}`
 
 ## หมายเหตุสำคัญ
 
 - ระบบใช้ SQLite (`my_factory_app/factory_stock.db`) เหมาะกับการรันบนเซิร์ฟเวอร์เครื่องเดียว
+- ห้ามนำ `factory_stock.db` มากับการ Deploy โค้ดหรือใช้ Git ทับฐานบน Server
 - ก่อนอัปเดตเวอร์ชันหรือย้ายเครื่อง ควร backup ฐานข้อมูลทุกครั้ง
