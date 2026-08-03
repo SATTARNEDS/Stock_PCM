@@ -1,0 +1,4 @@
+วาง Python 3.12 Windows installer แบบ x64 ในโฟลเดอร์นี้
+
+ชื่อไฟล์ที่รองรับ เช่น:
+python-3.12.10-amd64.exe

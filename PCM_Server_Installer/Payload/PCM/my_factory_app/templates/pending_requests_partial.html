@@ -1,0 +1,63 @@
+{% for log in pending_logs %}
+{% set pkg = (log['package_unit']|default(log['unit'])|string|lower) %}
+{% set is_medicine_pack = (('ยา' in (log['category']|string)) or ('medicine' in (log['category']|string|lower)) or ('pharma' in (log['category']|string|lower)) or ('drug' in (log['category']|string|lower))) and (('pack' in pkg) or ('package' in pkg) or ('box' in pkg) or ('jar' in pkg) or ('bottle' in pkg) or ('แพ็ค' in pkg) or ('กล่อง' in pkg) or ('กระปุก' in pkg) or ('ขวด' in pkg)) %}
+<tr>
+    <td class="small text-muted ps-4">{{ log['timestamp'] }}</td>
+    <td>
+        <div class="fw-medium text-dark">{{ log['emp_name'] }}</div>
+        <small class="text-muted">{{ log['department'] }}</small>
+    </td>
+    <td>
+        {{ log['product_name'] }}
+        {% if is_medicine_pack and log['conversion_rate'] and log['conversion_rate'] > 1 and log['base_unit'] %}
+            <span class="split-unit-badge">1 {{ log['package_unit'] or log['unit'] }} = {{ log['conversion_rate'] }} {{ log['base_unit'] }}</span>
+        {% else %}
+            <small class="text-muted">({{ log['unit'] }})</small>
+        {% endif %}
+    </td>
+    <td class="text-center fw-medium text-primary">
+        {% if is_medicine_pack %}
+            {{ log['qty_base_unit'] if log['qty_base_unit'] is not none else log['qty'] }} {{ log['base_unit'] or 'เม็ด' }}
+            <div class="small text-muted">
+                {% if log['qty_package_unit'] is not none %}
+                    ≈ {{ '%.2f'|format(log['qty_package_unit']) }} {{ log['package_unit'] or log['unit'] }}
+                {% elif log['conversion_rate'] and log['conversion_rate'] > 0 %}
+                    ≈ {{ '%.2f'|format((log['qty_base_unit'] if log['qty_base_unit'] is not none else log['qty']) / log['conversion_rate']) }} {{ log['package_unit'] or log['unit'] }}
+                {% endif %}
+            </div>
+        {% else %}
+            {{ log['qty'] }} {{ log['unit'] }}
+        {% endif %}
+        <div class="small mt-1 {% if log['request_receive_mode'] == 'scheduled' %}text-warning{% else %}text-success{% endif %}">
+            {% if log['request_receive_mode'] == 'scheduled' and log['requested_receive_at'] %}
+                รับวันที่ {{ log['requested_receive_at']|format_ts }}
+            {% else %}
+                รับของทันที
+            {% endif %}
+        </div>
+    </td>
+    <td class="text-center">
+        <form action="{{ url_for('approve_request', log_id=log['id']) }}" method="POST" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="button" onclick="confirmAction(this.form, 'อนุมัติการเบิกนี้?', 'question', this)"
+                class="btn btn-sm btn-success rounded-pill px-3 me-1 shadow-sm pending-action-btn pending-action-approve">
+                <i class="fas fa-check me-1"></i>อนุมัติ
+            </button>
+        </form>
+        <form action="{{ url_for('reject_request', log_id=log['id']) }}" method="POST" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="button" onclick="confirmRejectAction(this.form, this)"
+                class="btn btn-sm btn-outline-danger rounded-pill px-3 shadow-sm pending-action-btn pending-action-reject">
+                <i class="fas fa-times me-1"></i>ปฏิเสธ
+            </button>
+        </form>
+    </td>
+</tr>
+{% else %}
+<tr>
+    <td colspan="5" class="text-center py-5 text-muted">
+        <i class="fas fa-inbox fa-3x mb-3 opacity-25 d-block"></i>
+        ไม่มีรายการรออนุมัติ
+    </td>
+</tr>
+{% endfor %}

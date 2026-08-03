@@ -1,0 +1,22 @@
+# Python Environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Database (ห้ามเอาขึ้น Git เด็ดขาด)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+logs/
+my_factory_app/backups/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+my_factory_app/.secret_key

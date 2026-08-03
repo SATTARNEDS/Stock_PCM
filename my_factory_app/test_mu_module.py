@@ -2,6 +2,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime
 from io import BytesIO
 
 from flask import Flask, session
@@ -38,6 +39,10 @@ class MuModuleTestCase(unittest.TestCase):
         conn.execute(
             "INSERT INTO admins(username,password,name,role) VALUES(?,?,?,'admin_mu')",
             ("mu_test_admin", generate_password_hash("StrongPassword123!"), "MU Test Admin"),
+        )
+        conn.execute(
+            "INSERT INTO admins(username,password,name,role) VALUES(?,?,?,'superadmin')",
+            ("super_test", generate_password_hash("SuperPassword123!"), "Super Test Admin"),
         )
         conn.execute(
             """CREATE TABLE users (
@@ -88,6 +93,24 @@ class MuModuleTestCase(unittest.TestCase):
             admin_session["admin_name"] = "MU Test Admin"
             admin_session["admin_role"] = "admin_mu"
 
+    def _login_superadmin(self):
+        with self.client.session_transaction() as admin_session:
+            admin_session["admin_logged_in"] = True
+            admin_session["admin_username"] = "super_test"
+            admin_session["admin_name"] = "Super Test Admin"
+            admin_session["admin_role"] = "superadmin"
+
+    def test_superadmin_can_access_mu_admin_but_other_admin_roles_cannot(self):
+        self._login_superadmin()
+        response = self.client.get("/mu/admin")
+        self.assertEqual(response.status_code, 200)
+
+        with self.client.session_transaction() as admin_session:
+            admin_session["admin_role"] = "admin_all"
+        response = self.client.get("/mu/admin")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("admin=1", response.headers["Location"])
+
     def test_seed_contains_all_excel_items(self):
         conn = sqlite3.connect(self.db_path)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM mu_products").fetchone()[0], 140)
@@ -110,7 +133,7 @@ class MuModuleTestCase(unittest.TestCase):
         self._login_admin()
         response = self.client.post(
             "/mu/admin/employee/E001/password",
-            data={"csrf_token": "test-csrf", "password": "EmployeePass123!"},
+            data={"csrf_token": "test-csrf", "password": "1234"},
         )
         self.assertEqual(response.status_code, 302)
 
@@ -119,7 +142,7 @@ class MuModuleTestCase(unittest.TestCase):
             user_session["user_id"] = "E001"
         response = self.client.post(
             "/mu/access/E001",
-            data={"csrf_token": "test-csrf", "password": "EmployeePass123!"},
+            data={"csrf_token": "test-csrf", "password": "1234"},
         )
         self.assertEqual(response.status_code, 302)
         self.assertIn("/mu/portal/E001", response.location)
@@ -362,12 +385,13 @@ class MuModuleTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data.startswith(b"PK"))
         workbook = load_workbook(BytesIO(response.data), read_only=True)
+        monthly_sheet_name = f"รายเดือน {datetime.now().strftime('%Y-%m')}"
         self.assertEqual(
             workbook.sheetnames,
-            ["รายการเบิก", "Stock Movement", "Audit Log", "รายเดือน 2026-07"],
+            ["รายการเบิก", "Stock Movement", "Audit Log", monthly_sheet_name],
         )
         self.assertEqual(workbook["รายการเบิก"]["A1"].value, "วันเวลา")
-        monthly_sheet = workbook["รายเดือน 2026-07"]
+        monthly_sheet = workbook[monthly_sheet_name]
         self.assertEqual(
             [monthly_sheet.cell(1, column).value for column in range(1, 10)],
             ["No.", "รหัสสินค้า", "รายการ / List", "รวม", "ยอดเบิก", "คงเหลือ", "Safety Stock", "สั่งซื้อ", "หน่วย"],

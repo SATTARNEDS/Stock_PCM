@@ -1,0 +1,74 @@
+{% for item in items %}
+{% set display_stock = item['display_stock'] if 'display_stock' in item.keys() else item['stock'] %}
+{% set effective_stock = item['effective_stock'] if 'effective_stock' in item.keys() else display_stock %}
+<tr data-product-id="{{ item['id'] }}" class="align-middle {% if effective_stock <= 0 %}table-danger{% elif item['is_active'] == 0 %}table-secondary opacity-75 text-muted{% endif %}">
+    <td class="ps-4 code-column"><code>{{ item['code'] }}</code></td>
+    <td class="fw-medium {% if item['is_active'] == 0 %}text-muted{% endif %}">
+        {{ item['name'] }}
+        {% if item['split_unit_hint_label'] %}
+        <span class="split-unit-badge">{{ item['split_unit_hint_label'] }}</span>
+        {% endif %}
+        {% if item['is_active'] == 0 %}
+        <span class="badge bg-danger ms-1" style="font-size: 0.6rem;">ปิดใช้งาน</span>
+        {% endif %}
+        {% if effective_stock <= 0 %}
+        <span class="badge bg-danger ms-1" style="font-size: 0.6rem;">หมดสต็อก</span>
+        {% endif %}
+    </td>
+    <td><span class="badge bg-light text-dark border">{{ item['category'] }}</span></td>
+    <td class="text-center fw-medium {{ 'text-danger' if effective_stock <= item['safety_stock'] else 'text-success' }}">
+        {% if item['is_split_tablet_medicine'] %}
+        <div>{{ item['backend_stock_text'] }}</div>
+        <small class="text-muted">แสดงหน้าเบิก: {{ item['frontend_stock_text'] }}</small>
+        {% else %}
+        <div>{{ display_stock }}</div>
+        {% if item['stock_source'] == 'lot' and display_stock != item['stock'] %}
+        <small class="text-muted">รวมจาก Lot / stock หลัก {{ item['stock'] }}</small>
+        {% endif %}
+        {% endif %}
+    </td>
+    <td class="text-center text-muted">{{ item['safety_stock'] }}</td>
+    <td class="text-center">
+        <a href="{{ url_for('generate_qr', code=item['code']) }}" target="_blank"
+            class="btn btn-sm btn-outline-info rounded-circle" title="ดู QR Code">
+            <i class="fas fa-qrcode"></i>
+        </a>
+    </td>
+    <td class="text-center text-nowrap">
+        <button
+            class="btn btn-sm {% if item['is_active'] == 1 %}btn-light text-danger{% else %}btn-danger text-white{% endif %} border shadow-sm rounded-circle"
+            title="เปิด/ปิดใช้งาน"
+            onclick="toggleProductStatus('{{ item['id'] }}', '{{ item['name'] }}', {{ item['is_active'] }})">
+            <i class="fas {% if item['is_active'] == 1 %}fa-eye-slash{% else %}fa-eye{% endif %}"></i>
+        </button>
+
+        <button class="btn btn-sm btn-light text-success border shadow-sm rounded-circle me-1 hover-shadow {% if item['is_active'] == 0 %}disabled{% endif %}"
+            title="เพิ่มสต็อก (Add Lot)" onclick="{% if item['is_active'] == 1 %}openAddLotModal('{{ item['code'] }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %}
+            disabled style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
+            <i class="fas fa-plus"></i>
+        </button>
+
+        <button class="btn btn-sm btn-light text-warning border shadow-sm rounded-circle hover-shadow {% if item['is_active'] == 0 %}disabled{% endif %}" title="แก้ไข"
+            onclick="{% if item['is_active'] == 1 %}editProductModal('{{ item['code'] }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %} disabled
+            style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
+            <i class="fas fa-edit"></i>
+        </button>
+
+        <button class="btn btn-sm btn-light text-danger border shadow-sm rounded-circle me-1 {% if item['is_active'] == 0 %}disabled{% endif %}"
+            title="ตัดจำหน่าย (Scrap)" onclick="{% if item['is_active'] == 1 %}openWriteOffModal('{{ item['code'] }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %} disabled style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
+            <i class="fas fa-trash-alt"></i>
+        </button>
+        <button class="btn btn-sm btn-light text-primary border shadow-sm rounded-circle me-1 {% if item['is_active'] == 0 %}disabled{% endif %}"
+            title="แก้ไข Lot" onclick="{% if item['is_active'] == 1 %}openEditLotModal('{{ item['code'] }}'){% else %}return false;{% endif %}" {% if item['is_active']==0 %} disabled style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
+            <i class="fas fa-tags"></i>
+        </button>
+    </td>
+</tr>
+{% else %}
+<tr>
+    <td colspan="7" class="text-center py-5 text-muted">
+        <i class="fas fa-box-open fa-2x mb-3 opacity-25 d-block"></i>
+        ไม่พบข้อมูลที่ค้นหา
+    </td>
+</tr>
+{% endfor %}

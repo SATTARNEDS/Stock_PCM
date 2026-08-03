@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Audit Report - PCM</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}">
+    <style>
+        :root {
+            --audit-ink: #143046;
+            --audit-muted: #5f7183;
+            --audit-paper: #fffdf7;
+            --audit-shell: #f3efe6;
+            --audit-line: #ddcfb8;
+            --audit-header: #f4d5d2;
+            --audit-month: #f7e9ae;
+            --audit-accent: #11698e;
+            --audit-accent-soft: #dff2f8;
+            --audit-danger: #b8493b;
+            --audit-danger-soft: #fde4df;
+            --audit-warn: #9c6b10;
+            --audit-warn-soft: #fff1d6;
+        }
+        body {
+            background:
+                radial-gradient(circle at top left, rgba(17, 105, 142, 0.12), transparent 30%),
+                linear-gradient(180deg, #f7f2e8 0%, #efe8db 100%);
+            color: var(--audit-ink);
+            font-family: 'Noto Sans Thai', sans-serif;
+        }
+        body.popup-mode {
+            background:
+                radial-gradient(circle at top right, rgba(17, 105, 142, 0.1), transparent 28%),
+                linear-gradient(180deg, #f8f4eb 0%, #efe8dd 100%);
+        }
+        .page-shell {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 1.4rem;
+        }
+        .page-shell.popup-shell {
+            max-width: 100%;
+            padding: 1rem;
+        }
+        .hero-card,
+        .sheet-card,
+        .guide-card,
+        .legend-card {
+            border: 1px solid rgba(221, 207, 184, 0.9);
+            border-radius: 24px;
+            box-shadow: 0 18px 50px rgba(80, 61, 28, 0.08);
+            overflow: hidden;
+            background: rgba(255, 253, 247, 0.95);
+        }
+        .hero-header {
+            background: linear-gradient(135deg, #12344d 0%, #0f6d85 100%);
+            color: #fff;
+            padding: 1.25rem 1.35rem;
+        }
+        .hero-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.35rem 0.8rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.12);
+            font-size: 0.76rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 0.7rem;
+        }
+        .hero-title {
+            font-size: clamp(1.35rem, 2vw, 2rem);
+            font-weight: 700;
+            margin: 0;
+            font-family: 'Kanit', 'Noto Sans Thai', sans-serif;
+            letter-spacing: 0.01em;
+        }
+        .hero-subtitle {
+            color: rgba(255, 255, 255, 0.78);
+            margin: 0.35rem 0 0;
+        }
+        .hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.7rem;
+            align-items: center;
+            justify-content: flex-end;
+        }
+        .hero-tools {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            align-items: center;
+        }
+        .hero-select {
+            min-width: 142px;
+            border-radius: 14px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .hero-select .input-group-text,
+        .hero-select .form-select {
+            border: 0;
+            box-shadow: none;
+        }
+        .hero-select .input-group-text {
+            background: rgba(255, 255, 255, 0.18);
+            color: #fff;
+        }
+        .hero-select .form-select {
+            background: rgba(255, 255, 255, 0.92);
+            color: var(--audit-ink);
+            font-weight: 600;
+        }
+        .hero-btn {
+            border-radius: 14px;
+            padding-inline: 1rem;
+            border: 0;
+            box-shadow: none;
+            font-weight: 600;
+        }
+        .hero-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            padding: 1rem 1.3rem 1.2rem;
+            background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,250,240,0.98));
+        }
+        .meta-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            border-radius: 999px;
+            padding: 0.5rem 0.85rem;
+            background: var(--audit-accent-soft);
+            color: var(--audit-accent);
+            font-size: 0.84rem;
+            font-weight: 600;
+        }
+        .guide-card {
+            background: linear-gradient(180deg, rgba(255,253,247,0.95), rgba(250,243,229,0.95));
+        }
+        .guide-steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.8rem;
+        }
+        .guide-step {
+            border-radius: 18px;
+            padding: 0.95rem 1rem;
+            background: rgba(255, 255, 255, 0.72);
+            border: 1px solid rgba(221, 207, 184, 0.75);
+        }
+        .guide-step strong {
+            display: block;
+            margin-bottom: 0.35rem;
+            color: var(--audit-ink);
+        }
+        .audit-toolbar {
+            background:
+                radial-gradient(circle at top right, rgba(17, 105, 142, 0.08), transparent 42%),
+                linear-gradient(145deg, rgba(255,255,255,0.96), rgba(253,247,236,0.98));
+            border: 1px solid rgba(201, 180, 145, 0.6);
+            border-radius: 20px;
+            padding: 0.9rem;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.85), 0 10px 28px rgba(68, 49, 22, 0.08);
+        }
+        .audit-search-group {
+            border: 1px solid rgba(173, 196, 209, 0.95);
+            border-radius: 14px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow: 0 4px 14px rgba(17, 105, 142, 0.08);
+        }
+        .audit-search-group .input-group-text {
+            border: 0;
+            background: linear-gradient(180deg, #e6f4f9, #d9edf5);
+            color: #1f607a;
+        }
+        .audit-search-input {
+            border: 0;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #214053;
+        }
+        .audit-search-input:focus {
+            box-shadow: none;
+        }
+        .audit-category-select {
+            border: 1px solid rgba(173, 196, 209, 0.95);
+            border-radius: 14px;
+            min-height: 36px;
+            background: linear-gradient(180deg, #ffffff, #f5fbfd);
+            font-size: 0.86rem;
+            font-weight: 600;
+            color: #23485d;
+            box-shadow: 0 4px 14px rgba(17, 105, 142, 0.08);
+        }
+        .audit-category-select:focus {
+            border-color: #66abc5;
+            box-shadow: 0 0 0 0.18rem rgba(30, 137, 170, 0.18);
+        }
+        .filter-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.55rem;
+            background: linear-gradient(180deg, #fff, #f8fbff);
+            padding: 0.5rem 0.82rem;
+            border-radius: 999px;
+            border: 1px solid rgba(173, 196, 209, 0.95);
+            box-shadow: 0 4px 14px rgba(17, 105, 142, 0.08);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .filter-toggle:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 18px rgba(17, 105, 142, 0.12);
+        }
+        .filter-toggle .form-check-input {
+            width: 1rem;
+            height: 1rem;
+            margin-top: 0;
+            border-color: #7ea7ba;
+        }
+        .filter-toggle .form-check-input:checked {
+            background-color: #166e8f;
+            border-color: #166e8f;
+        }
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+        }
+        .kpi-card {
+            border: 1px solid rgba(221, 207, 184, 0.9);
+            border-radius: 22px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(252,247,238,0.98));
+            box-shadow: 0 14px 38px rgba(72, 56, 22, 0.08);
+        }
+        .kpi-card .card-body {
+            min-height: 118px;
+            padding: 1rem 1.1rem;
+        }
+        .kpi-label {
+            font-size: 0.76rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--audit-muted);
+            margin-bottom: 0.5rem;
+        }
+        .kpi-number {
+            font-size: 1.95rem;
+            line-height: 1;
+            font-weight: 700;
+            color: var(--audit-ink);
+            font-family: 'Kanit', 'Noto Sans Thai', sans-serif;
+        }
+        .kpi-caption {
+            margin-top: 0.45rem;
+            font-size: 0.84rem;
+            color: var(--audit-muted);
+        }
+        .audit-table-wrap {
+            overflow-x: hidden;
+            border-top: 1px solid var(--audit-line);
+            border-bottom-left-radius: 24px;
+            border-bottom-right-radius: 24px;
+            background: var(--audit-paper);
+        }
+        .audit-table {
+            width: 100%;
+            margin: 0;
+            table-layout: fixed;
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+        .audit-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            letter-spacing: 0.02em;
+            font-size: 0.75rem;
+            border-bottom: 0;
+            border-color: var(--audit-line);
+            color: var(--audit-ink);
+            text-align: center;
+            padding: 0.52rem 0.26rem;
+            border-right: 1px solid rgba(184, 167, 136, 0.45);
+        }
+        .audit-table th,
+        .audit-table td {
+            vertical-align: middle;
+            white-space: normal;
+            word-break: break-word;
+        }
+        .audit-table tbody td {
+            padding: 0.56rem 0.3rem;
+            border-color: rgba(198, 178, 145, 0.92);
+            border-right: 1px solid rgba(184, 167, 136, 0.5);
+            font-size: 0.79rem;
+            background: rgba(255, 253, 247, 0.85);
+            text-align: center;
+        }
+        .audit-table tbody tr:hover {
+            background: rgba(240, 249, 251, 0.95) !important;
+        }
+        .audit-col-no { width: 2.5%; }
+        .audit-col-code { width: 7%; }
+        .audit-col-name { width: 30%; }
+        .audit-col-open,
+        .audit-col-receive,
+        .audit-col-adjust,
+        .audit-col-total,
+        .audit-col-withdraw,
+        .audit-col-closing,
+        .audit-col-safety,
+        .audit-col-order { width: 3%; }
+        .audit-col-unit { width: 2.5%; }
+        .audit-col-day { width: 1%; }
+        .audit-code {
+            background: #eef7fa;
+            border: 1px solid #bfdbe7;
+            color: #235a71;
+            border-radius: 8px;
+            padding: 4px 9px;
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+        .audit-location-badge {
+            background: #fff3df;
+            color: #8a5b14;
+            border: 1px solid #f0d6a5;
+            font-weight: 600;
+        }
+        .sheet-top-header th {
+            background: var(--audit-header);
+        }
+        .sheet-month-header th {
+            background: var(--audit-month);
+            z-index: 3;
+        }
+        .sheet-month-title {
+            background: var(--audit-month) !important;
+            font-size: 0.88rem !important;
+            font-weight: 700;
+        }
+        .inactive-day {
+            background: rgba(151, 133, 104, 0.12) !important;
+            color: rgba(95, 113, 131, 0.68) !important;
+        }
+        .day-col,
+        .day-cell {
+            min-width: 0;
+            text-align: center;
+            font-size: 0.68rem;
+            padding-inline: 0.18rem !important;
+        }
+        .num-cell {
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+        }
+        .text-cell {
+            text-align: left;
+            line-height: 1.25;
+        }
+        .muted-cell {
+            color: var(--audit-muted);
+            font-size: 0.73rem;
+        }
+        .order-cell {
+            font-weight: 700;
+        }
+        .order-cell.needs-order {
+            background: var(--audit-danger-soft);
+            color: var(--audit-danger);
+        }
+        .day-cell.inactive-day {
+            color: rgba(95, 113, 131, 0.45);
+        }
+        .audit-table thead tr:first-child th:nth-child(13),
+        .audit-table thead tr:last-child th:first-child,
+        .audit-table tbody td:nth-child(13) {
+            border-left: 2px solid rgba(156, 123, 60, 0.55);
+        }
+        .density-switch {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            background: linear-gradient(180deg, #f9fdff, #eef7fb);
+            border: 1px solid rgba(173, 196, 209, 0.95);
+            border-radius: 999px;
+            padding: 0.18rem;
+            box-shadow: 0 4px 14px rgba(17, 105, 142, 0.08);
+        }
+        .density-btn {
+            border: 0;
+            border-radius: 999px;
+            background: transparent;
+            color: #4f6b7c;
+            font-size: 0.74rem;
+            font-weight: 700;
+            padding: 0.3rem 0.72rem;
+            transition: all 0.2s ease;
+        }
+        .density-btn.active {
+            background: linear-gradient(135deg, #1b7b9b, #145f81);
+            color: #fff;
+            box-shadow: 0 6px 14px rgba(20, 95, 129, 0.32);
+        }
+        #auditTable.audit-density-comfortable thead th {
+            font-size: 0.79rem;
+            padding: 0.62rem 0.34rem;
+        }
+        #auditTable.audit-density-comfortable tbody td {
+            font-size: 0.86rem;
+            padding: 0.72rem 0.42rem;
+        }
+        #auditTable.audit-density-comfortable .day-col,
+        #auditTable.audit-density-comfortable .day-cell {
+            font-size: 0.74rem;
+        }
+        #auditTable.audit-density-comfortable .muted-cell {
+            font-size: 0.78rem;
+        }
+        .legend-card {
+            background: linear-gradient(180deg, rgba(255, 250, 241, 0.96), rgba(252, 246, 234, 0.98));
+        }
+        .legend-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 0.85rem;
+        }
+        .legend-item {
+            border-radius: 18px;
+            border: 1px solid rgba(221, 207, 184, 0.9);
+            background: rgba(255,255,255,0.74);
+            padding: 0.9rem 1rem;
+        }
+        .legend-item strong {
+            display: block;
+            margin-bottom: 0.25rem;
+            color: var(--audit-ink);
+        }
+        @media (max-width: 991px) {
+            .hero-actions {
+                justify-content: flex-start;
+            }
+            .hero-tools {
+                width: 100%;
+            }
+            .hero-select {
+                min-width: 120px;
+                flex: 1 1 140px;
+            }
+            .hero-btn {
+                flex: 1 1 auto;
+            }
+            .audit-table-wrap {
+                overflow-x: auto;
+            }
+            .audit-table {
+                min-width: 1240px;
+            }
+        }
+    </style>
+</head>
+<body class="{% if popup_mode %}popup-mode{% endif %}">
+<div class="page-shell {% if popup_mode %}popup-shell{% endif %}">
+    <div class="hero-card mb-3">
+        <div class="hero-header d-flex flex-column gap-3 flex-lg-row justify-content-between align-items-lg-center">
+            <div>
+                <div class="hero-kicker"><i class="fas fa-sheet-plastic"></i> Stock Style Audit</div>
+                <h1 class="hero-title"><i class="fas fa-clipboard-check text-info me-2"></i>Stock Audit Sheet</h1>
+                <p class="hero-subtitle">ตารางดูยอดเก่า</p>
+            </div>
+            <div class="hero-actions">
+                {% if not popup_mode %}
+                <a href="{{ url_for('admin_dashboard', module='stock') }}" class="btn btn-outline-light hero-btn">
+                    <i class="fas fa-arrow-left me-1"></i>กลับหน้า Admin
+                </a>
+                {% else %}
+                {% endif %}
+                <div class="hero-tools">
+                    <div class="input-group input-group-sm hero-select">
+                        <span class="input-group-text">ปี</span>
+                        <select class="form-select" id="auditYearSelect" onchange="reloadAuditView()">
+                            {% for year in available_years %}
+                            <option value="{{ year }}" {% if year == selected_year %}selected{% endif %}>{{ year }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="input-group input-group-sm hero-select">
+                        <span class="input-group-text">เดือน</span>
+                        <select class="form-select" id="auditMonthSelect" onchange="reloadAuditView()">
+                            {% for month in available_months %}
+                            <option value="{{ month.value }}" {% if month.value == selected_month %}selected{% endif %}>{{ month.short_label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button class="btn btn-success hero-btn" onclick="exportMonthlyAuditExcel()">
+                        <i class="fas fa-file-excel me-1"></i>Excel รายปี
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="hero-meta">
+            <span class="meta-chip"><i class="fas fa-calendar-days"></i> ชีต {{ selected_month_name }} {{ selected_year }}</span>
+            <span class="meta-chip"><i class="fas fa-table-cells-large"></i> โครงตารางหน้าเว็บตรงกับหัวคอลัมน์ Excel export</span>
+            <span class="meta-chip"><i class="fas fa-ban"></i> ไม่มีคอลัมน์ราคา</span>
+        </div>
+    </div>
+
+    <div class="guide-card mb-3">
+        <div class="card-body">
+            <h6 class="mb-3 fw-bold"><i class="fas fa-lightbulb me-2 text-warning"></i>วิธีอ่านชีตนี้ให้เร็ว</h6>
+            <div class="guide-steps">
+                <div class="guide-step">
+                    <strong>1. ดูยอดยกมาและรับเข้า</strong>
+                    <div class="small text-muted">เริ่มจากต้นเดือนว่ามีของอยู่เท่าไรและเดือนนี้รับเข้าเพิ่มเท่าไร</div>
+                </div>
+                <div class="guide-step">
+                    <strong>2. เทียบยอดเบิกกับคงเหลือ</strong>
+                    <div class="small text-muted">ดูยอดเบิกรวมและคงเหลือปลายเดือนว่าพอใช้งานหรือไม่</div>
+                </div>
+                <div class="guide-step">
+                    <strong>3. ไล่วันที่ 1-31</strong>
+                    <div class="small text-muted">คอลัมน์วันด้านขวาจะบอกปริมาณที่เบิกในแต่ละวันแบบเดียวกับ Excel</div>
+                </div>
+                <div class="guide-step">
+                    <strong>4. เช็คคอลัมน์สั่งซื้อ</strong>
+                    <div class="small text-muted">แถวที่มีพื้นแดงอ่อนคือสินค้าที่คงเหลือต่ำกว่า Safety stock</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="kpi-grid mb-3">
+        <div class="kpi-card">
+            <div class="card-body d-flex flex-column justify-content-between">
+                <div>
+                    <div class="kpi-label">จำนวนสินค้าทั้งหมด</div>
+                    <div class="kpi-number">{{ summary.total_products }}</div>
+                </div>
+                <div class="kpi-caption">ทุกรายการในชีต {{ selected_month_name }}</div>
+            </div>
+        </div>
+        <div class="kpi-card">
+            <div class="card-body d-flex flex-column justify-content-between">
+                <div>
+                    <div class="kpi-label">ยอดรับเข้ารวม</div>
+                    <div class="kpi-number">{{ summary.total_received }}</div>
+                </div>
+                <div class="kpi-caption">รวมรับเข้าทั้งเดือน</div>
+            </div>
+        </div>
+        <div class="kpi-card">
+            <div class="card-body d-flex flex-column justify-content-between">
+                <div>
+                    <div class="kpi-label">ยอดเบิกรวม</div>
+                    <div class="kpi-number">{{ summary.total_withdrawn }}</div>
+                </div>
+                <div class="kpi-caption">รวมยอดใช้จ่ายออกทั้งเดือน</div>
+            </div>
+        </div>
+        <div class="kpi-card">
+            <div class="card-body d-flex flex-column justify-content-between">
+                <div>
+                    <div class="kpi-label">ยอดคงเหลือรวม</div>
+                    <div class="kpi-number">{{ summary.total_closing }}</div>
+                </div>
+                <div class="kpi-caption">สถานะปลายเดือน</div>
+            </div>
+        </div>
+        <div class="kpi-card">
+            <div class="card-body d-flex flex-column justify-content-between">
+                <div>
+                    <div class="kpi-label">รายการที่ต้องสั่งซื้อ</div>
+                    <div class="kpi-number">{{ summary.items_to_order }}</div>
+                </div>
+                <div class="kpi-caption">ปริมาณสั่งซื้อรวม {{ summary.total_order_qty }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="sheet-card">
+        <div class="card-header hero-header d-flex justify-content-between align-items-center">
+            <div>
+                <h5 class="mb-0"><i class="fas fa-table me-2 text-info"></i>รายละเอียดชีต {{ selected_month_name }} {{ selected_year }}</h5>
+            </div>
+        </div>
+        <div class="card-body pb-0">
+            <div class="audit-toolbar mb-3">
+                <div class="row g-2 align-items-center">
+                    <div class="col-lg-6">
+                        <div class="input-group input-group-sm audit-search-group">
+                            <span class="input-group-text"><i class="fas fa-magnifying-glass"></i></span>
+                            <input type="text" class="form-control audit-search-input" id="auditSearchInput" placeholder="ค้นหารหัสสินค้า, ชื่อสินค้า หรือ location..." oninput="filterAuditTable()">
+                        </div>
+                    </div>
+                    <div class="col-lg-2">
+                        <select class="form-select form-select-sm audit-category-select" id="auditCategoryFilter" onchange="filterAuditTable()" aria-label="Category filter">
+                            <option value="">ทุกหมวดหมู่</option>
+                        </select>
+                    </div>
+                    <div class="col-lg-4 d-flex justify-content-lg-end">
+                        <div class="d-flex gap-2 align-items-center">
+                            <label class="filter-toggle">
+                                <input class="form-check-input" type="checkbox" id="mismatchOnlyToggle" onchange="filterAuditTable()">
+                                <span class="small fw-semibold">แสดงเฉพาะรายการที่ต้องสั่งซื้อ</span>
+                            </label>
+                            <div class="density-switch" aria-label="Table density switch">
+                                <button type="button" class="density-btn" id="densityCompactBtn" onclick="setAuditDensity('compact')">Compact</button>
+                                <button type="button" class="density-btn" id="densityComfortableBtn" onclick="setAuditDensity('comfortable')">Comfortable</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="card-body p-0 audit-table-wrap">
+            <table class="table table-hover table-sm mb-0 audit-table" id="auditTable">
+                <colgroup>
+                    <col class="audit-col-no">
+                    <col class="audit-col-code">
+                    <col class="audit-col-name">
+                    <col class="audit-col-open">
+                    <col class="audit-col-receive">
+                    <col class="audit-col-adjust">
+                    <col class="audit-col-total">
+                    <col class="audit-col-withdraw">
+                    <col class="audit-col-closing">
+                    <col class="audit-col-safety">
+                    <col class="audit-col-order">
+                    <col class="audit-col-unit">
+                    {% for day in range(1, active_day_count + 1) %}
+                    <col class="audit-col-day">
+                    {% endfor %}
+                </colgroup>
+                <thead>
+                    <tr class="sheet-top-header">
+                        <th rowspan="2">No.</th>
+                        <th rowspan="2">รหัสสินค้า</th>
+                        <th rowspan="2">รายการ / List</th>
+                        <th rowspan="2">ยอดยกมา</th>
+                        <th rowspan="2">รับเข้า</th>
+                        <th rowspan="2">ปรับยอด</th>
+                        <th rowspan="2">รวม</th>
+                        <th rowspan="2">ยอดเบิก</th>
+                        <th rowspan="2">คงเหลือ</th>
+                        <th rowspan="2">Safety stock</th>
+                        <th rowspan="2">สั่งซื้อ</th>
+                        <th rowspan="2">หน่วย</th>
+                        <th colspan="{{ active_day_count|default(31) }}" class="sheet-month-title">Month {{ selected_month_name }} {{ selected_year }}</th>
+                    </tr>
+                    <tr class="sheet-month-header">
+                        {% for day in range(1, active_day_count + 1) %}
+                        <th class="day-col {% if day > (active_day_count|default(31)) %}inactive-day{% endif %}">{{ day }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in audit_rows %}
+                    <tr data-category="{{ (item.category or '-')|trim|lower }}" data-category-label="{{ (item.category or '-')|trim }}">
+                        <td class="num-cell">{{ item.no }}</td>
+                        <td class="text-cell"><span class="audit-code">{{ item.code }}</span></td>
+                        <td class="text-cell">
+                            <div class="fw-semibold">{{ item.name }}</div>
+                            <div class="small muted-cell">{{ item.category or '-' }} • <span class="badge audit-location-badge">{{ item.location or '-' }}</span></div>
+                        </td>
+                        <td class="num-cell">{{ item.opening_balance }}</td>
+                        <td class="num-cell">{{ item.received }}</td>
+                        <td class="num-cell">{{ item.adjusted }}</td>
+                        <td class="num-cell fw-semibold">{{ item.total }}</td>
+                        <td class="num-cell">{{ item.withdrawn }}</td>
+                        <td class="num-cell fw-semibold">{{ item.closing_balance }}</td>
+                        <td class="num-cell">{{ item.safety_stock }}</td>
+                        <td class="num-cell order-cell {% if item.order_qty > 0 %}needs-order{% endif %}">{{ item.order_qty }}</td>
+                        <td class="num-cell muted-cell">{{ item.unit }}</td>
+                        {% for day in range(1, active_day_count + 1) %}
+                        <td class="day-cell {% if day > (active_day_count|default(31)) %}inactive-day{% endif %}">{{ item.daily_withdrawals.get(day, '') if day <= (active_day_count|default(31)) else '' }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="legend-card mt-4">
+        <div class="card-header hero-header">
+            <h5 class="mb-0"><i class="fas fa-book me-2"></i>Legend</h5>
+        </div>
+        <div class="card-body">
+            <div class="legend-grid">
+                <div class="legend-item">
+                    <strong>ยอดยกมา</strong>
+                    คือยอดคงเหลือ ณ วันแรกของเดือนที่เลือก
+                </div>
+                <div class="legend-item">
+                    <strong>รวม</strong>
+                    คำนวณจาก ยอดยกมา + รับเข้า + ปรับยอด
+                </div>
+                <div class="legend-item">
+                    <strong>ยอดเบิก</strong>
+                    รวมเฉพาะรายการที่อนุมัติและถูกตัดจ่ายจริงแล้ว
+                </div>
+                <div class="legend-item">
+                    <strong>คงเหลือ</strong>
+                    ยอดปลายเดือนตาม snapshot เดียวกับ Excel export
+                </div>
+                <div class="legend-item">
+                    <strong>สั่งซื้อ</strong>
+                    ระบบคำนวณจาก Safety stock ลบด้วยยอดคงเหลือ ถ้าเกิน 0 จะไฮไลต์สีอ่อน
+                </div>
+                <div class="legend-item">
+                    <strong>คอลัมน์วันที่ 1-31</strong>
+                    แสดงยอดเบิกรายวันของเดือนนั้นเพื่อไล่ pattern การใช้งานได้ทันที
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function reloadAuditView() {
+    const year = document.getElementById('auditYearSelect')?.value;
+    const month = document.getElementById('auditMonthSelect')?.value;
+    const params = new URLSearchParams(window.location.search);
+    if (year) params.set('year', year);
+    if (month) params.set('month', month);
+    params.delete('format');
+    window.location.href = `${window.location.pathname}?${params.toString()}`;
+}
+
+function exportMonthlyAuditExcel() {
+    const year = document.getElementById('auditYearSelect')?.value;
+    const params = new URLSearchParams(window.location.search);
+    params.set('format', 'xlsx');
+    if (year) {
+        params.set('year', year);
+    }
+    params.delete('popup');
+    window.location.href = `${window.location.pathname}?${params.toString()}`;
+}
+
+function setAuditDensity(mode) {
+    const table = document.getElementById('auditTable');
+    const compactBtn = document.getElementById('densityCompactBtn');
+    const comfortableBtn = document.getElementById('densityComfortableBtn');
+    if (!table || !compactBtn || !comfortableBtn) return;
+
+    if (mode === 'comfortable') {
+        table.classList.add('audit-density-comfortable');
+        compactBtn.classList.remove('active');
+        comfortableBtn.classList.add('active');
+    } else {
+        table.classList.remove('audit-density-comfortable');
+        compactBtn.classList.add('active');
+        comfortableBtn.classList.remove('active');
+    }
+
+    try {
+        localStorage.setItem('stockAuditDensity', mode);
+    } catch (e) {
+        // ignore storage errors
+    }
+}
+
+function filterAuditTable() {
+    const searchEl = document.getElementById('auditSearchInput');
+    const categoryEl = document.getElementById('auditCategoryFilter');
+    const mismatchOnly = document.getElementById('mismatchOnlyToggle')?.checked;
+    const table = document.getElementById('auditTable');
+    if (!table) return;
+
+    const keyword = (searchEl?.value || '').trim().toLowerCase();
+    const selectedCategory = (categoryEl?.value || '').trim().toLowerCase();
+    const rows = table.querySelectorAll('tbody tr');
+
+    rows.forEach(row => {
+        const code = (row.cells[1]?.textContent || '').toLowerCase();
+        const name = (row.cells[2]?.textContent || '').toLowerCase();
+        const location = (row.cells[2]?.textContent || '').toLowerCase();
+        const category = (row.dataset.category || '-').toLowerCase();
+        const orderText = (row.cells[10]?.textContent || '').trim();
+        const orderQty = parseInt(orderText || '0', 10) || 0;
+
+        const matchKeyword = !keyword || code.includes(keyword) || name.includes(keyword) || location.includes(keyword);
+        const matchCategory = !selectedCategory || category === selectedCategory;
+        const matchMismatch = !mismatchOnly || orderQty > 0;
+
+        row.style.display = (matchKeyword && matchCategory && matchMismatch) ? '' : 'none';
+    });
+}
+
+function initCategoryFilterOptions() {
+    const categoryEl = document.getElementById('auditCategoryFilter');
+    const table = document.getElementById('auditTable');
+    if (!categoryEl || !table) return;
+
+    const rows = table.querySelectorAll('tbody tr');
+    const categoryMap = new Map();
+
+    rows.forEach(row => {
+        const value = (row.dataset.category || '').trim().toLowerCase();
+        const label = (row.dataset.categoryLabel || '').trim();
+        if (!value || categoryMap.has(value)) return;
+        categoryMap.set(value, label || '-');
+    });
+
+    Array.from(categoryMap.entries())
+        .sort((a, b) => a[1].localeCompare(b[1], 'th'))
+        .forEach(([value, label]) => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = label;
+            categoryEl.appendChild(option);
+        });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initCategoryFilterOptions();
+
+    let savedMode = 'compact';
+    try {
+        savedMode = localStorage.getItem('stockAuditDensity') || 'compact';
+    } catch (e) {
+        savedMode = 'compact';
+    }
+    setAuditDensity(savedMode === 'comfortable' ? 'comfortable' : 'compact');
+});
+</script>
+<script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+</body>
+</html>

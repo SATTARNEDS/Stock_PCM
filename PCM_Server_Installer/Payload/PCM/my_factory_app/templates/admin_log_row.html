@@ -1,0 +1,40 @@
+{% for log in logs %}
+{% if log['status'] != 'Pending' %}
+<tr>
+    <td class="small">{{ log['timestamp'] | format_ts }}</td>
+    <td>
+        <div class="fw-medium">{{ log['emp_name'] or log['emp_id'] }}</div>
+        <small class="text-muted">
+            {{ log['department'] }} 
+            {% set display_location = log['location'] or log['product_location'] %}
+            {% if display_location %}
+                <span class="text-primary">({{ display_location }})</span>
+            {% endif %}
+        </small>
+    </td>
+    <td>
+        <span class="badge {% if 'เบิก' in log['action'] %}bg-warning text-dark{% elif 'เติม' in log['action'] %}bg-success{% else %}bg-info{% endif %} mb-1">
+            {{ log['action'] }}
+        </span><br>
+        {{ log['product_name'] }}
+        {% if log['note'] %}
+            <div class="small text-muted mt-1">{{ log['note'] }}</div>
+        {% endif %}
+    </td>
+    <td class="text-center fw-medium">
+        {%- set show_qty = log['qty_base_unit'] if (log['qty_base_unit'] and log['qty_base_unit']|int > 0) else log['qty'] -%}
+        {%- set show_unit = log['base_unit'] if (log['qty_base_unit'] and log['qty_base_unit']|int > 0 and log['base_unit']) else log['unit'] -%}
+        {{ show_qty }} {{ show_unit or '' }}
+    </td>
+    <td class="text-center">
+        {% if log['status'] == 'Approved' and log['request_receive_mode'] == 'scheduled' and log['pickup_confirmed_at'] %}
+        <span class="badge bg-info text-dark">รับของแล้ว</span>
+        {% else %}
+        <span class="badge {% if log['status']=='Approved' %}bg-success{% elif log['status']=='Rejected' %}bg-danger{% else %}bg-secondary{% endif %}">
+            {{ log['status'] }}
+        </span>
+        {% endif %}
+    </td>
+</tr>
+{% endif %}
+{% endfor %}

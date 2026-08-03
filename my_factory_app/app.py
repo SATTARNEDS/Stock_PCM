@@ -1,5 +1,7 @@
 import io
 import calendar
+import hashlib
+import json
 import math
 import mimetypes
 import re
@@ -762,10 +764,11 @@ def enrich_products_for_display(conn, products_list):
         package_tablet_total = int(item.get('package_tablet_total') or 0)
         open_base_qty = open_qty_map.get(item['id'], 0)
         open_extra_tablet_qty = open_extra_tablet_map.get(item['id'], 0)
-        package_stock = int(item.get('stock') or 0)
+        raw_package_stock = int(item.get('stock') or 0)
         lot_total_qty = lot_total_map.get(item['id'], 0)
-        has_lot_stock = (not split_medicine) and lot_total_qty > 0
-        display_package_stock = lot_total_qty if has_lot_stock else package_stock
+        has_lot_stock = item['id'] in lot_total_map
+        display_package_stock = lot_total_qty if has_lot_stock else raw_package_stock
+        package_stock = display_package_stock
         total_base_qty = (package_stock * conversion_rate) + open_base_qty
         base_to_tablet_rate = int(item.get('base_unit_to_tablet_rate') or 0)
         package_remainder_tablets = 0
@@ -805,7 +808,7 @@ def enrich_products_for_display(conn, products_list):
         item['package_remainder_tablets'] = package_remainder_tablets
         item['lot_total_qty'] = lot_total_qty
         item['stock_source'] = 'lot' if has_lot_stock else 'product'
-        item['display_stock'] = display_package_stock if not split_medicine else package_stock
+        item['display_stock'] = display_package_stock
 
         extra_bundles_from_open_remainder = 0
         true_tablet_remainder = 0
@@ -1221,6 +1224,39 @@ def start_write_transaction(conn):
             raise
 
 
+def build_inventory_fingerprint(conn):
+    """สร้างลายนิ้วมือจากข้อมูลที่มีผลต่อยอดสต็อก เพื่อกัน import ทับรายการใหม่"""
+    inventory_snapshot = {
+        'products': [tuple(row) for row in conn.execute('''
+            SELECT id, code, stock, reserved_stock, withdraw, is_active,
+                   COALESCE(package_unit, ''), COALESCE(base_unit, ''),
+                   COALESCE(conversion_rate, 1), COALESCE(package_tablet_total, 0),
+                   COALESCE(base_unit_to_tablet_rate, 0)
+            FROM products
+            ORDER BY id
+        ''').fetchall()],
+        'lots': [tuple(row) for row in conn.execute('''
+            SELECT id, product_id, COALESCE(lot_number, ''), qty,
+                   COALESCE(received_date, ''), COALESCE(expiry_date, '')
+            FROM product_lots
+            ORDER BY id
+        ''').fetchall()],
+        'open_packages': [tuple(row) for row in conn.execute('''
+            SELECT id, product_id, base_unit_qty, extra_tablet_qty, status,
+                   COALESCE(lot_id, '')
+            FROM open_packages
+            ORDER BY id
+        ''').fetchall()],
+    }
+    payload = json.dumps(
+        inventory_snapshot,
+        ensure_ascii=False,
+        separators=(',', ':'),
+        default=str,
+    ).encode('utf-8')
+    return hashlib.sha256(payload).hexdigest()
+
+
 def get_product_lot_total(conn, product_id):
     row = conn.execute(
         '''
@@ -1274,9 +1310,8 @@ def sync_product_stock_from_lots(conn, product_id, *, previous_stock=None, previ
     if not product:
         return None
 
-    # สินค้ายาแบบแตกหน่วยมี open_packages ร่วมด้วย จึงห้าม sync จาก lot อย่างเดียว
-    if is_split_tablet_medicine(product):
-        return int(product['stock'] or 0)
+    # ยาแบบแบ่งหน่วยเก็บ products.stock และ product_lots.qty เป็นจำนวน "หน่วยเต็มที่ยังไม่เปิด"
+    # ส่วนตลับ/เม็ดที่เปิดแล้วอยู่ใน open_packages แยกต่างหาก จึงซิงก์ยอด Lot ได้โดยไม่ทับสต็อกเปิด
 
     lot_exists = conn.execute(
         'SELECT 1 FROM product_lots WHERE product_id = ? LIMIT 1',
@@ -1390,6 +1425,56 @@ def adjust_fifo_lots_to_stock(conn, product_id, target_stock, *, fallback_expiry
         adjusted_lot_ids.append(lot['id'])
 
     return {'delta': delta, 'created_lot': False, 'adjusted_lot_ids': adjusted_lot_ids}
+
+
+def replace_open_package_totals(conn, product_id, base_unit_qty, extra_tablet_qty):
+    """แก้ยอดรวมของที่เปิดแล้วโดยไม่เขียนยอดซ้ำลงทุกแถว"""
+    target_base_qty = max(0, int(base_unit_qty or 0))
+    target_extra_qty = max(0, int(extra_tablet_qty or 0))
+    active_rows = conn.execute('''
+        SELECT id,
+               COALESCE(base_unit_qty, 0) AS base_unit_qty,
+               COALESCE(extra_tablet_qty, 0) AS extra_tablet_qty
+        FROM open_packages
+        WHERE product_id = ? AND status = 'active'
+        ORDER BY COALESCE(opened_date, ''), id
+    ''', (product_id,)).fetchall()
+    previous_base_qty = sum(int(row['base_unit_qty'] or 0) for row in active_rows)
+    previous_extra_qty = sum(int(row['extra_tablet_qty'] or 0) for row in active_rows)
+
+    if previous_base_qty == target_base_qty and previous_extra_qty == target_extra_qty:
+        return {
+            'changed': False,
+            'previous_base_qty': previous_base_qty,
+            'previous_extra_tablet_qty': previous_extra_qty,
+            'base_unit_qty': target_base_qty,
+            'extra_tablet_qty': target_extra_qty,
+        }
+
+    # เก็บแถวเดิมไว้เป็นประวัติ แล้วสร้างแถว active ใหม่เพียงแถวเดียวสำหรับยอดรวมที่แก้
+    conn.execute(
+        "UPDATE open_packages SET status = 'closed' WHERE product_id = ? AND status = 'active'",
+        (product_id,)
+    )
+    if target_base_qty > 0 or target_extra_qty > 0:
+        conn.execute('''
+            INSERT INTO open_packages
+                (product_id, lot_id, opened_date, base_unit_qty, extra_tablet_qty, package_unit_qty_before, status)
+            VALUES (?, NULL, ?, ?, ?, 0, 'active')
+        ''', (
+            product_id,
+            current_thailand_timestamp(),
+            target_base_qty,
+            target_extra_qty,
+        ))
+
+    return {
+        'changed': True,
+        'previous_base_qty': previous_base_qty,
+        'previous_extra_tablet_qty': previous_extra_qty,
+        'base_unit_qty': target_base_qty,
+        'extra_tablet_qty': target_extra_qty,
+    }
 
 
 def queue_device_notification(conn, *, target_ip, event_type, title, message, emp_id=None, log_id=None, batch_token=None, target_device_token=None):
@@ -4046,8 +4131,11 @@ def add_to_cart():
             conn.commit()
             success_msg = f'🛒 เพิ่ม {product["name"]} ({qty_to_reserve} {requested_unit_label} - หน่วยย่อย) เรียบร้อย'
             if is_ajax:
+                cart_count = conn.execute(
+                    'SELECT COUNT(*) FROM carts WHERE emp_id = ?', (emp_id,)
+                ).fetchone()[0]
                 conn.close()
-                return jsonify({'success': True, 'message': success_msg})
+                return jsonify({'success': True, 'message': success_msg, 'cart_count': cart_count})
             flash(success_msg, 'success')
         else:
             stock_update = conn.execute(
@@ -4071,8 +4159,11 @@ def add_to_cart():
             conn.commit()
             success_msg = f'🛒 เพิ่ม {product["name"]} ({qty} {requested_unit_label}) เรียบร้อย'
             if is_ajax:
+                cart_count = conn.execute(
+                    'SELECT COUNT(*) FROM carts WHERE emp_id = ?', (emp_id,)
+                ).fetchone()[0]
                 conn.close()
-                return jsonify({'success': True, 'message': success_msg})
+                return jsonify({'success': True, 'message': success_msg, 'cart_count': cart_count})
             flash(success_msg, 'success')
     else:
         conn.rollback()
@@ -6684,6 +6775,24 @@ def approve_request(log_id):
                 flash(withdrawal_result.get('message', '❌ ไม่สามารถตัดสต็อกยาได้'), 'danger')
                 return redirect(url_for('admin_dashboard', module='stock'))
 
+            consumed_lot_id = withdrawal_result.get('lot_id')
+            lot_detail = str(withdrawal_result.get('lot_detail') or '').strip()
+            if consumed_lot_id or lot_detail:
+                lot_note = f"FIFO Lot: {lot_detail}" if lot_detail else ''
+                conn.execute(
+                    '''
+                    UPDATE transaction_logs
+                    SET lot_id = COALESCE(?, lot_id),
+                        note = CASE
+                            WHEN ? = '' THEN note
+                            WHEN note IS NULL OR TRIM(note) = '' THEN ?
+                            ELSE note || ' | ' || ?
+                        END
+                    WHERE id = ?
+                    ''',
+                    (consumed_lot_id, lot_note, lot_note, lot_note, log_id)
+                )
+
             conn.execute(
                 'UPDATE products SET reserved_stock = MAX(0, reserved_stock - ?) WHERE id = ?',
                 (qty_base_to_withdraw, product_id)
@@ -7394,6 +7503,7 @@ def export_excel():
     
     role = session.get('admin_role', 'superadmin')
     conn = get_db_connection()
+    conn.execute('BEGIN')
     
     # 1. กำหนดเงื่อนไข Location ตามสิทธิ์ (Role)
     location_filter = ""
@@ -7407,7 +7517,7 @@ def export_excel():
         location_filter = "" # ดึงทั้งหมด
         filename = "Inventory_ALL.xlsx"
         
-    # 2. Query ดึงข้อมูลของและ Lot ที่เกี่ยวข้อง (GROUP BY เพื่อไม่ให้แถวซ้ำกรณีมีหลาย Lot)
+    # 2. Export หนึ่งแถวต่อหนึ่ง Lot เพื่อให้ import กลับมาแล้วไม่สร้าง Lot รวมซ้ำ
     query = f'''
         SELECT 
             p.code as 'รหัสของ',
@@ -7425,18 +7535,12 @@ def export_excel():
             COALESCE(op.base_unit_qty, 0) as 'หน่วยย่อยที่เปิดแล้ว',
             COALESCE(op.extra_tablet_qty, 0) as 'เศษเม็ดที่เปิดแล้ว',
             CASE WHEN p.is_active = 1 THEN 'เปิดใช้งาน' ELSE 'ปิดใช้งาน' END as 'สถานะการใช้งาน',
-            CASE
-                WHEN COUNT(pl.id) > 1 THEN 'หลาย Lot'
-                ELSE COALESCE(MAX(pl.lot_number), p.lot_no, '')
-            END as 'Lot No.',
-            COALESCE(MIN(pl.received_date), p.received_date, '') as 'วันที่รับเข้า',
-            CASE
-                WHEN COUNT(pl.id) > 1 THEN MIN(pl.expiry_date)
-                ELSE COALESCE(MAX(pl.expiry_date), p.expiry_date, '')
-            END as 'วันหมดอายุ',
-            COALESCE(SUM(pl.qty), 0) as 'จำนวนใน Lot'
+            COALESCE(pl.lot_number, '') as 'Lot No.',
+            COALESCE(pl.received_date, '') as 'วันที่รับเข้า',
+            COALESCE(pl.expiry_date, '') as 'วันหมดอายุ',
+            COALESCE(pl.qty, 0) as 'จำนวนใน Lot'
         FROM products p
-        LEFT JOIN product_lots pl ON pl.product_id = p.id AND pl.qty > 0
+        LEFT JOIN product_lots pl ON pl.product_id = p.id
         LEFT JOIN (
             SELECT product_id,
                    COALESCE(SUM(base_unit_qty), 0) as base_unit_qty,
@@ -7445,12 +7549,20 @@ def export_excel():
             GROUP BY product_id
         ) op ON op.product_id = p.id
         {location_filter}
-        GROUP BY p.id
-        ORDER BY p.location ASC, p.code ASC
+        ORDER BY p.location ASC, p.code ASC,
+                 CASE
+                     WHEN pl.received_date IS NULL OR trim(pl.received_date) = '' THEN '9999-12-31'
+                     WHEN pl.received_date LIKE '%/%/%' THEN substr(pl.received_date, 7, 4) || '-' || substr(pl.received_date, 4, 2) || '-' || substr(pl.received_date, 1, 2)
+                     ELSE pl.received_date
+                 END ASC,
+                 pl.id ASC
     '''
     
     # อ่านข้อมูลเข้า Pandas
     df = pd.read_sql_query(query, conn)
+    export_fingerprint = build_inventory_fingerprint(conn)
+    exported_at = get_thailand_time().isoformat()
+    conn.rollback()
     conn.close()
 
     def _auto_col_widths(writer, sheet_name, df_sheet):
@@ -7496,6 +7608,14 @@ def export_excel():
         ]
 
         workbook = writer.book
+        meta_sheet_name = '_PCM_META'
+        meta_df = pd.DataFrame([
+            {'key': 'format_version', 'value': '3'},
+            {'key': 'exported_at', 'value': exported_at},
+            {'key': 'inventory_fingerprint', 'value': export_fingerprint},
+        ])
+        meta_df.to_excel(writer, index=False, sheet_name=meta_sheet_name)
+        writer.sheets[meta_sheet_name].hide()
         header_format = workbook.add_format({
             'bold': True,
             'bg_color': '#DCEBFF',
@@ -7606,6 +7726,10 @@ def export_excel():
             df_cat.to_excel(writer, index=False, sheet_name=sheet_name)
             _auto_col_widths(writer, sheet_name, df_cat)
             _decorate_sheet(sheet_name, df_cat, is_medicine=is_medicine_cat)
+
+        # Excel ห้ามซ่อนชีตที่ active อยู่ จึงสลับไป README ก่อนซ่อน metadata
+        writer.sheets[guide_sheet_name].activate()
+        writer.sheets[meta_sheet_name].hide()
 
     output.seek(0)
 
@@ -7840,11 +7964,34 @@ def import_excel():
         # อ่านทุก Sheet (รองรับทั้งไฟล์ single-sheet เก่า และไฟล์ multi-sheet ใหม่)
         all_sheets = pd.read_excel(file, sheet_name=None)
 
+        meta_sheet_name = '_PCM_META'
+        meta_df = all_sheets.get(meta_sheet_name)
+        if meta_df is None or not {'key', 'value'}.issubset(meta_df.columns):
+            raise ValueError(
+                'ไฟล์นี้ไม่มีข้อมูลตรวจสอบเวอร์ชัน กรุณา Export ไฟล์ใหม่จากระบบแล้วแก้ไข/Import อีกครั้ง'
+            )
+        import_metadata = {
+            str(row['key']).strip(): str(row['value']).strip()
+            for _, row in meta_df.iterrows()
+            if pd.notna(row.get('key'))
+        }
+        exported_fingerprint = import_metadata.get('inventory_fingerprint', '')
+        if not exported_fingerprint:
+            raise ValueError('ไม่พบลายนิ้วมือสต็อกในไฟล์ กรุณา Export ไฟล์ใหม่')
+        format_version = import_metadata.get('format_version', '').removesuffix('.0')
+        if format_version != '3':
+            raise ValueError(
+                'ไฟล์ Export รุ่นนี้รวมหลาย Lot ไว้ในแถวเดียวและอาจทำให้ยอดเพิ่มซ้ำ '
+                'กรุณา Export ไฟล์ใหม่จากระบบเวอร์ชันล่าสุด'
+            )
+
         # ประมวลผลทุกชีตเพื่อรองรับทั้งกรณีแก้เฉพาะชีต "ทั้งหมด" และแก้เฉพาะชีตย่อย
         # โดยเรียงให้ชีต "ทั้งหมด" อยู่ท้ายสุด เผื่อกรณีมีการแก้ทั้งสองฝั่งพร้อมกัน
         master_sheets = []
         other_sheets = []
         for raw_sheet_name in all_sheets.keys():
+            if raw_sheet_name == meta_sheet_name:
+                continue
             normalized_sheet_name = str(raw_sheet_name or '').strip().lower()
             if normalized_sheet_name in ('ทั้งหมด', 'all'):
                 master_sheets.append(raw_sheet_name)
@@ -7853,6 +8000,15 @@ def import_excel():
         selected_sheets = other_sheets + master_sheets
 
         conn = get_db_connection()
+        # ล็อก writer ก่อนตรวจ fingerprint: Approve ที่มาก่อนจะถูกตรวจพบ
+        # ส่วน Approve ที่มาทีหลังจะรอจน Import commit/rollback เสร็จ
+        start_write_transaction(conn)
+        current_fingerprint = build_inventory_fingerprint(conn)
+        if current_fingerprint != exported_fingerprint:
+            raise ValueError(
+                'สต็อกมีการเปลี่ยนแปลงหลัง Export (เช่น มีการ Approve/เบิก/แก้ Lot) '
+                'ระบบจึงยกเลิก Import เพื่อป้องกันยอดเพี้ยน กรุณา Export ไฟล์ใหม่แล้วทำรายการอีกครั้ง'
+            )
         updated_count = 0
         inserted_count = 0
         medicine_done = False
@@ -7898,6 +8054,22 @@ def import_excel():
                 'qty': int(row['qty'] or 0),
                 'expiry_date': standardize_date(row['expiry_date'])
             }
+
+        baseline_open_packages = {
+            str(row['code'] or '').strip().upper(): {
+                'base_qty': int(row['base_qty'] or 0),
+                'extra_tablet_qty': int(row['extra_tablet_qty'] or 0),
+            }
+            for row in conn.execute('''
+                SELECT p.code,
+                       COALESCE(SUM(op.base_unit_qty), 0) AS base_qty,
+                       COALESCE(SUM(op.extra_tablet_qty), 0) AS extra_tablet_qty
+                FROM products p
+                LEFT JOIN open_packages op
+                  ON op.product_id = p.id AND op.status = 'active'
+                GROUP BY p.id
+            ''').fetchall()
+        }
 
         for sheet_name in selected_sheets:
             df = all_sheets[sheet_name]
@@ -7959,7 +8131,12 @@ def import_excel():
                 safety_stock = safe_int(row[safe_col]) if safe_col else 0
                 stock = safe_int(row[stock_col]) if stock_col else 0
 
-                lot_no = normalize_lot_number(row[lot_col]) if lot_col and pd.notna(row[lot_col]) else ''
+                raw_lot_value = str(row[lot_col]).strip() if lot_col and pd.notna(row[lot_col]) else ''
+                if raw_lot_value.casefold() in {'หลาย lot', 'multiple lots'}:
+                    raise ValueError(
+                        f'สินค้า {code} ใช้ค่า Lot แบบรวม "{raw_lot_value}" ซึ่งนำเข้าซ้ำไม่ได้ กรุณา Export ไฟล์ใหม่'
+                    )
+                lot_no = normalize_lot_number(raw_lot_value) if raw_lot_value else ''
                 received_date = standardize_date(row[received_col]) if received_col and pd.notna(row[received_col]) else ''
                 expiry_date = standardize_date(row[expiry_col]) if expiry_col and pd.notna(row[expiry_col]) else ''
                 lot_qty = safe_int(row[lot_qty_col]) if lot_qty_col and pd.notna(row[lot_qty_col]) else None
@@ -7987,6 +8164,16 @@ def import_excel():
                     import_pkg_unit or import_base_unit or import_conv_rate is not None or
                     import_base_to_tablet is not None or import_package_tablet is not None
                 )
+                baseline_open = baseline_open_packages.get(code, {'base_qty': 0, 'extra_tablet_qty': 0})
+                open_changed = bool(
+                    is_medicine_row
+                    and open_base_col
+                    and import_open_base is not None
+                    and (
+                        baseline_open['base_qty'] != max(0, int(import_open_base or 0))
+                        or baseline_open['extra_tablet_qty'] != max(0, int(import_open_extra or 0))
+                    )
+                )
 
                 baseline_product = baseline_products.get(code)
                 product_changed = baseline_product is None or any([
@@ -7997,9 +8184,6 @@ def import_excel():
                     baseline_product['safety_stock'] != safety_stock,
                     baseline_product['stock'] != stock,
                     baseline_product['is_active'] != is_active,
-                    baseline_product['lot_no'] != lot_no,
-                    baseline_product['received_date'] != received_date,
-                    baseline_product['expiry_date'] != expiry_date,
                 ])
 
                 lot_changed = False
@@ -8037,30 +8221,35 @@ def import_excel():
                         effective_package_tablet = max(0, import_package_tablet or 0)
                         conn.execute('''
                             UPDATE products
-                            SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?, lot_no=?, received_date=?, expiry_date=?,
+                            SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?,
                                 package_unit=?, base_unit=?, conversion_rate=?, base_unit_to_tablet_rate=?, package_tablet_total=?
                             WHERE id=?
-                        ''', (name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date,
+                        ''', (name, stock, safety_stock, category, unit, location, is_active,
                               effective_pkg_unit, effective_base_unit, effective_conv_rate, effective_base_to_tablet, effective_package_tablet, existing['id']))
                     elif product_changed:
                         conn.execute('''
                             UPDATE products
-                            SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?, lot_no=?, received_date=?, expiry_date=?
+                            SET name=?, stock=?, safety_stock=?, category=?, unit=?, location=?, is_active=?
                             WHERE id=?
-                        ''', (name, stock, safety_stock, category, unit, location, is_active, lot_no, received_date, expiry_date, existing['id']))
+                        ''', (name, stock, safety_stock, category, unit, location, is_active, existing['id']))
                     product_id = existing['id']
                     updated_count += 1
 
-                    # อัปเดต open_packages ถ้ามีคอลัมน์นี้ในไฟล์
-                    if is_medicine_row and open_base_col and import_open_base is not None:
-                        existing_open = conn.execute(
-                            'SELECT id FROM open_packages WHERE product_id=?', (product_id,)
-                        ).fetchone()
+                    # แตะยอดเปิดเฉพาะเมื่อผู้ใช้แก้ค่าจริง และรวมไว้แถวเดียวเพื่อไม่คูณยอดซ้ำ
+                    if open_changed:
+                        existing_open_rows = conn.execute(
+                            "SELECT id FROM open_packages WHERE product_id=? AND status='active' ORDER BY id",
+                            (product_id,),
+                        ).fetchall()
                         effective_open_extra = max(0, import_open_extra or 0)
-                        if existing_open:
+                        conn.execute(
+                            "UPDATE open_packages SET status='closed' WHERE product_id=? AND status='active'",
+                            (product_id,),
+                        )
+                        if existing_open_rows and (import_open_base > 0 or effective_open_extra > 0):
                             conn.execute(
-                                'UPDATE open_packages SET base_unit_qty=?, extra_tablet_qty=?, status=CASE WHEN ? > 0 OR ? > 0 THEN "active" ELSE "closed" END WHERE product_id=?',
-                                (import_open_base, effective_open_extra, import_open_base, effective_open_extra, product_id)
+                                "UPDATE open_packages SET base_unit_qty=?, extra_tablet_qty=?, status='active' WHERE id=?",
+                                (import_open_base, effective_open_extra, existing_open_rows[0]['id'])
                             )
                         elif import_open_base > 0 or effective_open_extra > 0:
                             conn.execute(
@@ -8083,21 +8272,24 @@ def import_excel():
                             (product_id, max(0, import_open_base or 0), max(0, import_open_extra or 0), 'active')
                         )
 
-                if not (product_changed or lot_changed or
-                        (is_medicine_row and open_base_col and import_open_base is not None) or
-                        (is_medicine_row and open_extra_col and import_open_extra is not None) or
+                if not (product_changed or lot_changed or open_changed or
                     (is_medicine_row and split_payload_present)):
+                    continue
+
+                # การแก้ข้อมูลสินค้า/หน่วยยาไม่ควรเขียน Lot ซ้ำหรือแปลงรูปแบบวันที่โดยไม่จำเป็น
+                if not lot_changed:
                     continue
 
                 if lot_no:
                     # มี Lot No. → upsert ด้วย lot_number
                     lot_rows = conn.execute(
-                        'SELECT id, lot_number FROM product_lots WHERE product_id = ?',
+                        'SELECT id, lot_number, received_date FROM product_lots WHERE product_id = ?',
                         (product_id,)
                     ).fetchall()
                     existing_lot = next((
                         lot for lot in lot_rows
                         if normalize_lot_number(lot['lot_number']) == lot_no
+                        and standardize_date(lot['received_date']) == received_date
                     ), None)
                     if existing_lot:
                         conn.execute('''
@@ -8146,6 +8338,8 @@ def import_excel():
         conn.commit()
         flash(f'✅ นำเข้าสำเร็จ: อัปเดต {updated_count}, เพิ่มใหม่ {inserted_count}', 'success')
     except Exception as e:
+        if conn:
+            conn.rollback()
         flash(f'❌ ผิดพลาด: {str(e)}', 'danger')
     finally:
         if conn:
@@ -8160,6 +8354,7 @@ def get_product(code):
     conn = get_db_connection()
     product = conn.execute('SELECT * FROM products WHERE code = ?', (code,)).fetchone()
     split_summary = None
+    lot_row_count = 0
     if product:
         conversion_rate = int(product['conversion_rate'] or 1)
         has_split_units = bool(product['base_unit'] and product['package_unit'] and conversion_rate > 1)
@@ -8174,13 +8369,16 @@ def get_product(code):
                 FROM open_packages
                 WHERE product_id = ? AND status = 'active'
             ''', (product['id'],)).fetchone()[0]
-            lot_total_qty = conn.execute('''
-                SELECT COALESCE(SUM(qty), 0)
+            lot_state = conn.execute('''
+                SELECT COALESCE(SUM(CASE WHEN COALESCE(qty, 0) > 0 THEN qty ELSE 0 END), 0) AS lot_total,
+                       COUNT(*) AS lot_count
                 FROM product_lots
-                WHERE product_id = ? AND qty > 0
-            ''', (product['id'],)).fetchone()[0]
+                WHERE product_id = ?
+            ''', (product['id'],)).fetchone()
+            lot_total_qty = int(lot_state['lot_total'] or 0)
+            lot_row_count = int(lot_state['lot_count'] or 0)
 
-            stock_package_qty = int(product['stock'] or 0)
+            stock_package_qty = lot_total_qty if lot_row_count > 0 else int(product['stock'] or 0)
             package_tablet_total = int(product['package_tablet_total'] or 0)
             base_to_tablet_rate = int(product['base_unit_to_tablet_rate'] or 0)
             extra_base_from_open_remainder = 0
@@ -8198,7 +8396,10 @@ def get_product(code):
             if package_tablet_total <= 0 and base_to_tablet_rate > 0:
                 package_tablet_total = conversion_rate * base_to_tablet_rate
             total_tablet_qty = 0
-            if package_tablet_total > 0:
+            base_unit_text = str(product['base_unit'] or '').strip().lower()
+            tablet_like_units = {'เม็ด', 'tablet', 'tablets', 'pill', 'pills', 'capsule', 'capsules'}
+            has_real_tablet_layer = base_to_tablet_rate > 0 or base_unit_text in tablet_like_units
+            if package_tablet_total > 0 and has_real_tablet_layer:
                 total_tablet_qty = (stock_package_qty * package_tablet_total) + (int(open_base_qty or 0) * base_to_tablet_rate) + int(open_extra_tablet_qty or 0)
                 if base_to_tablet_rate > 0:
                     total_base_qty = total_tablet_qty // base_to_tablet_rate
@@ -8218,6 +8419,11 @@ def get_product(code):
     if product:
         payload = dict(product)
         lot_total_qty = get_product_lot_total(conn, product['id'])
+        if lot_row_count <= 0:
+            lot_row_count = int(conn.execute(
+                'SELECT COUNT(*) FROM product_lots WHERE product_id = ?',
+                (product['id'],)
+            ).fetchone()[0] or 0)
         conn.close()
         payload['raw_stock'] = int(payload.get('stock') or 0)
         payload['lot_total_qty'] = int(lot_total_qty or 0)
@@ -8234,7 +8440,7 @@ def get_product(code):
         else:
             payload['split_mode'] = 'single'
             payload['package_tablet_total'] = int(payload.get('package_tablet_total') or 0)
-        if not is_split_tablet_medicine(product) and lot_total_qty > 0:
+        if lot_row_count > 0:
             payload['stock'] = int(lot_total_qty or 0)
         payload['split_summary'] = split_summary
         return jsonify(payload)
@@ -8271,15 +8477,21 @@ def get_product_lots(product_id):
             id ASC
     ''', (product_id,)).fetchall()
     lot_total_qty = get_product_lot_total(conn, product_id)
-    product_stock = int(product['stock'] or 0)
+    lot_row_count = int(conn.execute(
+        'SELECT COUNT(*) FROM product_lots WHERE product_id = ?',
+        (product_id,)
+    ).fetchone()[0] or 0)
+    raw_product_stock = int(product['stock'] or 0)
+    product_stock = int(lot_total_qty or 0) if lot_row_count > 0 else raw_product_stock
     supports_fifo_seed = not is_split_tablet_medicine(product)
-    missing_fifo_qty = max(0, product_stock - int(lot_total_qty or 0)) if supports_fifo_seed else 0
+    missing_fifo_qty = max(0, raw_product_stock - int(lot_total_qty or 0)) if supports_fifo_seed else 0
     conn.close()
 
     return jsonify({
         'product_id': product_id,
         'lots': [dict(lot) for lot in lots],
         'product_stock': product_stock,
+        'raw_product_stock': raw_product_stock,
         'lot_total_qty': int(lot_total_qty or 0),
         'missing_fifo_qty': missing_fifo_qty,
         'supports_fifo_seed': supports_fifo_seed
@@ -8390,19 +8602,27 @@ def update_product_lot():
         WHERE id = ?
     ''', (lot_number, qty, received_date, received_date, expiry_date, expiry_date, lot_id))
 
+    synced_stock = stock_before
+    lot_total_after = lot_total_before
     if existing['product_id']:
-        sync_product_stock_from_lots(
+        synced_stock = sync_product_stock_from_lots(
             conn,
             existing['product_id'],
             previous_stock=stock_before,
             previous_lot_total=lot_total_before,
             force=True
         )
+        lot_total_after = get_product_lot_total(conn, existing['product_id'])
 
     conn.commit()
     conn.close()
 
-    return jsonify({'success': True})
+    return jsonify({
+        'success': True,
+        'message': f'บันทึก Lot แล้ว ยอดคงเหลืออัปเดตเป็น {int(synced_stock or 0)}',
+        'product_stock': int(synced_stock or 0),
+        'lot_total_qty': int(lot_total_after or 0)
+    })
 
 
 @app.route('/admin/delete_product_lot/<int:lot_id>', methods=['POST'])
@@ -8496,6 +8716,7 @@ def edit_product():
     package_tablet_total = max(0, request.form.get('package_tablet_total', 0, type=int) or 0)
     open_base_qty = max(0, request.form.get('open_base_qty', 0, type=int) or 0)
     open_extra_tablet_qty = max(0, request.form.get('open_extra_tablet_qty', 0, type=int) or 0)
+    open_stock_changed = str(request.form.get('open_stock_changed', '0')).strip().lower() in ('1', 'true', 'on', 'yes')
     if split_mode not in ('single', 'multi'):
         split_mode = 'single'
 
@@ -8557,7 +8778,7 @@ def edit_product():
         ''', (name, unit, base_unit, package_unit, conversion_rate, base_unit_to_tablet_rate, package_tablet_total, safety_stock, stock, expiry_date, code))
 
         product_for_sync = conn.execute('SELECT * FROM products WHERE code=?', (code,)).fetchone()
-        if product_for_sync and not is_split_tablet_medicine(product_for_sync):
+        if product_for_sync:
             lot_adjustment = adjust_fifo_lots_to_stock(
                 conn,
                 product_for_sync['id'],
@@ -8575,24 +8796,35 @@ def edit_product():
                     VALUES (?, ?, ?, ?, 'Completed', ?)
                 ''', (f"ADMIN:{admin_name}", product_for_sync['id'], action_text, abs(int(lot_adjustment['delta'])), current_thailand_timestamp()))
 
-        # อัปเดต open_packages ถ้าเป็นสินค้าแยกหน่วยย่อย
+        # ช่อง stock ด้านบนแก้เฉพาะหน่วยเต็ม/Lot; แตะของที่เปิดแล้วเฉพาะเมื่อผู้ใช้แก้ช่องนั้นจริง ๆ
         if package_unit and base_unit and conversion_rate > 1:
-            product_row = conn.execute('SELECT id FROM products WHERE code=?', (code,)).fetchone()
-            if product_row:
-                pid = product_row['id']
-                existing_open = conn.execute(
-                    'SELECT id FROM open_packages WHERE product_id=?', (pid,)
-                ).fetchone()
-                if existing_open:
-                    conn.execute(
-                        'UPDATE open_packages SET base_unit_qty=?, extra_tablet_qty=?, status=CASE WHEN ? > 0 OR ? > 0 THEN "active" ELSE "closed" END WHERE product_id=?',
-                        (open_base_qty, open_extra_tablet_qty, open_base_qty, open_extra_tablet_qty, pid)
+            if product_for_sync and open_stock_changed:
+                open_adjustment = replace_open_package_totals(
+                    conn,
+                    product_for_sync['id'],
+                    open_base_qty,
+                    open_extra_tablet_qty,
+                )
+                if open_adjustment['changed']:
+                    admin_name = session.get('admin_name', 'Unknown')
+                    action_text = (
+                        'ปรับยอดของที่เปิดแล้วจากหน้าจอแก้ไขสินค้า: '
+                        f"{open_adjustment['previous_base_qty']}->{open_adjustment['base_unit_qty']} {base_unit}, "
+                        f"{open_adjustment['previous_extra_tablet_qty']}->{open_adjustment['extra_tablet_qty']} เม็ด"
                     )
-                elif open_base_qty > 0 or open_extra_tablet_qty > 0:
-                    conn.execute(
-                        'INSERT INTO open_packages (product_id, base_unit_qty, extra_tablet_qty, status) VALUES (?, ?, ?, ?)',
-                        (pid, open_base_qty, open_extra_tablet_qty, 'active')
-                    )
+                    conn.execute('''
+                        INSERT INTO transaction_logs (emp_id, product_id, action, qty, status, timestamp)
+                        VALUES (?, ?, ?, ?, 'Completed', ?)
+                    ''', (
+                        f"ADMIN:{admin_name}",
+                        product_for_sync['id'],
+                        action_text,
+                        abs(open_adjustment['base_unit_qty'] - open_adjustment['previous_base_qty']),
+                        current_thailand_timestamp(),
+                    ))
+        elif product_before and is_split_tablet_medicine(product_before):
+            # หากปิดการแยกหน่วย ให้ปิดยอดของเปิดเดิมด้วยอย่างชัดเจน
+            replace_open_package_totals(conn, product_before['id'], 0, 0)
 
         conn.commit()
         return jsonify({'success': True, 'message': 'แก้ไขข้อมูลของเรียบร้อย'})
@@ -9446,8 +9678,14 @@ def add_product_ajax():
                 ''', (product_id, lot_number, lot_qty_to_add, receive_date, expire_date))
 
         # 2. อัปเดตยอดรวม Stock ใน Table products
-        if is_split_med and stock_qty_to_add > 0:
-            conn.execute('UPDATE products SET stock = stock + ? WHERE id = ?', (stock_qty_to_add, product_id))
+        if is_split_med and lot_qty_to_add > 0:
+            sync_product_stock_from_lots(
+                conn,
+                product_id,
+                previous_stock=stock_before,
+                previous_lot_total=lot_total_before,
+                force=True
+            )
         elif not is_split_med and lot_qty_to_add > 0:
             sync_product_stock_from_lots(
                 conn,

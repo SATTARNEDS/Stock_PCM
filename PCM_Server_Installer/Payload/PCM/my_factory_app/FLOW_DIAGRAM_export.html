@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>FLOW DIAGRAM - Stock PCM</title>
+<link href="static/vendor/fonts/fonts.css" rel="stylesheet">
+<script src="static/vendor/mermaid/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'default',
+    flowchart: { useMaxWidth: true, htmlLabels: true },
+    fontSize: 14
+  });
+</script>
+<style>
+@page {
+  size: A4 landscape;
+  margin: 12mm 15mm;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'Sarabun', sans-serif;
+  font-size: 12pt;
+  line-height: 1.8;
+  color: #222;
+  margin: 0;
+  padding: 0;
+}
+
+/* ===== Text section (จำกัดความกว้าง) ===== */
+.text-section {
+  max-width: 220mm;
+  margin: 0 auto;
+  padding: 6mm 0;
+}
+
+h1 { font-size: 18pt; border-bottom: 2px solid #333; padding-bottom: 6px; margin-top: 10px; }
+h2 { font-size: 14pt; border-bottom: 1px solid #aaa; color: #1a237e; margin-top: 16px; }
+h3 { font-size: 12pt; color: #283593; margin-top: 10px; }
+h4, h5, h6 { margin-top: 8px; }
+
+blockquote {
+  border-left: 4px solid #999;
+  margin: 6px 0;
+  padding: 4px 14px;
+  background: #f5f5f5;
+  color: #555;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 10pt;
+}
+th { background: #e8eaf6; padding: 6px; text-align: left; border: 1px solid #ccc; }
+td { padding: 5px 7px; border: 1px solid #ccc; }
+tr:nth-child(even) { background: #fafafa; }
+
+code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 10pt; }
+pre { background: #f4f4f4; padding: 10px; border-radius: 5px; font-size: 10pt; }
+hr { border: none; border-top: 1px solid #ddd; margin: 12px 0; }
+li { margin: 2px 0; }
+p { margin: 4px 0; }
+
+/* ===== Diagram page ===== */
+.diagram-page {
+  page-break-before: always;
+  page-break-inside: avoid;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 170mm;
+  padding: 4mm 0;
+}
+
+.diagram-title {
+  font-size: 13pt;
+  font-weight: 600;
+  color: #1a237e;
+  border-bottom: 1px solid #aaa;
+  width: 100%;
+  text-align: center;
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+}
+
+/* Force mermaid SVG to fill landscape width */
+.diagram-page .mermaid {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+.diagram-page .mermaid svg {
+  max-width: 250mm !important;
+  max-height: 160mm !important;
+  width: 100% !important;
+  height: auto !important;
+}
+
+@media print {
+  body { padding: 0; }
+  .diagram-page { page-break-before: always; }
+}
+</style>
+</head>
+<body>
+<div class="text-section"><h1>เอกสารสรุปการทำงานระบบ Stock_PCM</h1>
+<blockquote>เอกสารฉบับนี้จัดทำขึ้นเพื่อใช้อธิบายภาพรวมการทำงานของระบบในเชิงวิชาการและเชิงปฏิบัติงาน</blockquote>
+<p>ระบบ Stock_PCM เป็นระบบสารสนเทศสำหรับบริหารจัดการการเบิกจ่ายสินค้า เวชภัณฑ์ และอุปกรณ์ที่เกี่ยวข้อง โดยรองรับการใช้งานแยกตามหน่วยงาน CC และ PC1 มีขั้นตอนการอนุมัติโดยผู้ดูแลระบบ รองรับการตัดสต็อกตามหลัก FIFO การจัดการยาแบบแตกหน่วย และการแจ้งเตือนผ่าน LINE ในหลายเหตุการณ์สำคัญของระบบ</p>
+<p><div align="center"></p>
+<table><thead>
+<tr><th>สีและสัญลักษณ์</th><th>ความหมาย</th></tr>
+</thead><tbody>
+<tr><td><span style="color:#1E88E5; font-weight:600;">🔵 ผู้ใช้งาน</span></td><td>ขั้นตอนการใช้งานของพนักงาน</td></tr>
+<tr><td><span style="color:#2E7D32; font-weight:600;">🟢 ระบบประมวลผล</span></td><td>ขั้นตอนที่ระบบทำงานอัตโนมัติ</td></tr>
+<tr><td><span style="color:#EF6C00; font-weight:600;">🟠 ผู้ดูแลระบบ</span></td><td>ขั้นตอนของแอดมินหรือผู้อนุมัติ</td></tr>
+<tr><td><span style="color:#C62828; font-weight:600;">🔴 แจ้งเตือน/ความเสี่ยง</span></td><td>เหตุการณ์ผิดปกติหรือการปฏิเสธ</td></tr>
+<tr><td><span style="color:#8E24AA; font-weight:600;">🟣 จุดตัดสินใจ</span></td><td>เงื่อนไขที่ระบบใช้ตัดสินใจ</td></tr>
+</tbody></table>
+<p></div></p>
+<hr>
+<h2>1. 🎯 วัตถุประสงค์ของระบบ</h2>
+<p>ระบบนี้ได้รับการออกแบบเพื่อรองรับการดำเนินงานด้านคลังสินค้าและวัสดุสิ้นเปลืองอย่างมีประสิทธิภาพ โดยมีวัตถุประสงค์สำคัญดังต่อไปนี้</p>
+<li>เพื่อให้ผู้ใช้งานสามารถเบิกสินค้าและยาได้ผ่านระบบเว็บอย่างเป็นระบบ</li>
+<li>เพื่อกำหนดสิทธิ์การเข้าถึงข้อมูลและการจัดการตาม location ของผู้ใช้และผู้ดูแลระบบ</li>
+<li>เพื่อรองรับการเบิกยาแบบแตกหน่วย เช่น เบิกเป็นเม็ด แต่จัดเก็บเป็นห่อ แผง หรือขวด</li>
+<li>เพื่อควบคุมการตัดสต็อกตามหลัก FIFO และการใช้ของจากแพ็กที่เปิดแล้วอย่างเหมาะสม</li>
+<li>เพื่อให้ผู้ดูแลระบบสามารถอนุมัติหรือปฏิเสธคำขอได้อย่างตรวจสอบย้อนกลับได้</li>
+<li>เพื่อสนับสนุนการแจ้งเตือนผ่าน LINE ในเหตุการณ์สำคัญ เช่น คำขอใหม่ ผลการอนุมัติ สต็อกต่ำ วันหมดอายุ และอายุการใช้งานของหมวกนิรภัย</li>
+<hr>
+<h2>2. 🔄 ภาพรวมการทำงานของระบบ</h2></div>
+<div class="diagram-page"><div class="diagram-title">2. 🔄 ภาพรวมการทำงานของระบบ</div><div class="mermaid">flowchart TD
+    A[ผู้ใช้เข้าสู่ระบบด้วยรหัสพนักงาน] --> B[ระบบตรวจสอบข้อมูลผู้ใช้]
+    B --> C{ระบุ location}
+    C -->|CC| D[แสดงสินค้า CC และ General]
+    C -->|PC1| E[แสดงสินค้า PC1 และ General]
+    D --> F[ผู้ใช้ค้นหาและเลือกสินค้า]
+    E --> F
+    F --> G[เพิ่มสินค้าลงตะกร้า]
+    G --> H[ผู้ใช้ยืนยันคำขอเบิก]
+    H --> I{เป็นยาแตกหน่วยหรือไม่}
+    I -->|ใช่| J[คำนวณหน่วยยาและจอง stock]
+    I -->|ไม่ใช่| K[ใช้ flow สินค้าทั่วไป]
+    J --> L[บันทึก transaction log เป็น Pending]
+    K --> L
+    L --> M[ส่ง LINE แจ้งคำขอใหม่]
+    M --> N[Admin Dashboard]
+    N --> O{อนุมัติหรือปฏิเสธ}
+    O -->|อนุมัติ| P[อัปเดต lot, stock, withdraw, status]
+    O -->|ปฏิเสธ| Q[คืน stock และเปลี่ยน status]
+    P --> R[ส่ง LINE แจ้งผลการอนุมัติ]
+    Q --> S[จบกระบวนการ]
+
+    classDef user fill:#E3F2FD,stroke:#1E88E5,color:#0D47A1,stroke-width:2px;
+    classDef process fill:#E8F5E9,stroke:#43A047,color:#1B5E20,stroke-width:2px;
+    classDef admin fill:#FFF3E0,stroke:#FB8C00,color:#E65100,stroke-width:2px;
+
+    class A,B,C,D,E,F,G,H,I user;
+    class J,K,L,M,P,Q,R,S process;
+    class N,O admin;</div></div>
+<div class="text-section"><h3>สาระสำคัญของกระบวนการ</h3>
+<li>ผู้ใช้งานจะเห็นรายการสินค้าเฉพาะในส่วนงานที่ตนมีสิทธิ์เข้าถึง</li>
+<li>เมื่อผู้ใช้ยืนยันการเบิก ระบบจะบันทึกรายการเข้าสู่สถานะ Pending เพื่อรอการพิจารณา</li>
+<li>ผู้ดูแลระบบจะทำการอนุมัติหรือปฏิเสธคำขอตามสิทธิ์ของตน</li>
+<li>เมื่อได้รับการอนุมัติ ระบบจะอัปเดตสต็อกจริง พร้อมส่งการแจ้งเตือนผลการดำเนินการ</li>
+<hr>
+<h2>3. 🏭 การแยกการทำงานตามฝั่ง CC และ PC1</h2></div>
+<div class="diagram-page"><div class="diagram-title">3. 🏭 การแยกการทำงานตามฝั่ง CC และ PC1</div><div class="mermaid">flowchart TD
+    A[ผู้ใช้หรือแอดมินเข้าสู่ระบบ] --> B{ตรวจ location / role}
+
+    B -->|User CC| C[เห็นสินค้า CC + General]
+    B -->|User PC1| D[เห็นสินค้า PC1 + General]
+    B -->|Admin CC| E[จัดการรายการของฝั่ง CC]
+    B -->|Admin PC1| F[จัดการรายการของฝั่ง PC1]
+    B -->|Superadmin| G[เห็นและจัดการทุกฝั่ง]
+
+    C --> H[ส่งแจ้งเตือน LINE ไปกลุ่ม CC]
+    D --> I[ส่งแจ้งเตือน LINE ไปกลุ่ม PC1]
+    E --> H
+    F --> I
+    G --> J[เลือกดูข้อมูลได้ทุก location]
+
+    classDef decision fill:#F3E5F5,stroke:#8E24AA,color:#4A148C,stroke-width:2px;
+    classDef cc fill:#E8F5E9,stroke:#2E7D32,color:#1B5E20,stroke-width:2px;
+    classDef pc1 fill:#E1F5FE,stroke:#039BE5,color:#01579B,stroke-width:2px;
+    classDef super fill:#FFF8E1,stroke:#F9A825,color:#F57F17,stroke-width:2px;
+
+    class B decision;
+    class C,E,H cc;
+    class D,F,I pc1;
+    class G,J super;</div></div>
+<div class="text-section"><h3>หลักการแยกฝั่ง</h3>
+<li>ฝั่ง CC เห็นและอนุมัติได้เฉพาะข้อมูลของ CC</li>
+<li>ฝั่ง PC1 เห็นและอนุมัติได้เฉพาะข้อมูลของ PC1</li>
+<li>Superadmin เห็นข้อมูลรวมทั้งหมด</li>
+<li>LINE จะ route ไปยังกลุ่มตามฝั่งที่เกี่ยวข้อง</li>
+<hr>
+<h2>4. Flow การเบิกสินค้าทั่วไป</h2>
+<li>ผู้ใช้เลือกสินค้า</li>
+<li>ระบบเพิ่มลงตะกร้า</li>
+<li>ระบบจอง stock และเพิ่ม reserved_stock</li>
+<li>ผู้ใช้กดยืนยันคำขอ</li>
+<li>ระบบสร้าง transaction_logs เป็น Pending</li>
+<li>ส่ง LINE แจ้งแอดมิน</li>
+<li>แอดมินกดอนุมัติหรือปฏิเสธ</li>
+<li>ระบบอัปเดตสถานะเป็น Approved หรือ Rejected</li>
+<hr>
+<h2>5. Flow การเบิกยาแบบ FIFO และแตกหน่วย</h2>
+<h3>5.1 เงื่อนไขที่เข้าสู่ flow ยา</h3>
+<li>สินค้าอยู่ในหมวด ยา</li>
+<li>มี conversion_rate มากกว่า 1</li>
+<li>มีหน่วยหลัก/หน่วยย่อย เช่น ห่อ และ เม็ด</li>
+<h3>5.2 ผังการคำนวณแบบแนวตั้ง</h3></div>
+<div class="diagram-page"><div class="diagram-title">5.2 ผังการคำนวณแบบแนวตั้ง</div><div class="mermaid">flowchart TD
+    A[ผู้ใช้เลือกยา] --> B[กรอกจำนวนที่ต้องการเบิก]
+    B --> C{เบิกเป็นเม็ดหรือเป็นแพ็ก}
+    C -->|เม็ด| D[ใช้ base unit]
+    C -->|แพ็ก| E[แปลงเป็น base unit]
+    D --> F[ตรวจ stock รวม]
+    E --> F
+    F --> G{ของพอหรือไม่}
+    G -->|ไม่พอ| H[แจ้งเตือนของไม่พอ]
+    G -->|พอ| I[ตัดจาก open_packages ก่อน]
+    I --> J{ยังไม่พอหรือไม่}
+    J -->|พอแล้ว| K[บันทึกยอดคงเหลือที่เปิดใช้]
+    J -->|ยังไม่พอ| L[เปิดแพ็กใหม่จาก lot เก่าสุด]
+    L --> M[อัปเดต open_packages]
+    K --> N[สร้าง log Pending]
+    M --> N
+    N --> O[รอ Admin อนุมัติ]
+
+    classDef input fill:#E3F2FD,stroke:#1565C0,color:#0D47A1,stroke-width:2px;
+    classDef process fill:#E8F5E9,stroke:#2E7D32,color:#1B5E20,stroke-width:2px;
+    classDef warn fill:#FFEBEE,stroke:#E53935,color:#B71C1C,stroke-width:2px;
+    classDef wait fill:#FFF8E1,stroke:#F9A825,color:#F57F17,stroke-width:2px;
+
+    class A,B,C input;
+    class D,E,F,G,I,J,K,L,M,N process;
+    class H warn;
+    class O wait;</div></div>
+<div class="text-section"><h3>5.3 หลัก FIFO ที่ระบบใช้จริง</h3>
+<h4>ชั้นที่ 1: open_packages</h4>
+<li>ใช้ของจากแพ็กที่เปิดอยู่ก่อน</li>
+<li>เลือกจากรายการที่เปิดไว้เก่าที่สุด</li>
+<h4>ชั้นที่ 2: product_lots</h4>
+<li>เมื่อต้องเปิดแพ็กใหม่หรือแอดมินอนุมัติ ระบบจะอ้างอิง lot เก่าสุดก่อน</li>
+<li>เรียงตาม received_date จากเก่าไปใหม่</li>
+<hr>
+<h2>6. ✅ Flow การอนุมัติของ Admin</h2></div>
+<div class="diagram-page"><div class="diagram-title">6. ✅ Flow การอนุมัติของ Admin</div><div class="mermaid">flowchart TD
+    A[รายการคำขอ Pending] --> B[Admin เปิด Dashboard]
+    B --> C{ตรวจสิทธิ์ตาม role และ location}
+    C -->|ไม่ผ่าน| D[ปฏิเสธการเข้าถึง]
+    C -->|ผ่าน| E[เปิดดูรายละเอียดคำขอ]
+    E --> F{กดอนุมัติหรือปฏิเสธ}
+    F -->|อนุมัติ| G[เริ่ม transaction]
+    G --> H[ตัด lot และอัปเดต stock]
+    H --> I[บันทึกเวลาอนุมัติและสถานะ Approved]
+    I --> J[เช็ก safety stock]
+    J --> K[ส่ง LINE แจ้งผลอนุมัติ]
+    F -->|ปฏิเสธ| L[คืน stock และ reserved_stock]
+    L --> M[เปลี่ยนสถานะเป็น Rejected]
+
+    classDef admin fill:#FFF3E0,stroke:#EF6C00,color:#E65100,stroke-width:2px;
+    classDef reject fill:#FFEBEE,stroke:#C62828,color:#B71C1C,stroke-width:2px;
+
+    class A,B,C,E,F,G,H,I,J,K,L,M admin;
+    class D reject;</div></div>
+<div class="text-section"><h3>สิ่งที่ระบบทำเมื่อแอดมินกดอนุมัติ</h3>
+<li>เปลี่ยนสถานะรายการเป็น Approved</li>
+<li>บันทึก lot ที่ถูกใช้</li>
+<li>เพิ่มค่า withdraw ของสินค้า</li>
+<li>ตรวจ stock ต่ำกว่า safety stock</li>
+<li>ส่ง LINE แจ้งผลกลับไปยังกลุ่มที่ถูกต้อง</li>
+<h3>สิ่งที่ระบบทำเมื่อแอดมินกดปฏิเสธ</h3>
+<li>คืน stock หรือ reserved_stock ตามชนิดสินค้า</li>
+<li>เปลี่ยนสถานะเป็น Rejected</li>
+<li>ไม่ตัดสต็อกจริง</li>
+<hr>
+<h2>7. 🔔 ระบบแจ้งเตือน LINE และงานแจ้งเตือนอัตโนมัติ</h2>
+<p>ระบบปัจจุบันมีการแจ้งเตือนหลักดังนี้:</p>
+<li>ตอนผู้ใช้ส่งคำขอเบิกใหม่</li>
+<li>ตอนแอดมินอนุมัติคำขอ (แจ้งตรงไปยังกลุ่ม LINE ของฝั่งผู้เบิก)</li>
+<li>ตอน stock ต่ำกว่า safety stock</li>
+<li>ตอนสินค้าใกล้หมดอายุ (Daily Alert — แยกส่งแต่ละฝั่ง)</li>
+<li>ตอนหมวกนิรภัยครบอายุการใช้งาน (Daily Alert — แยกส่งแต่ละฝั่ง)</li>
+<h3>Mermaid แสดงการแจ้งเตือนแบบแนวตั้ง</h3></div>
+<div class="diagram-page"><div class="diagram-title">Mermaid แสดงการแจ้งเตือนแบบแนวตั้ง</div><div class="mermaid">flowchart TD
+    A[เกิด event ในระบบ] --> B{เป็น event ประเภทใด}
+
+    B -->|คำขอเบิกใหม่| C[ส่ง LINE แจ้ง Admin ตามฝั่ง]
+    B -->|Admin อนุมัติ| D[ส่ง LINE แจ้งผลอนุมัติ ตามฝั่งผู้เบิก]
+    B -->|สต็อกต่ำ| E[ส่ง LINE เตือนสั่งซื้อ ตามฝั่ง]
+    B -->|Daily Alert Job| F{จัดกลุ่มข้อมูลตาม location}
+
+    F -->|สินค้า CC ใกล้หมดอายุ| G[ส่ง LINE แจ้งวันหมดอายุ → กลุ่ม CC]
+    F -->|สินค้า PC1 ใกล้หมดอายุ| H[ส่ง LINE แจ้งวันหมดอายุ → กลุ่ม PC1]
+    F -->|พนักงาน CC ครบรอบหมวก| I[ส่ง LINE แจ้งเปลี่ยนหมวก → กลุ่ม CC]
+    F -->|พนักงาน PC1 ครบรอบหมวก| J[ส่ง LINE แจ้งเปลี่ยนหมวก → กลุ่ม PC1]
+
+    C --> K{route ตามฝั่ง}
+    D --> K
+    E --> K
+    K -->|CC| L[LINE กลุ่ม CC]
+    K -->|PC1| M[LINE กลุ่ม PC1]
+
+    classDef event fill:#EDE7F6,stroke:#5E35B1,color:#311B92,stroke-width:2px;
+    classDef linecc fill:#E8F5E9,stroke:#2E7D32,color:#1B5E20,stroke-width:2px;
+    classDef linepc1 fill:#E1F5FE,stroke:#0277BD,color:#01579B,stroke-width:2px;
+    classDef schedule fill:#FFF8E1,stroke:#F9A825,color:#F57F17,stroke-width:2px;
+
+    class A,B,C,D,E,F event;
+    class G,I,L linecc;
+    class H,J,M linepc1;
+    class K schedule;</div></div>
+<div class="text-section"><h3>รายละเอียดการแจ้งเตือน</h3>
+<h4>แจ้งเตือนวันหมดอายุ (Daily Alert)</h4>
+<li>ตรวจสอบจากตาราง <code>product_lots</code> (รองรับทั้ง lot เก่าและ lot ใหม่)</li>
+<li>แจ้งล่วงหน้าก่อนหมดอายุภายใน 30 วัน</li>
+<li><strong>แยกส่งแต่ละฝั่ง</strong>: สินค้า location CC → LINE กลุ่ม CC, สินค้า location PC1 → LINE กลุ่ม PC1</li>
+<li>ป้องกันการสับสนของข้อมูลระหว่าง 2 ฝั่ง</li>
+<h4>แจ้งเตือนอายุการใช้งานหมวกนิรภัย (Daily Alert)</h4>
+<li>ตรวจจากประวัติการเบิกที่อนุมัติแล้ว โดยเทียบกับ location ของพนักงาน</li>
+<li>แจ้งเตือนเมื่อครบ 2 ปี (23 เดือนขึ้นไปนับจากวันเบิก)</li>
+<li><strong>แยกส่งแต่ละฝั่ง</strong>: พนักงาน location CC → LINE กลุ่ม CC, พนักงาน location PC1 → LINE กลุ่ม PC1</li>
+<h4>หน่วยสินค้าในการแจ้งเตือนอนุมัติ</h4>
+<li>ระบบใช้ฟังก์ชัน <code>is_split_tablet_medicine()</code> เพื่อตรวจว่าสินค้าเป็นยาแตกหน่วยหรือไม่</li>
+<li>สินค้าทั่วไปจะแสดงหน่วยจาก <code>products.unit</code> (เช่น gallon, ชิ้น)</li>
+<li>ยาแตกหน่วยจะแสดงหน่วยจาก <code>products.base_unit</code> (เช่น เม็ด) ป้องกันหน่วยผิดพลาด</li>
+<hr>
+<h2>8. โครงสร้างตารางหลักในฐานข้อมูล</h2>
+<h3>users</h3>
+<li>ข้อมูลพนักงาน</li>
+<li>department</li>
+<li>location</li>
+<li>สถานะ lock การใช้งาน</li>
+<h3>products</h3>
+<li>stock</li>
+<li>reserved_stock</li>
+<li>withdraw</li>
+<li>base_unit</li>
+<li>package_unit</li>
+<li>conversion_rate</li>
+<li>location</li>
+<li>expiry_date</li>
+<h3>carts</h3>
+<li>รายการที่ผู้ใช้เลือกก่อนยืนยัน</li>
+<h3>product_lots</h3>
+<li>เก็บข้อมูล lot เพื่อใช้ FIFO</li>
+<li>เก็บ received_date และ expiry_date</li>
+<h3>open_packages</h3>
+<li>เก็บจำนวนคงเหลือของแพ็กที่ถูกเปิดแล้ว</li>
+<h3>transaction_logs</h3>
+<li>request log</li>
+<li>approved / rejected log</li>
+<li>medicine audit log</li>
+<li>helmet usage history</li>
+<hr>
+<h2>9. สรุปผลการพัฒนาระบบในปัจจุบัน</h2>
+<p>จากการปรับปรุงล่าสุด ระบบสามารถรองรับการทำงานที่สำคัญได้อย่างครบถ้วน ดังนี้</p>
+<li>รองรับการใช้งานทั้งหน่วยงาน CC และ PC1</li>
+<li>กำหนดสิทธิ์ผู้ดูแลระบบแยกตามฝั่งการใช้งาน</li>
+<li>รองรับการแจ้งเตือน LINE แยกตามกลุ่มงาน</li>
+<li>รองรับการเบิกยาแบบแตกหน่วย เช่น เม็ด ห่อ หรือแผง</li>
+<li>ใช้หลัก FIFO ผ่านทั้ง open_packages และ product_lots</li>
+<li>มีระบบอนุมัติและปฏิเสธคำขออย่างเป็นลำดับขั้น</li>
+<li>มีการแจ้งเตือนเมื่อสต็อกต่ำกว่าระดับที่กำหนด</li>
+<li>มีการแจ้งเตือนสินค้าที่ใกล้หมดอายุ <strong>แยกฝั่ง CC / PC1</strong> (ตรวจจาก product_lots)</li>
+<li>มีการแจ้งเตือนหมวกนิรภัยครบอายุการใช้งาน <strong>แยกฝั่ง CC / PC1</strong> (ตรวจจาก location พนักงาน)</li>
+<li>การแสดงหน่วยสินค้าในการแจ้งเตือนอนุมัติใช้ <code>is_split_tablet_medicine()</code> เพื่อความถูกต้อง</li>
+<li>แผนภาพ Mermaid ถูกปรับเป็นแนวตั้งเพื่อให้อ่านและนำเสนอได้ชัดเจนมากขึ้น</li>
+<hr>
+<h2>10. บทสรุป</h2>
+<p>ระบบ Stock_PCM ได้รับการพัฒนาให้สามารถตอบสนองต่อการบริหารจัดการคลังสินค้าและการเบิกจ่ายวัสดุในองค์กรได้อย่างเป็นระบบ มีความเหมาะสมทั้งในด้านการใช้งานจริง การควบคุมสิทธิ์ การตรวจสอบย้อนหลัง และการแจ้งเตือนเชิงป้องกัน ทั้งนี้ เอกสารฉบับนี้สามารถใช้เป็นข้อมูลประกอบการนำเสนอผลงาน การส่งรายงาน หรือการอธิบายกระบวนการทำงานของระบบแก่ผู้เกี่ยวข้องได้อย่างเหมาะสม</p></div>
+</body>
+</html>

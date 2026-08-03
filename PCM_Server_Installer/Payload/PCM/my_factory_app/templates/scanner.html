@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Scanner - Stock PCM</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}">
+    <style>
+        body {
+            background:
+                radial-gradient(circle at 15% 20%, rgba(0, 122, 255, 0.22), rgba(0, 0, 0, 0) 38%),
+                radial-gradient(circle at 85% 80%, rgba(0, 212, 170, 0.2), rgba(0, 0, 0, 0) 36%),
+                linear-gradient(155deg, #0d1117 0%, #0f1626 48%, #131b2c 100%);
+            color: white;
+            font-family: 'Mitr', sans-serif;
+            min-height: 100vh;
+        }
+
+        #reader {
+            width: 100%;
+            border-radius: 24px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+            position: relative;
+        }
+
+        #reader::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, rgba(0, 212, 170, 0), rgba(0, 212, 170, 0.9), rgba(0, 212, 170, 0));
+            animation: scanLine 2.4s linear infinite;
+            pointer-events: none;
+            z-index: 3;
+        }
+
+        .scanner-container {
+            max-width: 520px;
+            margin: auto;
+            padding-top: 40px;
+        }
+
+        .scanner-head {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 18px;
+            -webkit-backdrop-filter: blur(8px);
+            backdrop-filter: blur(8px);
+            padding: 14px 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.22);
+        }
+
+        /* ตกแต่งกรอบสแกน */
+        #reader__scan_region { background: white !important; }
+
+        @keyframes scanLine {
+            0% { top: 12%; }
+            50% { top: 84%; }
+            100% { top: 12%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container scanner-container">
+        <div class="text-center mb-4 scanner-head">
+            <h2 class="fw-medium"><i class="fas fa-qrcode text-primary me-2"></i>QR Scanner</h2>
+            <p class="text-light opacity-75 mb-0">วางบาร์โค้ดให้อยู่ในกรอบเพื่อสแกน</p>
+        </div>
+
+        <div id="reader"></div>
+
+        <div class="d-grid gap-2 mt-4">
+            <a href="{{ url_for('index') }}" class="btn btn-outline-light rounded-pill py-2">
+                <i class="fas fa-times me-2"></i>ยกเลิกและกลับหน้าหลัก
+            </a>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='vendor/html5-qrcode/html5-qrcode.min.js') }}"></script>
+    <script>
+        function onScanSuccess(decodedText, decodedResult) {
+            // เมื่อสแกนติด ให้พาไปยัง Route ที่เราเพิ่งสร้าง
+            window.location.href = `/scan/${decodedText}`;
+            html5QrcodeScanner.clear(); // ปิดกล้อง
+        }
+
+        let html5QrcodeScanner = new Html5QrcodeScanner(
+            "reader", { 
+                fps: 15, // ความเร็วเฟรม
+                qrbox: {width: 250, height: 250}, // ขนาดกรอบสแกน
+                aspectRatio: 1.0 
+            }
+        );
+        html5QrcodeScanner.render(onScanSuccess);
+    </script>
+</body>
+</html>

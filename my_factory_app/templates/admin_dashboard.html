@@ -1001,8 +1001,129 @@
         }
 
         .split-detail-box {
-            background: #f0f8ff;
-            border: 1px dashed #86b7fe;
+            background: #f8fbff;
+            border: 1px solid #cfe2ff;
+        }
+
+        .split-section {
+            min-width: 0;
+            padding: 1rem;
+            background: #fff;
+            border: 1px solid #dfe7f1;
+            border-radius: 0.75rem;
+        }
+
+        .split-section + .split-section {
+            margin-top: 1rem;
+        }
+
+        .split-section-title {
+            display: flex;
+            gap: 0.65rem;
+            align-items: flex-start;
+            margin-bottom: 0.85rem;
+            color: #17365d;
+        }
+
+        .split-step-number {
+            display: inline-flex;
+            flex: 0 0 1.65rem;
+            width: 1.65rem;
+            height: 1.65rem;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            color: #fff;
+            background: #0d6efd;
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+
+        .split-flow-preview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            align-items: center;
+            margin: 0.25rem 0 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: 0.65rem;
+            color: #17365d;
+            background: #eaf3ff;
+            font-weight: 700;
+        }
+
+        .split-flow-node {
+            padding: 0.35rem 0.7rem;
+            border: 1px solid #b8d3fb;
+            border-radius: 999px;
+            background: #fff;
+        }
+
+        .split-flow-arrow {
+            color: #5f7693;
+        }
+
+        .split-calculated-field {
+            background: #eef6ff !important;
+            color: #174d88;
+            font-weight: 700;
+        }
+
+        .split-open-stock {
+            border-color: #ffd98a;
+            background: #fffaf0;
+        }
+
+        .split-summary-card {
+            margin: 0;
+            padding: 1rem;
+            border: 1px solid #8dd9ea;
+            border-radius: 0.75rem;
+            color: #123f5a;
+            background: #e9faff;
+        }
+
+        .split-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.65rem;
+            margin-top: 0.75rem;
+        }
+
+        .split-summary-item {
+            min-width: 0;
+            padding: 0.7rem 0.8rem;
+            border-radius: 0.6rem;
+            background: rgba(255, 255, 255, 0.82);
+        }
+
+        .split-summary-item span,
+        .split-summary-item small {
+            display: block;
+        }
+
+        .split-summary-item strong {
+            display: block;
+            margin-top: 0.15rem;
+            color: #0b3760;
+            font-size: 1rem;
+            overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 767.98px) {
+            .split-summary-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .split-flow-preview {
+                align-items: stretch;
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .split-flow-arrow {
+                transform: rotate(90deg);
+            }
         }
 
         .unit-field-group .form-control {
@@ -1931,6 +2052,9 @@
                 {% if role == 'superadmin' %}
                 <button class="sidebar-group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarSystem" aria-expanded="false" aria-controls="sidebarSystem"><i class="fas fa-gears group-icon"></i><span>System Administration</span><i class="fas fa-chevron-right group-chevron"></i></button>
                 <div class="collapse sidebar-submenu" id="sidebarSystem">
+                    <a href="{{ url_for('mu.admin_dashboard') }}" class="nav-link">
+                        <i class="fas fa-industry me-2 text-info"></i> MU Administration
+                    </a>
                     <a href="javascript:void(0)" class="nav-link" onclick="openAdminAccountsModal()">
                         <i class="fas fa-user-shield me-2 text-warning"></i> จัดการบัญชี Admin
                     </a>
@@ -2908,7 +3032,7 @@
     </datalist>
 
     <div class="modal fade" id="addProductModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl">
             <div class="modal-content border-0 shadow-lg">
                 <div class="modal-header bg-dark text-white border-0">
                     <h5 class="modal-title fw-medium"><i
@@ -2957,7 +3081,7 @@
                             <div class="col-md-6">
                                 <label class="form-label fw-medium text-muted small">หน่วยนับ (Unit)</label>
                                 <input type="text" id="add_unit" name="unit" class="form-control shadow-none" required
-                                    oninput="updateStockUnitHints('add')">
+                                    oninput="updateStockUnitHints('add'); updateSplitModeVisual('add'); renderAddSplitSummaryFromForm()">
                             </div>
                             <div class="col-lg-3 col-md-6">
                                 <label class="form-label fw-medium text-muted small" id="addSafetyLabel">จุดสั่งซื้อ (Safety)</label>
@@ -2992,65 +3116,107 @@
                                     <input class="form-check-input" type="checkbox" id="addEnableSplit"
                                         onchange="toggleAddSplitDetail()">
                                     <label class="form-check-label fw-medium small" for="addEnableSplit">
-                                        <i class="fas fa-pills me-1 text-info"></i>แยกหน่วยย่อย (เช่น กล่อง → เม็ด)
+                                        <i class="fas fa-pills me-1 text-info"></i>ยานี้สามารถเปิดแบ่งจ่ายได้
                                     </label>
                                 </div>
                             </div>
                             <div class="col-12 is-hidden" id="addSplitDetailRow">
-                                <div class="row g-3 p-3 rounded-3 split-detail-box">
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small">รูปแบบการแยก</label>
-                                        <select id="add_split_mode" name="split_mode" class="form-select shadow-none"
-                                            onchange="renderAddSplitSummaryFromForm()">
-                                            <option value="single">แยกชั้นเดียว</option>
-                                            <option value="multi">แยกหลายชั้น</option>
-                                        </select>
+                                <div class="p-3 p-md-4 rounded-3 split-detail-box">
+                                    <div class="row g-3 align-items-end mb-3">
+                                        <div class="col-lg-7">
+                                            <label class="form-label fw-semibold" for="add_split_mode">ยาแบ่งออกมาเป็นแบบไหน</label>
+                                            <select id="add_split_mode" name="split_mode" class="form-select shadow-none"
+                                                aria-describedby="add_split_mode_hint"
+                                                onchange="updateSplitModeVisual('add'); renderAddSplitSummaryFromForm()">
+                                                <option value="single">2 ระดับ — หน่วยเต็ม → เม็ด</option>
+                                                <option value="multi">3 ระดับ — หน่วยเต็ม → หน่วยกลาง → เม็ด</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-lg-5">
+                                            <small class="text-muted d-block" id="add_split_mode_hint">เลือกแบบที่ตรงกับของจริงในคลัง</small>
+                                        </div>
                                     </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small">หน่วยแพ็ค/กล่อง/กระปุก</label>
-                                        <input type="text" id="add_package_unit" name="package_unit" class="form-control shadow-none"
-                                            list="medicineSplitUnitOptions"
-                                            placeholder="เช่น กล่อง, ขวด, กระปุก" oninput="updateStockUnitHints('add'); renderAddSplitSummaryFromForm()">
+
+                                    <div class="split-flow-preview" id="addSplitFlowPreview" aria-live="polite">
+                                        <span class="split-flow-node" id="addFlowPackageUnit">หน่วยเต็ม</span>
+                                        <i class="fas fa-arrow-right split-flow-arrow" aria-hidden="true"></i>
+                                        <span class="split-flow-node" id="addFlowBaseUnit">เม็ด</span>
+                                        <i class="fas fa-arrow-right split-flow-arrow is-hidden" id="addFlowTabletArrow" aria-hidden="true"></i>
+                                        <span class="split-flow-node is-hidden" id="addFlowTabletUnit">เม็ด</span>
                                     </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small">หน่วยย่อย</label>
-                                        <input type="text" id="add_base_unit" name="base_unit" class="form-control shadow-none"
-                                            list="medicineSplitUnitOptions"
-                                            placeholder="เช่น ห่อ, ซอง, เม็ด" oninput="renderAddSplitSummaryFromForm()">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small">1 แพ็ค มีจำนวน (หน่วยย่อย)</label>
-                                        <input type="number" id="add_conversion_rate" name="conversion_rate" class="form-control shadow-none"
-                                            min="1" step="1" value="1" oninput="renderAddSplitSummaryFromForm()">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small text-primary">1 หน่วยนำเข้า = กี่เม็ด</label>
-                                        <input type="number" id="add_package_tablet_total" name="package_tablet_total" class="form-control shadow-none"
-                                            min="0" step="1" value="0" placeholder="เช่น 100" oninput="renderAddSplitSummaryFromForm()">
-                                    </div>
-                                    <div class="col-md-3" id="add_base_to_tablet_col">
-                                        <label class="form-label fw-medium text-muted small text-primary">1 หน่วยย่อย = กี่เม็ด</label>
-                                        <input type="number" id="add_base_unit_to_tablet_rate" name="base_unit_to_tablet_rate" class="form-control shadow-none"
-                                            min="0" step="1" value="0" placeholder="เช่น 10" oninput="renderAddSplitSummaryFromForm()">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small text-warning">
-                                            <i class="fas fa-box-open me-1"></i>หน่วยย่อยที่เปิดแล้ว
-                                        </label>
-                                        <input type="number" id="add_open_base_qty" name="open_base_qty" class="form-control shadow-none border-warning"
-                                            min="0" step="1" value="0" oninput="renderAddSplitSummaryFromForm()">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small text-warning">
-                                            <i class="fas fa-pills me-1"></i>เศษเม็ดที่เปิดแล้ว
-                                        </label>
-                                        <input type="number" id="add_open_extra_tablet_qty" name="open_extra_tablet_qty" class="form-control shadow-none border-warning"
-                                            min="0" step="1" value="0" oninput="renderAddSplitSummaryFromForm()">
-                                    </div>
+
+                                    <fieldset class="split-section">
+                                        <legend class="split-section-title h6">
+                                            <span class="split-step-number">1</span>
+                                            <span>บอกโครงสร้างของยา <small class="d-block mt-1 fw-normal text-muted">กรอกตามข้อความบนฉลาก โดยระบบจะคำนวณจำนวนหน่วยกลางให้เอง</small></span>
+                                        </legend>
+                                        <div class="row g-3">
+                                            <div class="col-md-4">
+                                                <label class="form-label fw-medium small" for="add_package_unit">หน่วยเต็มที่ยังไม่เปิด เรียกว่า</label>
+                                                <input type="text" id="add_package_unit" name="package_unit" class="form-control shadow-none"
+                                                    list="medicineSplitUnitOptions" placeholder="เช่น หลอด, กล่อง, ขวด"
+                                                    oninput="updateStockUnitHints('add'); updateSplitModeVisual('add'); renderAddSplitSummaryFromForm()">
+                                                <small class="text-muted">ควรตรงกับ “หน่วยนับ” ด้านบน</small>
+                                            </div>
+                                            <div class="col-md-4" id="add_base_unit_col">
+                                                <label class="form-label fw-medium small" for="add_base_unit">หน่วยกลางที่แบ่งออกมา เรียกว่า</label>
+                                                <input type="text" id="add_base_unit" name="base_unit" class="form-control shadow-none"
+                                                    list="medicineSplitUnitOptions" placeholder="เช่น ตลับ, แผง, ซอง"
+                                                    oninput="updateSplitModeVisual('add'); renderAddSplitSummaryFromForm()">
+                                            </div>
+                                            <div class="col-md-4">
+                                                <label class="form-label fw-medium small" for="add_package_tablet_total">จำนวนเม็ดทั้งหมดใน 1 หน่วยเต็ม</label>
+                                                <input type="number" id="add_package_tablet_total" name="package_tablet_total" class="form-control shadow-none"
+                                                    min="0" step="1" value="0" inputmode="numeric" placeholder="เช่น 100"
+                                                    oninput="updateSplitModeVisual('add'); renderAddSplitSummaryFromForm()">
+                                            </div>
+                                            <div class="col-md-4" id="add_base_to_tablet_col">
+                                                <label class="form-label fw-medium small" for="add_base_unit_to_tablet_rate">จำนวนเม็ดใน 1 หน่วยกลาง</label>
+                                                <input type="number" id="add_base_unit_to_tablet_rate" name="base_unit_to_tablet_rate" class="form-control shadow-none"
+                                                    min="0" step="1" value="0" inputmode="numeric" placeholder="เช่น 10"
+                                                    oninput="updateSplitModeVisual('add'); renderAddSplitSummaryFromForm()">
+                                            </div>
+                                            <div class="col-md-4" id="add_conversion_rate_col">
+                                                <label class="form-label fw-medium small" for="add_conversion_rate" id="addConversionRateLabel">ระบบคำนวณ: ได้กี่หน่วยกลาง</label>
+                                                <input type="number" id="add_conversion_rate" name="conversion_rate"
+                                                    class="form-control split-calculated-field" min="0" step="1" value="0" readonly aria-readonly="true">
+                                                <small class="text-muted" id="addConversionRateHint">ไม่ต้องกรอกช่องนี้</small>
+                                            </div>
+                                        </div>
+                                    </fieldset>
+
+                                    <fieldset class="split-section split-open-stock">
+                                        <legend class="split-section-title h6">
+                                            <span class="split-step-number">2</span>
+                                            <span>กรอกเฉพาะของที่เปิดออกมาแล้ว <small class="d-block mt-1 fw-normal text-muted">ไม่ต้องรวมหน่วยเต็มที่กรอกใน “จำนวนเริ่มต้น” ด้านบน</small></span>
+                                        </legend>
+                                        <div class="row g-3">
+                                            <div class="col-md-6">
+                                                <label class="form-label fw-medium small" for="add_open_base_qty" id="addOpenBaseLabel">
+                                                    <i class="fas fa-box-open me-1 text-warning" aria-hidden="true"></i>จำนวนที่เปิดออกมาแล้ว
+                                                </label>
+                                                <div class="input-group unit-field-group">
+                                                    <input type="number" id="add_open_base_qty" name="open_base_qty" class="form-control shadow-none border-warning"
+                                                        min="0" step="1" value="0" inputmode="numeric" oninput="renderAddSplitSummaryFromForm()">
+                                                    <span class="input-group-text" id="addOpenBaseUnitBadge">หน่วย</span>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6" id="add_open_extra_col">
+                                                <label class="form-label fw-medium small" for="add_open_extra_tablet_qty" id="addOpenExtraLabel">
+                                                    <i class="fas fa-pills me-1 text-warning" aria-hidden="true"></i>เม็ดที่เหลือไม่ครบ 1 หน่วยกลาง
+                                                </label>
+                                                <div class="input-group unit-field-group">
+                                                    <input type="number" id="add_open_extra_tablet_qty" name="open_extra_tablet_qty" class="form-control shadow-none border-warning"
+                                                        min="0" step="1" value="0" inputmode="numeric" oninput="renderAddSplitSummaryFromForm()">
+                                                    <span class="input-group-text">เม็ด</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </fieldset>
                                 </div>
                             </div>
                             <div class="col-12 is-hidden" id="addSplitSummaryRow">
-                                <div class="alert alert-info mb-0 py-2 px-3 small" id="addSplitSummaryBox">
+                                <div class="split-summary-card" id="addSplitSummaryBox" role="status" aria-live="polite">
                                     -
                                 </div>
                             </div>
@@ -3068,7 +3234,7 @@
     </div>
 
     <div class="modal fade" id="editProductModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl">
             <div class="modal-content border-0 shadow-lg">
                 <div class="modal-header bg-dark text-white border-0">
                     <h5 class="modal-title fw-medium"><i class="fas fa-edit text-warning me-2"></i>แก้ไขข้อมูล</h5>
@@ -3093,82 +3259,8 @@
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-medium text-muted small">หน่วยนับ</label>
-                            <input type="text" id="edit_unit" name="unit" class="form-control shadow-none" required>
-                        </div>
-                        <div class="col-12 is-hidden" id="editSplitUnitToggleRow">
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" id="editEnableSplit"
-                                    onchange="toggleEditSplitDetail()">
-                                <label class="form-check-label fw-medium small" for="editEnableSplit">
-                                    <i class="fas fa-pills me-1 text-info"></i>แยกหน่วยย่อย (เช่น กล่อง -> เม็ด)
-                                </label>
-                            </div>
-                        </div>
-                        <div class="col-12 is-hidden" id="editSplitDetailRow">
-                            <div class="row g-3 p-3 rounded-3 split-detail-box">
-                                <div class="col-md-3">
-                                    <label class="form-label fw-medium text-muted small">รูปแบบการแยก</label>
-                                    <select id="edit_split_mode" name="split_mode" class="form-select shadow-none"
-                                        onchange="updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
-                                        <option value="single">แยกชั้นเดียว</option>
-                                        <option value="multi">แยกหลายชั้น</option>
-                                    </select>
-                                    <small class="text-muted d-block mt-1" id="edit_split_mode_hint">ชั้นเดียว: กรอกเม็ดรวมต่อหน่วยนำเข้า</small>
-                                </div>
-                                <div class="col-md-3">
-                                    <label class="form-label fw-medium text-muted small">หน่วยแพ็ค/กล่อง/กระปุก</label>
-                                    <input type="text" id="edit_package_unit" name="package_unit" class="form-control shadow-none"
-                                        list="medicineSplitUnitOptions"
-                                        placeholder="เช่น กล่อง, ขวด, กระปุก">
-                                </div>
-                                <div class="col-md-3" id="edit_base_unit_col">
-                                    <label class="form-label fw-medium text-muted small">หน่วยย่อย</label>
-                                    <input type="text" id="edit_base_unit" name="base_unit" class="form-control shadow-none"
-                                        list="medicineSplitUnitOptions"
-                                        placeholder="เช่น เม็ด">
-                                </div>
-                                <div class="col-md-3" id="edit_conversion_rate_col">
-                                    <label class="form-label fw-medium text-muted small">1 แพ็ค มีจำนวน (หน่วยย่อย)</label>
-                                    <input type="number" id="edit_conversion_rate" name="conversion_rate" class="form-control shadow-none"
-                                        min="1" step="1" value="1" oninput="renderEditSplitSummaryFromForm()">
-                                </div>
-                                <div class="col-md-3">
-                                    <label class="form-label fw-medium text-muted small text-primary">1 หน่วยนำเข้า = กี่เม็ด</label>
-                                    <input type="number" id="edit_package_tablet_total" name="package_tablet_total" class="form-control shadow-none"
-                                        min="0" step="1" value="0" oninput="renderEditSplitSummaryFromForm()" placeholder="เช่น 100">
-                                </div>
-                                <div class="col-md-3" id="edit_base_to_tablet_col">
-                                    <label class="form-label fw-medium text-muted small text-primary">1 หน่วยย่อย = กี่เม็ด</label>
-                                    <input type="number" id="edit_base_unit_to_tablet_rate" name="base_unit_to_tablet_rate" class="form-control shadow-none"
-                                        min="0" step="1" value="0" oninput="renderEditSplitSummaryFromForm()" placeholder="เช่น 10">
-                                </div>
-                                <div class="col-md-3">
-                                    <label class="form-label fw-medium text-muted small text-warning">
-                                        <i class="fas fa-box-open me-1"></i>หน่วยย่อยที่เปิดแล้ว
-                                    </label>
-                                    <input type="number" id="edit_open_base_qty" name="open_base_qty" class="form-control shadow-none border-warning"
-                                        min="0" step="1" value="0" oninput="renderEditSplitSummaryFromForm()"
-                                        title="จำนวนหน่วยย่อยจากแพ็คที่เปิดใช้งานแล้ว (เช่น ขวดที่แงะออกจากแพ็ค)">
-                                </div>
-                                <div class="col-md-3">
-                                    <label class="form-label fw-medium text-muted small text-warning">
-                                        <i class="fas fa-pills me-1"></i>เศษเม็ดที่เปิดแล้ว
-                                    </label>
-                                    <input type="number" id="edit_open_extra_tablet_qty" name="open_extra_tablet_qty" class="form-control shadow-none border-warning"
-                                        min="0" step="1" value="0" oninput="renderEditSplitSummaryFromForm()"
-                                        title="จำนวนเศษเม็ดที่เหลือจากแพ็คที่เปิดแล้ว">
-                                </div>
-                                <div class="col-12">
-                                    <div id="editLiveStockHint" class="alert alert-primary mb-0 py-2 px-3 small">
-                                        รวมคงเหลือแบบเรียลไทม์จะแสดงที่นี่
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-12 is-hidden" id="editSplitSummaryRow">
-                            <div class="alert alert-info mb-0 py-2 px-3 small" id="editSplitSummaryBox">
-                                -
-                            </div>
+                            <input type="text" id="edit_unit" name="unit" class="form-control shadow-none" required
+                                oninput="updateStockUnitHints('edit'); updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-medium text-muted small">สถานที่เก็บ</label>
@@ -3180,21 +3272,132 @@
                             <label class="form-label fw-medium text-muted small" id="editSafetyLabel">จุดสั่งซื้อ (Safety)</label>
                             <div class="input-group unit-field-group">
                                 <input type="number" id="edit_safety_stock" name="safety_stock"
-                                    class="form-control shadow-none">
+                                    class="form-control shadow-none" min="0" step="1">
                                 <span class="input-group-text small" id="editSafetyUnitBadge">หน่วย</span>
                             </div>
                         </div>
                         <div class="col-lg-3 col-md-6">
-                            <label class="form-label fw-medium text-muted small" id="editStockLabel">จำนวนคงเหลือ</label>
+                            <label class="form-label fw-medium text-muted small" id="editStockLabel">จำนวนหน่วยเต็มที่ยังไม่เปิด</label>
                             <div class="input-group unit-field-group">
-                                <input type="number" id="edit_stock" name="stock" class="form-control shadow-none" oninput="renderEditSplitSummaryFromForm()">
+                                <input type="number" id="edit_stock" name="stock" class="form-control shadow-none"
+                                    min="0" step="1" oninput="renderEditSplitSummaryFromForm()">
                                 <span class="input-group-text small" id="editStockUnitBadge">หน่วย</span>
                             </div>
+                            <small class="text-muted is-hidden" id="editStockHelp">ช่องนี้ปรับเฉพาะหน่วยเต็มใน Lot ไม่เพิ่มยอดของที่เปิดแล้ว</small>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-medium text-muted small">วันหมดอายุ</label>
                             <input type="text" id="edit_date_picker_expiry" name="expiry_date" placeholder="DD/MM/YYYY"
                                 class="form-control shadow-none">
+                        </div>
+                        <div class="col-12 is-hidden" id="editSplitUnitToggleRow">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="editEnableSplit"
+                                    onchange="toggleEditSplitDetail()">
+                                <label class="form-check-label fw-medium small" for="editEnableSplit">
+                                    <i class="fas fa-pills me-1 text-info"></i>ยานี้สามารถเปิดแบ่งจ่ายได้
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-12 is-hidden" id="editSplitDetailRow">
+                            <div class="p-3 p-md-4 rounded-3 split-detail-box">
+                                <div class="row g-3 align-items-end mb-3">
+                                    <div class="col-lg-7">
+                                        <label class="form-label fw-semibold" for="edit_split_mode">ยาแบ่งออกมาเป็นแบบไหน</label>
+                                        <select id="edit_split_mode" name="split_mode" class="form-select shadow-none"
+                                            aria-describedby="edit_split_mode_hint"
+                                            onchange="updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
+                                            <option value="single">2 ระดับ — หน่วยเต็ม → เม็ด</option>
+                                            <option value="multi">3 ระดับ — หน่วยเต็ม → หน่วยกลาง → เม็ด</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-lg-5">
+                                        <small class="text-muted d-block" id="edit_split_mode_hint">เลือกแบบที่ตรงกับของจริงในคลัง</small>
+                                    </div>
+                                </div>
+
+                                <div class="split-flow-preview" id="editSplitFlowPreview" aria-live="polite">
+                                    <span class="split-flow-node" id="editFlowPackageUnit">หน่วยเต็ม</span>
+                                    <i class="fas fa-arrow-right split-flow-arrow" aria-hidden="true"></i>
+                                    <span class="split-flow-node" id="editFlowBaseUnit">เม็ด</span>
+                                    <i class="fas fa-arrow-right split-flow-arrow is-hidden" id="editFlowTabletArrow" aria-hidden="true"></i>
+                                    <span class="split-flow-node is-hidden" id="editFlowTabletUnit">เม็ด</span>
+                                </div>
+
+                                <fieldset class="split-section">
+                                    <legend class="split-section-title h6">
+                                        <span class="split-step-number">1</span>
+                                        <span>บอกโครงสร้างของยา <small class="d-block mt-1 fw-normal text-muted">กรอกตามข้อความบนฉลาก โดยระบบจะคำนวณจำนวนหน่วยกลางให้เอง</small></span>
+                                    </legend>
+                                    <div class="row g-3">
+                                        <div class="col-md-4">
+                                            <label class="form-label fw-medium small" for="edit_package_unit">หน่วยเต็มที่ยังไม่เปิด เรียกว่า</label>
+                                            <input type="text" id="edit_package_unit" name="package_unit" class="form-control shadow-none"
+                                                list="medicineSplitUnitOptions" placeholder="เช่น หลอด, กล่อง, ขวด"
+                                                oninput="updateStockUnitHints('edit'); updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
+                                            <small class="text-muted">ควรตรงกับ “หน่วยนับ” ด้านบน</small>
+                                        </div>
+                                        <div class="col-md-4" id="edit_base_unit_col">
+                                            <label class="form-label fw-medium small" for="edit_base_unit">หน่วยกลางที่แบ่งออกมา เรียกว่า</label>
+                                            <input type="text" id="edit_base_unit" name="base_unit" class="form-control shadow-none"
+                                                list="medicineSplitUnitOptions" placeholder="เช่น ตลับ, แผง, ซอง"
+                                                oninput="updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label fw-medium small" for="edit_package_tablet_total">จำนวนเม็ดทั้งหมดใน 1 หน่วยเต็ม</label>
+                                            <input type="number" id="edit_package_tablet_total" name="package_tablet_total" class="form-control shadow-none"
+                                                min="0" step="1" value="0" inputmode="numeric" placeholder="เช่น 100"
+                                                oninput="updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
+                                        </div>
+                                        <div class="col-md-4" id="edit_base_to_tablet_col">
+                                            <label class="form-label fw-medium small" for="edit_base_unit_to_tablet_rate">จำนวนเม็ดใน 1 หน่วยกลาง</label>
+                                            <input type="number" id="edit_base_unit_to_tablet_rate" name="base_unit_to_tablet_rate" class="form-control shadow-none"
+                                                min="0" step="1" value="0" inputmode="numeric" placeholder="เช่น 10"
+                                                oninput="updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
+                                        </div>
+                                        <div class="col-md-4" id="edit_conversion_rate_col">
+                                            <label class="form-label fw-medium small" for="edit_conversion_rate" id="editConversionRateLabel">ระบบคำนวณ: ได้กี่หน่วยกลาง</label>
+                                            <input type="number" id="edit_conversion_rate" name="conversion_rate"
+                                                class="form-control split-calculated-field" min="0" step="1" value="0" readonly aria-readonly="true">
+                                            <small class="text-muted" id="editConversionRateHint">ไม่ต้องกรอกช่องนี้</small>
+                                        </div>
+                                    </div>
+                                </fieldset>
+
+                                <fieldset class="split-section split-open-stock">
+                                    <legend class="split-section-title h6">
+                                        <span class="split-step-number">2</span>
+                                        <span>กรอกเฉพาะของที่เปิดออกมาแล้ว <small class="d-block mt-1 fw-normal text-muted">ไม่ต้องรวมหน่วยเต็มที่กรอกใน “จำนวนหน่วยเต็มที่ยังไม่เปิด” ด้านบน</small></span>
+                                    </legend>
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-medium small" for="edit_open_base_qty" id="editOpenBaseLabel">
+                                                <i class="fas fa-box-open me-1 text-warning" aria-hidden="true"></i>จำนวนที่เปิดออกมาแล้ว
+                                            </label>
+                                            <div class="input-group unit-field-group">
+                                                <input type="number" id="edit_open_base_qty" name="open_base_qty" class="form-control shadow-none border-warning"
+                                                    min="0" step="1" value="0" inputmode="numeric" oninput="renderEditSplitSummaryFromForm()">
+                                                <span class="input-group-text" id="editOpenBaseUnitBadge">หน่วย</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6" id="edit_open_extra_col">
+                                            <label class="form-label fw-medium small" for="edit_open_extra_tablet_qty" id="editOpenExtraLabel">
+                                                <i class="fas fa-pills me-1 text-warning" aria-hidden="true"></i>เม็ดที่เหลือไม่ครบ 1 หน่วยกลาง
+                                            </label>
+                                            <div class="input-group unit-field-group">
+                                                <input type="number" id="edit_open_extra_tablet_qty" name="open_extra_tablet_qty" class="form-control shadow-none border-warning"
+                                                    min="0" step="1" value="0" inputmode="numeric" oninput="renderEditSplitSummaryFromForm()">
+                                                <span class="input-group-text">เม็ด</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </fieldset>
+                            </div>
+                        </div>
+                        <div class="col-12 is-hidden" id="editSplitSummaryRow">
+                            <div class="split-summary-card" id="editSplitSummaryBox" role="status" aria-live="polite">
+                                -
+                            </div>
                         </div>
                     </div>
                     <div class="modal-body border-top bg-light text-end">
@@ -4680,6 +4883,7 @@
             const stockLabelEl = document.getElementById(isAddMode ? 'addStockLabel' : 'editStockLabel');
             const safetyBadgeEl = document.getElementById(isAddMode ? 'addSafetyUnitBadge' : 'editSafetyUnitBadge');
             const stockBadgeEl = document.getElementById(isAddMode ? 'addStockUnitBadge' : 'editStockUnitBadge');
+            const stockHelpEl = document.getElementById(isAddMode ? 'addStockHelp' : 'editStockHelp');
 
             if (!categoryEl || !unitEl || !safetyLabelEl || !stockLabelEl) return;
 
@@ -4691,41 +4895,109 @@
 
             const stockUnit = (isMedicine && splitEnabled && packageUnit) ? packageUnit : (unit || 'หน่วย');
             safetyLabelEl.textContent = 'จุดสั่งซื้อ (Safety)';
-            stockLabelEl.textContent = isAddMode ? 'จำนวนเริ่มต้น' : 'จำนวนคงเหลือ';
+            stockLabelEl.textContent = (isMedicine && splitEnabled)
+                ? (isAddMode ? `จำนวน${stockUnit}เต็มเริ่มต้น` : `จำนวน${stockUnit}เต็มที่ยังไม่เปิด (ปรับยอด Lot)`)
+                : (isAddMode ? 'จำนวนเริ่มต้น' : 'จำนวนคงเหลือ');
             if (safetyBadgeEl) safetyBadgeEl.textContent = stockUnit;
             if (stockBadgeEl) stockBadgeEl.textContent = stockUnit;
+            if (stockHelpEl) stockHelpEl.classList.toggle('is-hidden', !(isMedicine && splitEnabled));
         }
 
         function updateSplitModeVisual(mode) {
             const isAddMode = mode === 'add';
-            const modeEl = document.getElementById(isAddMode ? 'add_split_mode' : 'edit_split_mode');
-            const hintEl = document.getElementById(isAddMode ? 'add_split_mode_hint' : 'edit_split_mode_hint');
-            const baseToTabletCol = document.getElementById(isAddMode ? 'add_base_to_tablet_col' : 'edit_base_to_tablet_col');
-            const baseUnitInput = document.getElementById(isAddMode ? 'add_base_unit' : 'edit_base_unit');
-            const baseToTabletInput = document.getElementById(isAddMode ? 'add_base_unit_to_tablet_rate' : 'edit_base_unit_to_tablet_rate');
+            const prefix = isAddMode ? 'add' : 'edit';
+            const modeEl = document.getElementById(`${prefix}_split_mode`);
+            const hintEl = document.getElementById(`${prefix}_split_mode_hint`);
+            const packageUnitInput = document.getElementById(`${prefix}_package_unit`);
+            const baseUnitInput = document.getElementById(`${prefix}_base_unit`);
+            const packageTabletInput = document.getElementById(`${prefix}_package_tablet_total`);
+            const baseToTabletInput = document.getElementById(`${prefix}_base_unit_to_tablet_rate`);
+            const conversionRateInput = document.getElementById(`${prefix}_conversion_rate`);
+            const baseUnitCol = document.getElementById(`${prefix}_base_unit_col`);
+            const baseToTabletCol = document.getElementById(`${prefix}_base_to_tablet_col`);
+            const conversionRateCol = document.getElementById(`${prefix}_conversion_rate_col`);
+            const openExtraCol = document.getElementById(`${prefix}_open_extra_col`);
+            const openExtraInput = document.getElementById(`${prefix}_open_extra_tablet_qty`);
+            const conversionLabel = document.getElementById(`${prefix}ConversionRateLabel`);
+            const conversionHint = document.getElementById(`${prefix}ConversionRateHint`);
+            const openBaseLabel = document.getElementById(`${prefix}OpenBaseLabel`);
+            const openBaseBadge = document.getElementById(`${prefix}OpenBaseUnitBadge`);
+            const flowPackage = document.getElementById(`${prefix}FlowPackageUnit`);
+            const flowBase = document.getElementById(`${prefix}FlowBaseUnit`);
+            const flowTabletArrow = document.getElementById(`${prefix}FlowTabletArrow`);
+            const flowTablet = document.getElementById(`${prefix}FlowTabletUnit`);
 
             if (!modeEl) return;
             const splitMode = modeEl.value || 'single';
+            const isMulti = splitMode === 'multi';
+
+            if (splitMode === 'single' && baseUnitInput) {
+                const currentBaseUnit = (baseUnitInput.value || '').trim();
+                if (currentBaseUnit && currentBaseUnit !== 'เม็ด') {
+                    baseUnitInput.dataset.multiValue = currentBaseUnit;
+                }
+                baseUnitInput.value = 'เม็ด';
+            } else if (isMulti && baseUnitInput && (baseUnitInput.value || '').trim() === 'เม็ด') {
+                baseUnitInput.value = baseUnitInput.dataset.multiValue || '';
+            }
 
             if (hintEl) {
-                hintEl.textContent = splitMode === 'multi'
-                    ? 'หลายชั้น: หน่วยนำเข้า -> หน่วยย่อย -> เม็ด'
-                    : 'ชั้นเดียว: หน่วยนำเข้า -> เม็ด';
+                hintEl.textContent = isMulti
+                    ? 'ใช้เมื่อมีหน่วยกลาง เช่น หลอด → ตลับ → เม็ด'
+                    : 'ใช้เมื่อเปิดหน่วยเต็มแล้วนับเป็นเม็ดทันที เช่น กล่อง → เม็ด';
             }
 
-            if (baseToTabletCol) {
-                baseToTabletCol.classList.toggle('is-hidden', splitMode !== 'multi');
-            }
+            if (baseUnitCol) baseUnitCol.classList.toggle('is-hidden', !isMulti);
+            if (baseToTabletCol) baseToTabletCol.classList.toggle('is-hidden', !isMulti);
+            if (conversionRateCol) conversionRateCol.classList.toggle('is-hidden', !isMulti);
+            if (openExtraCol) openExtraCol.classList.toggle('is-hidden', !isMulti);
 
-            if (splitMode === 'single') {
-                if (baseUnitInput && (!baseUnitInput.value || baseUnitInput.value.trim() === '')) {
-                    baseUnitInput.value = 'เม็ด';
+            if (!isMulti && baseToTabletInput) {
+                if ((parseInt(baseToTabletInput.value || '0', 10) || 0) > 0) {
+                    baseToTabletInput.dataset.multiValue = baseToTabletInput.value;
                 }
+                baseToTabletInput.value = '0';
+            } else if (isMulti && baseToTabletInput && (parseInt(baseToTabletInput.value || '0', 10) || 0) === 0) {
+                baseToTabletInput.value = baseToTabletInput.dataset.multiValue || '0';
+            }
+            if (!isMulti && openExtraInput) {
+                if ((parseInt(openExtraInput.value || '0', 10) || 0) > 0) {
+                    openExtraInput.dataset.multiValue = openExtraInput.value;
+                }
+                openExtraInput.value = '0';
+            } else if (isMulti && openExtraInput && (parseInt(openExtraInput.value || '0', 10) || 0) === 0) {
+                openExtraInput.value = openExtraInput.dataset.multiValue || '0';
             }
 
-            if (splitMode !== 'multi' && baseToTabletInput) {
-                baseToTabletInput.value = '0';
+            const packageUnit = (packageUnitInput?.value || 'หน่วยเต็ม').trim() || 'หน่วยเต็ม';
+            const baseUnit = (baseUnitInput?.value || (isMulti ? 'หน่วยกลาง' : 'เม็ด')).trim() || (isMulti ? 'หน่วยกลาง' : 'เม็ด');
+            const packageTabletTotal = Math.max(0, parseInt(packageTabletInput?.value || '0', 10) || 0);
+            const baseToTablet = Math.max(0, parseInt(baseToTabletInput?.value || '0', 10) || 0);
+            const conversionRate = isMulti
+                ? (baseToTablet > 0 ? Math.floor(packageTabletTotal / baseToTablet) : 0)
+                : packageTabletTotal;
+            const remainderTablet = isMulti && baseToTablet > 0
+                ? packageTabletTotal % baseToTablet
+                : 0;
+
+            if (conversionRateInput) conversionRateInput.value = String(conversionRate);
+            if (conversionLabel) conversionLabel.textContent = `ระบบคำนวณ: จำนวน${baseUnit}ต่อ${packageUnit}`;
+            if (conversionHint) {
+                conversionHint.textContent = packageTabletTotal > 0 && baseToTablet > 0
+                    ? `แบ่งได้ ${conversionRate} ${baseUnit}${remainderTablet > 0 ? ` และเหลือ ${remainderTablet} เม็ด` : ' พอดี ไม่มีเศษ'}`
+                    : 'กรอกจำนวนเม็ด 2 ช่อง แล้วระบบจะคำนวณให้';
             }
+            if (openBaseLabel) {
+                openBaseLabel.textContent = isMulti
+                    ? `จำนวน${baseUnit}ที่แยกออกมาแล้ว`
+                    : 'จำนวนเม็ดที่เปิดออกมาแล้ว';
+            }
+            if (openBaseBadge) openBaseBadge.textContent = isMulti ? baseUnit : 'เม็ด';
+
+            if (flowPackage) flowPackage.textContent = packageUnit;
+            if (flowBase) flowBase.textContent = isMulti ? baseUnit : 'เม็ด';
+            if (flowTabletArrow) flowTabletArrow.classList.toggle('is-hidden', !isMulti);
+            if (flowTablet) flowTablet.classList.toggle('is-hidden', !isMulti);
         }
 
         function toggleAddSplitFields() {
@@ -4763,6 +5035,13 @@
             const summaryRow = document.getElementById('addSplitSummaryRow');
             detailRow.classList.toggle('is-hidden', !cb.checked);
             if (summaryRow) summaryRow.classList.toggle('is-hidden', !cb.checked);
+            if (cb.checked) {
+                const packageUnitEl = document.getElementById('add_package_unit');
+                const stockUnitEl = document.getElementById('add_unit');
+                if (packageUnitEl && !(packageUnitEl.value || '').trim()) {
+                    packageUnitEl.value = (stockUnitEl?.value || '').trim();
+                }
+            }
             if (!cb.checked) {
                 ['add_package_unit','add_base_unit','add_conversion_rate','add_base_unit_to_tablet_rate','add_package_tablet_total','add_open_base_qty','add_open_extra_tablet_qty'].forEach(id => {
                     const el = document.getElementById(id);
@@ -4789,84 +5068,73 @@
                 return;
             }
 
-            const convRate = parseInt(document.getElementById('add_conversion_rate')?.value || 1, 10) || 1;
+            const convRate = Math.max(0, parseInt(document.getElementById('add_conversion_rate')?.value || 0, 10) || 0);
             const baseToTablet = parseInt(document.getElementById('add_base_unit_to_tablet_rate')?.value || 0, 10) || 0;
             const packageTabletTotal = parseInt(document.getElementById('add_package_tablet_total')?.value || 0, 10) || 0;
             const splitMode = document.getElementById('add_split_mode')?.value || 'single';
             const stock = parseInt(document.getElementById('add_stock')?.value || 0, 10) || 0;
             const openBase = parseInt(document.getElementById('add_open_base_qty')?.value || 0, 10) || 0;
-            const openExtraEl = document.getElementById('add_open_extra_tablet_qty');
-            const openExtraTablet = parseInt(openExtraEl?.value || 0, 10) || 0;
-            const pkgUnit = (document.getElementById('add_package_unit')?.value || 'แพ็ค').trim() || 'แพ็ค';
-            const baseUnit = (document.getElementById('add_base_unit')?.value || 'หน่วยย่อย').trim() || 'หน่วยย่อย';
-            const activeId = document.activeElement ? document.activeElement.id : '';
-            const convRateEl = document.getElementById('add_conversion_rate');
-            const packageTabletTotalEl = document.getElementById('add_package_tablet_total');
+            const openExtraTablet = splitMode === 'multi'
+                ? (parseInt(document.getElementById('add_open_extra_tablet_qty')?.value || 0, 10) || 0)
+                : 0;
+            const pkgUnitRaw = (document.getElementById('add_package_unit')?.value || 'หน่วยเต็ม').trim() || 'หน่วยเต็ม';
+            const baseUnitRaw = splitMode === 'multi'
+                ? ((document.getElementById('add_base_unit')?.value || 'หน่วยกลาง').trim() || 'หน่วยกลาง')
+                : 'เม็ด';
+            const pkgUnit = escapeHtml(pkgUnitRaw);
+            const baseUnit = escapeHtml(baseUnitRaw);
+            const hasInvalidConfig = packageTabletTotal <= 0
+                || (splitMode === 'multi' && (baseToTablet <= 0 || convRate <= 0));
 
-            let effectiveConvRate = convRate;
-            let effectiveBaseToTablet = baseToTablet;
-
-            if (splitMode === 'multi' && packageTabletTotal > 0 && baseToTablet > 0) {
-                if (activeId === 'add_conversion_rate') {
-                    if (packageTabletTotalEl) packageTabletTotalEl.value = String(convRate * baseToTablet);
-                    effectiveConvRate = convRate;
-                } else {
-                    effectiveConvRate = Math.floor(packageTabletTotal / baseToTablet);
-                    if (convRateEl) convRateEl.value = String(effectiveConvRate);
-                }
-            } else if (splitMode === 'single' && packageTabletTotal > 0) {
-                effectiveConvRate = packageTabletTotal;
-                effectiveBaseToTablet = 0;
-                if (convRateEl) convRateEl.value = String(effectiveConvRate);
-            }
-
-            const multiRemainder = (splitMode === 'multi' && packageTabletTotal > 0 && baseToTablet > 0)
+            const multiRemainder = (splitMode === 'multi' && !hasInvalidConfig)
                 ? (packageTabletTotal % baseToTablet)
                 : 0;
-            // รวมเศษจากทุกแพ็ค + เศษที่เปิดแล้ว แล้วค่อยแปลงเป็นหน่วยย่อยทันที
+            // คิดยอดรวมเมื่อแปลงหน่วยเต็มทั้งหมด เพื่อให้เทียบสต็อกได้ในหน่วยเดียวกัน
             const packageRemainderTablets = (splitMode === 'multi' && multiRemainder > 0)
                 ? (stock * multiRemainder)
                 : 0;
-            let manualOpenExtraTablet = openExtraTablet;
-            if (openExtraEl) {
-                if (activeId === 'add_open_extra_tablet_qty') {
-                    openExtraEl.dataset.manualValue = String(manualOpenExtraTablet);
-                } else {
-                    manualOpenExtraTablet = parseInt(openExtraEl.dataset.manualValue || openExtraEl.value || '0', 10) || 0;
-                }
-            }
-            const totalRemainderTablets = packageRemainderTablets + manualOpenExtraTablet;
+            const totalRemainderTablets = packageRemainderTablets + openExtraTablet;
             const extraBundlesFromRemainder = (baseToTablet > 0)
                 ? Math.floor(totalRemainderTablets / baseToTablet) : 0;
             const trueRemainderTablets = (baseToTablet > 0 && totalRemainderTablets > 0)
                 ? totalRemainderTablets % baseToTablet : 0;
-            const totalBase = stock * effectiveConvRate + openBase + extraBundlesFromRemainder;
-            const perPackageBundleText = (splitMode === 'multi' && effectiveBaseToTablet > 0)
-                ? `1 ${pkgUnit} = ${effectiveConvRate} ${baseUnit} (${effectiveBaseToTablet} เม็ด/${baseUnit})${multiRemainder > 0 ? ` + เหลือ ${multiRemainder} เม็ด/แพ็ค` : ''}`
-                : `1 ${pkgUnit} = ${effectiveConvRate} ${baseUnit}`;
-
+            const totalBase = stock * convRate + openBase + extraBundlesFromRemainder;
             const totalTablet = splitMode === 'multi'
-                ? (packageTabletTotal > 0
-                    ? (stock * packageTabletTotal) + (openBase * effectiveBaseToTablet) + totalRemainderTablets
-                    : (effectiveBaseToTablet > 0 ? (stock * effectiveConvRate + openBase) * effectiveBaseToTablet + totalRemainderTablets : 0))
-                : (packageTabletTotal > 0 ? (stock * packageTabletTotal) + openBase + totalRemainderTablets : null);
-            const remainderLine = (splitMode === 'multi' && extraBundlesFromRemainder > 0)
-                ? `<br><span class="text-success"><i class="fas fa-recycle me-1"></i>เศษจากแพ็ค ${packageRemainderTablets} เม็ด + เศษเปิดแล้ว ${manualOpenExtraTablet} เม็ด = ${totalRemainderTablets} เม็ด → จัดเพิ่มได้ ${extraBundlesFromRemainder} ${baseUnit}${trueRemainderTablets > 0 ? ` + เหลือสุดท้าย ${trueRemainderTablets} เม็ด` : ''}</span>`
-                : (splitMode === 'multi' && trueRemainderTablets > 0
-                    ? `<br><span class="text-warning">เศษจากแพ็ค ${packageRemainderTablets} เม็ด + เศษเปิดแล้ว ${manualOpenExtraTablet} เม็ด = ${totalRemainderTablets} เม็ด (ยังไม่ครบ 1 ${baseUnit})</span>`
-                    : '');
-            const totalPackText = (totalTablet !== null && typeof totalTablet === 'number')
-                ? `รวม ${stock} ${pkgUnit} + เปิดแล้ว ${openBase} ${baseUnit} = ${totalBase} ${baseUnit} = ${totalTablet} เม็ด`
-                : `รวม ${stock} ${pkgUnit} + เปิดแล้ว ${openBase} ${baseUnit} = ${totalBase} ${baseUnit}`;
-            const remainderFieldHint = (splitMode === 'multi' && baseToTablet > 0)
-                ? `<br><span class="text-primary fw-semibold">เศษสุดท้ายที่ควรแสดงในช่อง "เศษเม็ดที่เปิดแล้ว" = ${trueRemainderTablets} เม็ด</span>`
-                : '';
+                ? (stock * packageTabletTotal) + (openBase * baseToTablet) + openExtraTablet
+                : (stock * packageTabletTotal) + openBase;
 
-            if (openExtraEl && splitMode === 'multi' && baseToTablet > 0 && activeId !== 'add_open_extra_tablet_qty') {
-                openExtraEl.value = String(trueRemainderTablets);
+            summaryBox.className = `split-summary-card${hasInvalidConfig ? ' border-danger' : ''}`;
+            if (hasInvalidConfig) {
+                summaryBox.innerHTML = `
+                    <strong class="text-danger"><i class="fas fa-circle-exclamation me-1" aria-hidden="true"></i>ข้อมูลยังไม่ครบ</strong>
+                    <div class="mt-1">${splitMode === 'multi'
+                        ? 'กรอกจำนวนเม็ดใน 1 หน่วยเต็ม และจำนวนเม็ดใน 1 หน่วยกลางให้ครบ'
+                        : 'กรอกจำนวนเม็ดทั้งหมดใน 1 หน่วยเต็ม'}</div>
+                `;
+                summaryRow.classList.remove('is-hidden');
+                return;
             }
 
-            summaryBox.innerHTML = `<strong>สรุปตั้งค่า:</strong> ${perPackageBundleText}<br>${totalPackText}${remainderLine}${remainderFieldHint}`;
+            const openedText = splitMode === 'multi'
+                ? `${openBase} ${baseUnit}${openExtraTablet > 0 ? ` + ${openExtraTablet} เม็ด` : ''}`
+                : `${openBase} เม็ด`;
+            const totalUnitText = splitMode === 'multi'
+                ? `${totalBase} ${baseUnit}${trueRemainderTablets > 0 ? ` + ${trueRemainderTablets} เม็ด` : ''}`
+                : `${totalTablet} เม็ด`;
+            const structureText = splitMode === 'multi'
+                ? `1 ${pkgUnit} มี ${convRate} ${baseUnit} — ${baseUnit}ละ ${baseToTablet} เม็ด${multiRemainder > 0 ? ` และมีเศษ ${multiRemainder} เม็ด` : ''}`
+                : `1 ${pkgUnit} มี ${packageTabletTotal} เม็ด`;
+
+            summaryBox.innerHTML = `
+                <strong><i class="fas fa-check-circle me-1 text-success" aria-hidden="true"></i>ตรวจสอบก่อนบันทึก</strong>
+                <div class="small mt-1">${structureText}</div>
+                <div class="split-summary-grid">
+                    <div class="split-summary-item"><span class="small text-muted">หน่วยเต็มที่ยังไม่เปิด</span><strong>${stock} ${pkgUnit}</strong></div>
+                    <div class="split-summary-item"><span class="small text-muted">ของที่เปิดออกมาแล้ว</span><strong>${openedText}</strong></div>
+                    <div class="split-summary-item"><span class="small text-muted">รวมเมื่อแปลงเป็นหน่วยเดียว</span><strong>${totalUnitText}</strong><small class="text-primary">รวม ${totalTablet} เม็ด</small></div>
+                </div>
+                <div class="mt-2 fw-semibold">ของจริงในคลัง: ${stock} ${pkgUnit} (ยังไม่เปิด) + ${openedText}</div>
+            `;
             summaryRow.classList.remove('is-hidden');
         }
 
@@ -4913,6 +5181,13 @@
 
             detailRow.classList.toggle('is-hidden', !cb.checked);
             summaryRow.classList.toggle('is-hidden', !cb.checked);
+            if (cb.checked) {
+                const packageUnitEl = document.getElementById('edit_package_unit');
+                const stockUnitEl = document.getElementById('edit_unit');
+                if (packageUnitEl && !(packageUnitEl.value || '').trim()) {
+                    packageUnitEl.value = (stockUnitEl?.value || '').trim();
+                }
+            }
             if (!cb.checked) {
                 ['edit_package_unit', 'edit_base_unit', 'edit_conversion_rate', 'edit_base_unit_to_tablet_rate'].forEach(id => {
                     const el = document.getElementById(id);
@@ -4929,162 +5204,94 @@
             }
             updateStockUnitHints('edit');
             updateSplitModeVisual('edit');
-        }
-
-        function renderEditSplitSummary(data) {
-            const summaryRow = document.getElementById('editSplitSummaryRow');
-            const summaryBox = document.getElementById('editSplitSummaryBox');
-            if (!summaryRow || !summaryBox) return;
-
-            const conversionRate = parseInt(data.conversion_rate || 1, 10);
-            const isSplitMedicine = data.category === 'ยา'
-                && !!(data.package_unit && data.base_unit)
-                && conversionRate > 1;
-
-            if (!isSplitMedicine || !data.split_summary) {
-                summaryRow.classList.add('is-hidden');
-                summaryBox.textContent = '-';
-                return;
-            }
-
-            const summary = data.split_summary;
-            const packageQty = parseInt(summary.stock_package_qty || 0, 10);
-            const openBaseQty = parseInt(summary.open_base_qty || 0, 10);
-            const openExtraTabletQty = parseInt(summary.open_extra_tablet_qty || 0, 10);
-            const totalBaseQty = parseInt(summary.total_base_qty || 0, 10);
-            const packageUnit = data.package_unit || data.unit || 'แพ็ก';
-            const baseUnit = data.base_unit || 'หน่วยย่อย';
-            const baseToTablet = parseInt(data.base_unit_to_tablet_rate || 0, 10) || 0;
-            const totalPackageEquivalent = (totalBaseQty / conversionRate).toFixed(2);
-            const totalTabletQty = parseInt(summary.total_tablet_qty || 0, 10);
-            const totalTabletText = baseToTablet > 0 ? `<br><span class="text-primary">≈ ${totalTabletQty} เม็ด</span>` : '';
-            const extraText = openExtraTabletQty > 0 ? `<br><span class="text-warning">เศษเม็ดจากหน่วยเปิด: ${openExtraTabletQty} เม็ด</span>` : '';
-
-            summaryBox.innerHTML = `
-                <strong>สรุปคงเหลือปัจจุบัน:</strong>
-                ในคลัง ${packageQty} ${packageUnit}
-                + เปิดใช้แล้ว ${openBaseQty} ${baseUnit}
-                = รวมทั้งหมด ${totalBaseQty} ${baseUnit} (${totalPackageEquivalent} ${packageUnit})
-                ${extraText}
-                ${totalTabletText}
-            `;
-            summaryRow.classList.remove('is-hidden');
+            renderEditSplitSummaryFromForm();
         }
 
         function renderEditSplitSummaryFromForm() {
             const summaryRow = document.getElementById('editSplitSummaryRow');
             const summaryBox = document.getElementById('editSplitSummaryBox');
-            const liveHintEl = document.getElementById('editLiveStockHint');
             if (!summaryRow || !summaryBox) return;
-            // แสดงสรุปเฉพาะหมวด "ยา" เท่านั้น
             const category = document.getElementById('edit_category')?.value || '';
             const splitEnabled = (document.getElementById('editEnableSplit') || {}).checked;
             if (category !== 'ยา' || !splitEnabled) {
                 summaryRow.classList.add('is-hidden');
-                if (liveHintEl) liveHintEl.style.display = 'none';
                 return;
             }
-            if (liveHintEl) liveHintEl.style.display = '';
-            const convRate = parseInt(document.getElementById('edit_conversion_rate')?.value || 1, 10) || 1;
+
+            const convRate = Math.max(0, parseInt(document.getElementById('edit_conversion_rate')?.value || 0, 10) || 0);
             const baseToTablet = parseInt(document.getElementById('edit_base_unit_to_tablet_rate')?.value || 0, 10) || 0;
             const packageTabletTotal = parseInt(document.getElementById('edit_package_tablet_total')?.value || 0, 10) || 0;
             const splitMode = document.getElementById('edit_split_mode')?.value || 'single';
             const stock = parseInt(document.getElementById('edit_stock')?.value || 0, 10) || 0;
             const safetyStock = parseInt(document.getElementById('edit_safety_stock')?.value || 0, 10) || 0;
             const openBase = parseInt(document.getElementById('edit_open_base_qty')?.value || 0, 10) || 0;
-            const openExtraEl = document.getElementById('edit_open_extra_tablet_qty');
-            const openExtraTablet = parseInt(openExtraEl?.value || 0, 10) || 0;
-            const pkgUnit = document.getElementById('edit_package_unit')?.value || 'แพ็ค';
-            const baseUnit = document.getElementById('edit_base_unit')?.value || 'หน่วยย่อย';
-            const activeId = document.activeElement ? document.activeElement.id : '';
-            const convRateEl = document.getElementById('edit_conversion_rate');
-            const packageTabletTotalEl = document.getElementById('edit_package_tablet_total');
+            const openExtraTablet = splitMode === 'multi'
+                ? (parseInt(document.getElementById('edit_open_extra_tablet_qty')?.value || 0, 10) || 0)
+                : 0;
+            const pkgUnitRaw = (document.getElementById('edit_package_unit')?.value || 'หน่วยเต็ม').trim() || 'หน่วยเต็ม';
+            const baseUnitRaw = splitMode === 'multi'
+                ? ((document.getElementById('edit_base_unit')?.value || 'หน่วยกลาง').trim() || 'หน่วยกลาง')
+                : 'เม็ด';
+            const pkgUnit = escapeHtml(pkgUnitRaw);
+            const baseUnit = escapeHtml(baseUnitRaw);
+            const hasInvalidConfig = packageTabletTotal <= 0
+                || (splitMode === 'multi' && (baseToTablet <= 0 || convRate <= 0));
 
-            let effectiveConvRate = convRate;
-            let effectiveBaseToTablet = baseToTablet;
-            if (splitMode === 'multi' && packageTabletTotal > 0 && baseToTablet > 0) {
-                if (activeId === 'edit_conversion_rate') {
-                    if (packageTabletTotalEl) packageTabletTotalEl.value = String(convRate * baseToTablet);
-                    effectiveConvRate = convRate;
-                } else {
-                    effectiveConvRate = Math.floor(packageTabletTotal / baseToTablet);
-                    if (convRateEl) convRateEl.value = String(effectiveConvRate);
-                }
-            } else if (splitMode === 'single' && packageTabletTotal > 0) {
-                effectiveConvRate = packageTabletTotal;
-                effectiveBaseToTablet = 0;
-                if (convRateEl) convRateEl.value = String(effectiveConvRate);
-            }
-
-            const multiRemainder = (splitMode === 'multi' && packageTabletTotal > 0 && baseToTablet > 0)
+            const multiRemainder = (splitMode === 'multi' && !hasInvalidConfig)
                 ? (packageTabletTotal % baseToTablet)
                 : 0;
-            // รวมเศษจากทุกแพ็ค + เศษที่เปิดแล้ว แล้วค่อยแปลงเป็นหน่วยย่อยทันที
+            // คิดยอดรวมเมื่อแปลงหน่วยเต็มทั้งหมด เพื่อให้เทียบสต็อกได้ในหน่วยเดียวกัน
             const packageRemainderTablets = (splitMode === 'multi' && multiRemainder > 0)
                 ? (stock * multiRemainder)
                 : 0;
-            let manualOpenExtraTablet = openExtraTablet;
-            if (openExtraEl) {
-                if (activeId === 'edit_open_extra_tablet_qty') {
-                    openExtraEl.dataset.manualValue = String(manualOpenExtraTablet);
-                } else {
-                    manualOpenExtraTablet = parseInt(openExtraEl.dataset.manualValue || openExtraEl.value || '0', 10) || 0;
-                }
-            }
-            const totalRemainderTablets = packageRemainderTablets + manualOpenExtraTablet;
+            const totalRemainderTablets = packageRemainderTablets + openExtraTablet;
             const extraBundlesFromRemainder = (baseToTablet > 0)
                 ? Math.floor(totalRemainderTablets / baseToTablet) : 0;
             const trueRemainderTablets = (baseToTablet > 0 && totalRemainderTablets > 0)
                 ? totalRemainderTablets % baseToTablet : 0;
-            const totalBase = stock * effectiveConvRate + openBase + extraBundlesFromRemainder;
-            const totalPackageEquivalent = effectiveConvRate > 0 ? ((stock * effectiveConvRate + openBase) / effectiveConvRate) : stock;
+            const totalBase = stock * convRate + openBase + extraBundlesFromRemainder;
             const totalTablet = splitMode === 'multi'
-                ? (packageTabletTotal > 0
-                    ? (stock * packageTabletTotal) + (openBase * effectiveBaseToTablet) + totalRemainderTablets
-                    : (effectiveBaseToTablet > 0 ? (stock * effectiveConvRate + openBase) * effectiveBaseToTablet + totalRemainderTablets : 0))
-                : (packageTabletTotal > 0 ? (stock * packageTabletTotal) + openBase + totalRemainderTablets : null);
-            const hasInvalidConfig = splitMode === 'multi' && (packageTabletTotal <= 0 || baseToTablet <= 0 || effectiveConvRate <= 0);
+                ? (stock * packageTabletTotal) + (openBase * baseToTablet) + openExtraTablet
+                : (stock * packageTabletTotal) + openBase;
+            const totalPackageEquivalent = packageTabletTotal > 0 ? totalTablet / packageTabletTotal : stock;
             const isSafetyRisk = !hasInvalidConfig && safetyStock > 0 && totalPackageEquivalent <= safetyStock;
-            const remainderInfoHtml = (splitMode === 'multi' && extraBundlesFromRemainder > 0)
-                ? `<br><span class="text-success"><i class="fas fa-recycle me-1"></i>เศษจากแพ็ค ${packageRemainderTablets} เม็ด + เศษเปิดแล้ว ${manualOpenExtraTablet} เม็ด = ${totalRemainderTablets} เม็ด → จัดเพิ่มได้ <strong>${extraBundlesFromRemainder} ${baseUnit}</strong>${trueRemainderTablets > 0 ? ` + เหลือสุดท้าย ${trueRemainderTablets} เม็ด` : ''}</span>`
-                : (splitMode === 'multi' && trueRemainderTablets > 0
-                    ? `<br><span class="text-warning">เศษจากแพ็ค ${packageRemainderTablets} เม็ด + เศษเปิดแล้ว ${manualOpenExtraTablet} เม็ด = ${totalRemainderTablets} เม็ด (ยังไม่ครบ 1 ${baseUnit})</span>`
-                    : '');
-            const remainderFieldHint = (splitMode === 'multi' && baseToTablet > 0)
-                ? `<br><span class="text-primary fw-semibold">เศษสุดท้ายที่ควรแสดงในช่อง "เศษเม็ดที่เปิดแล้ว" = ${trueRemainderTablets} เม็ด</span>`
-                : '';
 
-            if (openExtraEl && splitMode === 'multi' && baseToTablet > 0 && activeId !== 'edit_open_extra_tablet_qty') {
-                openExtraEl.value = String(trueRemainderTablets);
+            summaryBox.className = `split-summary-card${hasInvalidConfig ? ' border-danger' : (isSafetyRisk ? ' border-warning' : '')}`;
+            if (hasInvalidConfig) {
+                summaryBox.innerHTML = `
+                    <strong class="text-danger"><i class="fas fa-circle-exclamation me-1" aria-hidden="true"></i>ข้อมูลยังไม่ครบ</strong>
+                    <div class="mt-1">${splitMode === 'multi'
+                        ? 'กรอกจำนวนเม็ดใน 1 หน่วยเต็ม และจำนวนเม็ดใน 1 หน่วยกลางให้ครบ'
+                        : 'กรอกจำนวนเม็ดทั้งหมดใน 1 หน่วยเต็ม'}</div>
+                `;
+                summaryRow.classList.remove('is-hidden');
+                return;
             }
+
+            const openedText = splitMode === 'multi'
+                ? `${openBase} ${baseUnit}${openExtraTablet > 0 ? ` + ${openExtraTablet} เม็ด` : ''}`
+                : `${openBase} เม็ด`;
+            const totalUnitText = splitMode === 'multi'
+                ? `${totalBase} ${baseUnit}${trueRemainderTablets > 0 ? ` + ${trueRemainderTablets} เม็ด` : ''}`
+                : `${totalTablet} เม็ด`;
+            const structureText = splitMode === 'multi'
+                ? `1 ${pkgUnit} มี ${convRate} ${baseUnit} — ${baseUnit}ละ ${baseToTablet} เม็ด${multiRemainder > 0 ? ` และมีเศษ ${multiRemainder} เม็ด` : ''}`
+                : `1 ${pkgUnit} มี ${packageTabletTotal} เม็ด`;
+            const safetyText = safetyStock > 0
+                ? `${isSafetyRisk ? '<span class="text-danger fw-semibold">ถึงจุดสั่งซื้อแล้ว</span>' : 'จุดสั่งซื้อ'}: ${safetyStock} ${pkgUnit}`
+                : 'ยังไม่ได้กำหนดจุดสั่งซื้อ';
+
             summaryBox.innerHTML = `
-                <strong>สรุปหลังแก้ไข:</strong>
-                ในคลัง ${stock} ${pkgUnit} × ${effectiveConvRate} + เปิด ${openBase} ${baseUnit}
-                ${extraBundlesFromRemainder > 0 ? `+ เศษรวม → เพิ่ม ${extraBundlesFromRemainder} ${baseUnit}` : ''}
-                = รวมทั้งหมด <strong>${totalBase} ${baseUnit}</strong>
-                ${splitMode === 'multi' && effectiveBaseToTablet > 0 ? `<br><span class="text-muted">1 ${pkgUnit} = ${effectiveConvRate} ${baseUnit} (${effectiveBaseToTablet} เม็ด/${baseUnit})${multiRemainder > 0 ? ` + เหลือ ${multiRemainder} เม็ด/แพ็ค` : ''}</span>` : ''}
-                ${remainderInfoHtml}
-                ${remainderFieldHint}
-                <br><span class="text-muted">เทียบเท่า ${totalPackageEquivalent.toFixed(2)} ${pkgUnit}</span>
-                ${totalTablet !== null ? `<br><span class="text-primary">≈ ${typeof totalTablet === 'number' ? totalTablet : 0} เม็ด</span>` : ''}
+                <strong><i class="fas fa-check-circle me-1 text-success" aria-hidden="true"></i>คงเหลือหลังบันทึก</strong>
+                <div class="small mt-1">${structureText}</div>
+                <div class="split-summary-grid">
+                    <div class="split-summary-item"><span class="small text-muted">หน่วยเต็มที่ยังไม่เปิด</span><strong>${stock} ${pkgUnit}</strong></div>
+                    <div class="split-summary-item"><span class="small text-muted">ของที่เปิดออกมาแล้ว</span><strong>${openedText}</strong></div>
+                    <div class="split-summary-item"><span class="small text-muted">รวมเมื่อแปลงเป็นหน่วยเดียว</span><strong>${totalUnitText}</strong><small class="text-primary">รวม ${totalTablet} เม็ด</small></div>
+                </div>
+                <div class="mt-2 fw-semibold">ของจริงในคลัง: ${stock} ${pkgUnit} (ยังไม่เปิด) + ${openedText}</div>
+                <div class="small mt-1 text-muted">${safetyText}</div>
             `;
-            if (liveHintEl) {
-                const tabletText = totalTablet !== null ? ` | ≈${typeof totalTablet === 'number' ? totalTablet : 0} เม็ด` : '';
-                const remainderText = (splitMode === 'multi' && extraBundlesFromRemainder > 0)
-                    ? ` | เศษรวมจัดได้ +${extraBundlesFromRemainder} ${baseUnit}${trueRemainderTablets > 0 ? ` เหลือ ${trueRemainderTablets} เม็ด` : ''}`
-                    : (splitMode === 'multi' && trueRemainderTablets > 0 ? ` | เศษสุดท้าย ${trueRemainderTablets} เม็ด` : '');
-                const safetyText = safetyStock > 0 ? ` | Safety ${safetyStock} ${pkgUnit}` : '';
-                if (hasInvalidConfig) {
-                    liveHintEl.className = 'alert alert-danger mb-0 py-2 px-3 small';
-                    liveHintEl.textContent = 'ข้อมูลยังไม่ครบสำหรับโหมดหลายชั้น: ต้องระบุเม็ดต่อหน่วยนำเข้าและเม็ดต่อหน่วยย่อยให้ถูกต้อง';
-                } else if (isSafetyRisk) {
-                    liveHintEl.className = 'alert alert-warning mb-0 py-2 px-3 small';
-                    liveHintEl.textContent = `ใกล้จุดสั่งซื้อ: ${stock} ${pkgUnit} + ${openBase} ${baseUnit} = รวม ${totalBase} ${baseUnit} (≈ ${totalPackageEquivalent.toFixed(2)} ${pkgUnit})${safetyText}${tabletText}${remainderText}`;
-                } else {
-                    liveHintEl.className = 'alert alert-primary mb-0 py-2 px-3 small';
-                    liveHintEl.textContent = `สด: ${stock} ${pkgUnit} + ${openBase} ${baseUnit} = รวม ${totalBase} ${baseUnit} (≈ ${totalPackageEquivalent.toFixed(2)} ${pkgUnit})${safetyText}${tabletText}${remainderText}`;
-                }
-            }
             summaryRow.classList.remove('is-hidden');
         }
 
@@ -5097,17 +5304,21 @@
                 const baseUnit = (document.getElementById('add_base_unit')?.value || '').trim();
                 const baseToTablet = parseInt(document.getElementById('add_base_unit_to_tablet_rate')?.value || 0, 10) || 0;
                 const packageTotalTablet = parseInt(document.getElementById('add_package_tablet_total')?.value || 0, 10) || 0;
+                if (packageTotalTablet <= 0) {
+                    Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณากรอกจำนวนเม็ดทั้งหมดใน 1 หน่วยเต็ม' });
+                    return;
+                }
                 if (splitMode === 'multi') {
-                    if (packageTotalTablet <= 0) {
-                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณาระบุ 1 หน่วยนำเข้า มีกี่เม็ด' });
-                        return;
-                    }
                     if (!baseUnit) {
-                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณาระบุหน่วยย่อย เช่น ซอง/ห่อ' });
+                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณาระบุชื่อหน่วยกลาง เช่น ตลับ แผง หรือซอง' });
                         return;
                     }
                     if (baseToTablet <= 0) {
-                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: `กรุณาระบุ 1 ${baseUnit} มีกี่เม็ด` });
+                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: `กรุณากรอกจำนวนเม็ดใน 1 ${baseUnit}` });
+                        return;
+                    }
+                    if (packageTotalTablet < baseToTablet) {
+                        Swal.fire({ icon: 'warning', title: 'ตัวเลขไม่ถูกต้อง', text: `จำนวนเม็ดใน 1 ${baseUnit} ต้องไม่มากกว่าจำนวนเม็ดในหน่วยเต็ม` });
                         return;
                     }
                     const convRateEl = document.getElementById('add_conversion_rate');
@@ -5302,23 +5513,31 @@
                 document.getElementById('edit_category_display').value = data.category;
                 document.getElementById('edit_unit').value = data.unit;
                 document.getElementById('edit_package_unit').value = data.package_unit || data.unit || '';
-                document.getElementById('edit_base_unit').value = data.base_unit || 'เม็ด';
+                const editBaseUnitEl = document.getElementById('edit_base_unit');
+                editBaseUnitEl.value = data.base_unit || 'เม็ด';
+                editBaseUnitEl.dataset.multiValue = data.split_mode === 'multi' ? (data.base_unit || '') : '';
                 document.getElementById('edit_conversion_rate').value = data.conversion_rate || 1;
                 document.getElementById('edit_base_unit_to_tablet_rate').value = data.base_unit_to_tablet_rate || 0;
                 document.getElementById('edit_split_mode').value = data.split_mode || 'single';
                 document.getElementById('edit_package_tablet_total').value = data.package_tablet_total || 0;
                 document.getElementById('edit_open_base_qty').value = (data.split_summary?.open_base_qty || 0);
-                document.getElementById('edit_open_extra_tablet_qty').value = (data.split_summary?.open_extra_tablet_qty || 0);
-                const hasSplitData = (parseInt(data.conversion_rate || 1, 10) > 1)
-                    && !!(data.package_unit && data.base_unit);
-                toggleEditSplitFields(data.category, hasSplitData);
-                updateSplitModeVisual('edit');
-                renderEditSplitSummary(data);
-                updateStockUnitHints('edit');
+                document.getElementById('edit_open_extra_tablet_qty').value = (
+                    data.split_summary?.open_extra_tablet_qty_raw
+                    ?? data.split_summary?.open_extra_tablet_qty
+                    ?? 0
+                );
+                document.getElementById('edit_open_base_qty').dataset.initialValue = document.getElementById('edit_open_base_qty').value;
+                document.getElementById('edit_open_extra_tablet_qty').dataset.initialValue = document.getElementById('edit_open_extra_tablet_qty').value;
                 document.getElementById('edit_location').value = data.location;
                 document.getElementById('edit_location_display').value = data.location;
                 document.getElementById('edit_safety_stock').value = data.safety_stock;
                 document.getElementById('edit_stock').value = data.stock;
+                const hasSplitData = (parseInt(data.conversion_rate || 1, 10) > 1)
+                    && !!(data.package_unit && data.base_unit);
+                toggleEditSplitFields(data.category, hasSplitData);
+                updateSplitModeVisual('edit');
+                updateStockUnitHints('edit');
+                renderEditSplitSummaryFromForm();
                 if (document.getElementById('edit_date_picker_expiry')._flatpickr) {
                     document.getElementById('edit_date_picker_expiry')._flatpickr.setDate(data.expiry_date || '');
                 }
@@ -5611,17 +5830,21 @@
                 const baseUnitText = (document.getElementById('edit_base_unit')?.value || '').trim();
                 const baseToTabletVal = parseInt(document.getElementById('edit_base_unit_to_tablet_rate')?.value || 0, 10) || 0;
                 const packageTotalTablet = parseInt(document.getElementById('edit_package_tablet_total')?.value || 0, 10) || 0;
+                if (category === 'ยา' && packageTotalTablet <= 0) {
+                    Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณากรอกจำนวนเม็ดทั้งหมดใน 1 หน่วยเต็ม' });
+                    return;
+                }
                 if (category === 'ยา' && splitMode === 'multi') {
-                    if (packageTotalTablet <= 0) {
-                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณาระบุ 1 หน่วยนำเข้า มีกี่เม็ด' });
-                        return;
-                    }
                     if (!baseUnitText) {
-                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณาระบุหน่วยย่อย เช่น ซอง/ห่อ' });
+                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณาระบุชื่อหน่วยกลาง เช่น ตลับ แผง หรือซอง' });
                         return;
                     }
                     if (baseToTabletVal <= 0) {
-                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: `กรุณาระบุ 1 ${baseUnitText} มีกี่เม็ด` });
+                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: `กรุณากรอกจำนวนเม็ดใน 1 ${baseUnitText}` });
+                        return;
+                    }
+                    if (packageTotalTablet < baseToTabletVal) {
+                        Swal.fire({ icon: 'warning', title: 'ตัวเลขไม่ถูกต้อง', text: `จำนวนเม็ดใน 1 ${baseUnitText} ต้องไม่มากกว่าจำนวนเม็ดในหน่วยเต็ม` });
                         return;
                     }
                     const convRateEl = document.getElementById('edit_conversion_rate');
@@ -5633,6 +5856,13 @@
             }
             const formData = new FormData(form);
             formData.set('split_enabled', splitEnabled ? '1' : '0');
+            const openBaseEl = document.getElementById('edit_open_base_qty');
+            const openExtraEl = document.getElementById('edit_open_extra_tablet_qty');
+            const openStockChanged = splitEnabled && (
+                (openBaseEl?.value || '0') !== (openBaseEl?.dataset.initialValue || '0')
+                || (openExtraEl?.value || '0') !== (openExtraEl?.dataset.initialValue || '0')
+            );
+            formData.set('open_stock_changed', openStockChanged ? '1' : '0');
             formData.append('csrf_token', adminCsrfToken);
             fetch('/admin/edit_product', { method: 'POST', body: formData, headers: { 'X-CSRF-Token': adminCsrfToken } })
                 .then(checkAuth).then(res => res.json()).then(data => {

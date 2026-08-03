@@ -1,0 +1,35 @@
+<style>
+    .qr-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        /* เรียง 4 รูปต่อแถว */
+        gap: 20px;
+    }
+
+    .qr-item {
+        text-align: center;
+        border: 1px solid #ccc;
+        padding: 10px;
+    }
+
+    @media print {
+        .no-print {
+            display: none;
+        }
+
+        /* ซ่อนปุ่มตอนสั่งพิมพ์ */
+    }
+</style>
+
+<div class="no-print">
+    <button onclick="window.print()">สั่งพิมพ์หน้านี้</button>
+</div>
+
+<div class="qr-grid">
+    {% for item in items %}
+    <div class="qr-item">
+        <img src="{{ url_for('generate_qr', code=item['code']) }}" width="150">
+        <p><strong>{{ item['code'] }}</strong><br>{{ item['name'] }}</p>
+    </div>
+    {% endfor %}
+</div>

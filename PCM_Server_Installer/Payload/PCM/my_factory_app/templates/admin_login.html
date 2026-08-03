@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin Login</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}">
+    <style>
+        body {
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 10% 10%, #d9ecff 0%, rgba(217, 236, 255, 0) 36%),
+                radial-gradient(circle at 85% 90%, #ffe6c7 0%, rgba(255, 230, 199, 0) 38%),
+                linear-gradient(140deg, #eef5ff 0%, #f5f9ff 50%, #f8fcf7 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+
+        .login-container {
+            width: min(460px, 100%);
+            background: transparent !important;
+        }
+
+        .login-card {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 20px;
+            border: 1px solid rgba(9, 74, 142, 0.12);
+            box-shadow: 0 20px 40px rgba(9, 43, 80, 0.14);
+            padding: 28px;
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
+        }
+
+        .login-card .form-control {
+            border-radius: 12px;
+            border: 1px solid #dbe8fb;
+        }
+
+        .login-card .btn-danger {
+            border-radius: 12px;
+            background: linear-gradient(135deg, #d93434, #bb1f1f);
+            border: 0;
+            box-shadow: 0 10px 20px rgba(185, 31, 31, 0.22);
+        }
+
+        .global-loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .global-loading-overlay.is-active {
+            display: flex;
+        }
+
+        .global-loading-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 14px 16px;
+            min-width: 260px;
+            box-shadow: 0 16px 36px rgba(16, 24, 40, 0.2);
+        }
+    </style>
+</head>
+<body>
+<div id="globalLoadingOverlay" class="global-loading-overlay" aria-hidden="true">
+    <div class="global-loading-card">
+        <div id="globalLoadingText" class="fw-medium">กำลังเข้าสู่ระบบ...</div>
+        <div class="small text-muted mt-1">กรุณารอสักครู่และอย่ากดซ้ำ</div>
+    </div>
+</div>
+<div class="login-container bg-dark">
+    <div class="login-card text-center">
+        <h3 class="fw-medium mb-4">🔒 Admin Access</h3>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <form method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3 text-start">
+                <label class="form-label">Username</label>
+                <input type="text" name="username" class="form-control" required>
+            </div>
+            <div class="mb-3 text-start">
+                <label class="form-label">Password</label>
+                <input type="password" name="password" class="form-control" required>
+            </div>
+            <button type="submit" class="btn btn-danger w-100 py-2">Login</button>
+        </form>
+        <div class="mt-3">
+            <a href="/" class="text-muted small">กลับหน้าหลัก</a>
+        </div>
+    </div>
+</div>
+<script>
+    function showGlobalLoading(text) {
+        const overlay = document.getElementById('globalLoadingOverlay');
+        const label = document.getElementById('globalLoadingText');
+        if (label) label.textContent = text || 'กำลังประมวลผล...';
+        if (overlay) {
+            overlay.classList.add('is-active');
+            overlay.setAttribute('aria-hidden', 'false');
+        }
+    }
+
+    document.addEventListener('submit', function(event) {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        if (form.dataset.submitting === '1') {
+            event.preventDefault();
+            return;
+        }
+        form.dataset.submitting = '1';
+        const submitBtn = form.querySelector('button[type="submit"]');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'กำลังเข้าสู่ระบบ...';
+        }
+        showGlobalLoading('กำลังตรวจสอบสิทธิ์แอดมิน...');
+    });
+</script>
+</body>
+</html>

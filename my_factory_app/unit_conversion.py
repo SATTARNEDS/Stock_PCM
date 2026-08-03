@@ -77,7 +77,17 @@ class UnitConversionManager:
         conversion_rate = float(product.get('conversion_rate') or 1)
         package_tablet_total = int(product.get('package_tablet_total') or 0)
         base_unit_to_tablet_rate = int(product.get('base_unit_to_tablet_rate') or 0)
-        stock_package_unit = product.get('stock') or 0
+        raw_stock_package_unit = int(product.get('stock') or 0)
+        cursor.execute('''
+            SELECT COUNT(*) AS lot_count,
+                   COALESCE(SUM(CASE WHEN COALESCE(qty, 0) > 0 THEN qty ELSE 0 END), 0) AS lot_total
+            FROM product_lots
+            WHERE product_id = ?
+        ''', (product_id,))
+        lot_state = cursor.fetchone()
+        lot_count = int(lot_state[0] or 0) if lot_state else 0
+        lot_total = int(lot_state[1] or 0) if lot_state else 0
+        stock_package_unit = lot_total if lot_count > 0 else raw_stock_package_unit
         # ใช้ยอดจองจาก carts เป็นหลัก เพื่อกันกรณี reserved_stock ใน products คลาดเคลื่อน
         cursor.execute('SELECT COALESCE(SUM(qty), 0) FROM carts WHERE product_id = ?', (product_id,))
         reserved_row = cursor.fetchone()
@@ -415,21 +425,51 @@ class UnitConversionManager:
         calc = self.calculate_withdrawal(product_id, qty_base_unit, use_open_box)
         
         if not calc['can_fulfill']:
+            calc.setdefault('success', False)
             return calc
         
         try:
             # Get product info
             info = self.get_product_unit_info(product_id)
-            
-            # 1. Reduce stock (full packages) แบบมีเงื่อนไขกันยอดติดลบ
-            stock_update = self.cursor.execute('''
-                UPDATE products 
-                SET stock = stock - ?
-                WHERE id = ? AND stock >= ?
-            ''', (calc['full_packages_needed'], product_id, calc['full_packages_needed']))
 
-            if stock_update.rowcount == 0:
-                raise ValueError('สต็อกแพ็กไม่พอสำหรับการตัดจ่าย')
+            # เมื่อต้องเปิดแพ็กใหม่ ต้องตัด Lot หน่วยแพ็กพร้อมกันตาม FIFO
+            lot_allocations = self._consume_package_lots_fifo(
+                product_id,
+                calc['full_packages_needed'],
+                preferred_lot_id=lot_id,
+            )
+            consumed_lot_id = lot_allocations[0]['lot_id'] if lot_allocations else lot_id
+            lot_detail = ', '.join(
+                f"{allocation['lot_number']} x {allocation['qty']}"
+                for allocation in lot_allocations
+            )
+            if lot_detail:
+                calc['transaction_note'] = (
+                    f"{calc['transaction_note']} | FIFO Lot: {lot_detail}"
+                    if calc['transaction_note'] else f"FIFO Lot: {lot_detail}"
+                )
+            
+            # 1. ให้ยอดแพ็กคงเหลือตรงกับ Lot หลังตัด FIFO; open_packages ยังคงแยกต่างหาก
+            lot_state_after = self.cursor.execute('''
+                SELECT COUNT(*) AS lot_count,
+                       COALESCE(SUM(CASE WHEN COALESCE(qty, 0) > 0 THEN qty ELSE 0 END), 0) AS lot_total
+                FROM product_lots
+                WHERE product_id = ?
+            ''', (product_id,)).fetchone()
+            lot_count_after = int(lot_state_after[0] or 0) if lot_state_after else 0
+            if lot_count_after > 0:
+                self.cursor.execute(
+                    'UPDATE products SET stock = ? WHERE id = ?',
+                    (int(lot_state_after[1] or 0), product_id),
+                )
+            else:
+                stock_update = self.cursor.execute('''
+                    UPDATE products
+                    SET stock = stock - ?
+                    WHERE id = ? AND stock >= ?
+                ''', (calc['full_packages_needed'], product_id, calc['full_packages_needed']))
+                if stock_update.rowcount == 0:
+                    raise ValueError('สต็อกแพ็กไม่พอสำหรับการตัดจ่าย')
             
             # 2. If taking from open_box, reduce it
             if calc['from_open_box'] > 0:
@@ -447,7 +487,7 @@ class UnitConversionManager:
                     INSERT INTO open_packages 
                     (product_id, lot_id, opened_date, base_unit_qty, extra_tablet_qty, package_unit_qty_before, status)
                     VALUES (?, ?, datetime('now'), ?, ?, 1, 'active')
-                ''', (product_id, lot_id, calc['new_open_box_qty'], new_open_extra_tablets))
+                ''', (product_id, consumed_lot_id, calc['new_open_box_qty'], new_open_extra_tablets))
             
             # route อนุมัติจะ update pending log เดิม จึงปิดการสร้าง log ซ้ำได้ด้วย create_log=False
             if create_log:
@@ -458,7 +498,7 @@ class UnitConversionManager:
                 ''', (
                     emp_id,
                     product_id,
-                    lot_id,
+                    consumed_lot_id,
                     calc['full_packages_needed'],
                     qty_base_unit,
                     calc['total_packages_used'],
@@ -474,7 +514,10 @@ class UnitConversionManager:
                 'transaction_note': calc['transaction_note'],
                 'full_packages_needed': calc['full_packages_needed'],
                 'total_packages_used': calc['total_packages_used'],
-                'stock_remaining': info['stock_package_unit'] - calc['full_packages_needed']
+                'stock_remaining': info['stock_package_unit'] - calc['full_packages_needed'],
+                'lot_id': consumed_lot_id,
+                'lot_allocations': lot_allocations,
+                'lot_detail': lot_detail,
             }
             
         except Exception as e:
@@ -483,6 +526,54 @@ class UnitConversionManager:
                 'success': False,
                 'message': f"❌ บันทึกล้มเหลว: {str(e)}"
             }
+
+    def _consume_package_lots_fifo(self, product_id, packages_to_consume, preferred_lot_id=None):
+        """ลด Lot หน่วยแพ็กตาม FIFO และคืนรายละเอียด Lot ที่ใช้"""
+        remaining = max(0, int(packages_to_consume or 0))
+        if remaining <= 0:
+            return []
+
+        lots = self.cursor.execute('''
+            SELECT id, lot_number, qty, received_date
+            FROM product_lots
+            WHERE product_id = ? AND qty > 0
+            ORDER BY
+                CASE
+                    WHEN received_date IS NULL OR trim(received_date) = '' THEN '9999-12-31'
+                    WHEN received_date LIKE '%/%/%' THEN substr(received_date, 7, 4) || '-' || substr(received_date, 4, 2) || '-' || substr(received_date, 1, 2)
+                    ELSE received_date
+                END ASC,
+                id ASC
+        ''', (product_id,)).fetchall()
+
+        if preferred_lot_id:
+            lots = sorted(lots, key=lambda row: 0 if int(row['id']) == int(preferred_lot_id) else 1)
+
+        total_available = sum(int(row['qty'] or 0) for row in lots)
+        if total_available < remaining:
+            raise ValueError(
+                f"จำนวนใน Lot ไม่พอสำหรับเปิดแพ็กใหม่ (Lot {total_available}, ต้องใช้ {remaining})"
+            )
+
+        allocations = []
+        for lot in lots:
+            if remaining <= 0:
+                break
+            take = min(int(lot['qty'] or 0), remaining)
+            if take <= 0:
+                continue
+            self.cursor.execute(
+                'UPDATE product_lots SET qty = qty - ? WHERE id = ?',
+                (take, lot['id']),
+            )
+            allocations.append({
+                'lot_id': int(lot['id']),
+                'lot_number': str(lot['lot_number'] or '-'),
+                'qty': int(take),
+            })
+            remaining -= take
+
+        return allocations
 
     def _consume_open_extra_tablets(self, product_id, tablets_to_consume):
         """Consume extra tablets from active open packages by FIFO order."""

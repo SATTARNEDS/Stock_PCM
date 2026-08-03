@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PCM System - Login</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}">
+    <script src="{{ url_for('static', filename='vendor/sweetalert2/sweetalert2.all.min.js') }}"></script>
+
+    <style>
+        :root {
+            --primary: #0d6efd;
+            --admin-dark: #1e293b;
+            --white: #ffffff;
+            --transition: all 0.6s cubic-bezier(0.7, 0, 0.2, 1);
+        }
+
+        /* ใช้ปุ่มแสดงรหัสผ่านของระบบเพียงปุ่มเดียว */
+        #adminPasswordInput::-ms-reveal,
+        #adminPasswordInput::-ms-clear {
+            display: none;
+        }
+
+        #adminPasswordInput {
+            appearance: none;
+            -webkit-appearance: none;
+        }
+
+        body {
+            background:
+                radial-gradient(circle at 12% 10%, #d7ecff 0%, rgba(215, 236, 255, 0) 34%),
+                radial-gradient(circle at 88% 88%, #ffe9cc 0%, rgba(255, 233, 204, 0) 40%),
+                linear-gradient(145deg, #edf4ff 0%, #f4f7ff 52%, #f7fbf4 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Mitr', sans-serif;
+            margin: 0;
+            padding: 15px;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        body::before,
+        body::after {
+            content: "";
+            position: fixed;
+            width: 360px;
+            height: 360px;
+            border-radius: 50%;
+            filter: blur(50px);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        body::before {
+            background: rgba(13, 110, 253, 0.18);
+            top: -120px;
+            right: -90px;
+        }
+
+        body::after {
+            background: rgba(12, 170, 132, 0.14);
+            bottom: -130px;
+            left: -110px;
+        }
+
+        /* Container หลัก - แก้ไขความสูงและความกว้างให้สมดุล */
+        .auth-container {
+            position: relative;
+            background: rgba(255, 255, 255, 0.88);
+            width: 900px;
+            max-width: 100%;
+            min-height: 580px;
+            border-radius: 32px;
+            box-shadow: 0 30px 70px rgba(15, 43, 79, 0.18);
+            overflow: hidden;
+            display: flex;
+            border: 1px solid rgba(255, 255, 255, 0.7);
+            -webkit-backdrop-filter: blur(8px);
+            backdrop-filter: blur(8px);
+            z-index: 1;
+            animation: cardFloatIn 0.7s ease forwards;
+        }
+
+        /* ฝั่งฟอร์ม (สีขาว) */
+        .form-box {
+            width: 50%;
+            padding: 40px;
+            transition: var(--transition);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1;
+        }
+
+        .form-content {
+            width: 100%;
+            max-width: 340px;
+            /* คุมความกว้างฟอร์ม */
+            animation: fadeIn 0.5s ease forwards;
+        }
+
+        /* แผงด้านข้าง (สีน้ำเงิน/มืด) */
+        .side-panel {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            width: 50%;
+            height: 100%;
+            background: linear-gradient(145deg, #0d6efd 0%, #0a4ca0 60%, #072d66 100%);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 40px;
+            transition: var(--transition);
+            z-index: 2;
+            overflow: hidden;
+        }
+
+        .side-panel::before,
+        .side-panel::after {
+            content: "";
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.16);
+        }
+
+        .side-panel::before {
+            width: 220px;
+            height: 220px;
+            right: -90px;
+            top: -80px;
+        }
+
+        .side-panel::after {
+            width: 170px;
+            height: 170px;
+            left: -70px;
+            bottom: -75px;
+        }
+
+        /* สลับฝั่งเมื่อเป็น Admin */
+        @media (min-width: 768px) {
+            .auth-container.is-admin .form-box {
+                transform: translateX(100%);
+            }
+
+            .auth-container.is-admin .side-panel {
+                transform: translateX(-100%);
+                background: var(--admin-dark);
+            }
+        }
+
+        /* Mobile Responsive - แก้ไขให้ซ้อนกันแนวตั้ง */
+        @media (max-width: 767px) {
+            .auth-container {
+                flex-direction: column;
+                width: 100%;
+                max-width: 420px;
+                min-height: 0;
+            }
+
+            .form-box {
+                width: 100%;
+                padding: 40px 25px;
+                order: 2;
+            }
+
+            .side-panel {
+                position: relative;
+                left: 0;
+                width: 100%;
+                height: auto;
+                padding: 40px 20px;
+                order: 1;
+            }
+
+            .auth-container.is-admin .side-panel {
+                background: var(--admin-dark);
+            }
+
+            .auth-container.is-admin .form-box {
+                transform: none;
+            }
+        }
+
+        /* Input Styling - แก้ไขบั๊กขอบและ Padding */
+        .input-group-modern {
+            background: #f8fafc;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 16px;
+            margin-bottom: 15px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            width: 100%;
+            transition: 0.3s;
+        }
+
+        .input-group-modern:focus-within {
+            border-color: var(--primary);
+            background: white;
+        }
+
+        .input-group-modern .input-group-text {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            padding-left: 18px;
+        }
+
+        .input-group-modern .form-control {
+            border: none !important;
+            background: transparent !important;
+            padding: 14px 12px;
+            box-shadow: none !important;
+        }
+
+        /* Button Styling */
+        .btn-main {
+            background: var(--primary);
+            color: white;
+            border-radius: 16px;
+            padding: 14px;
+            font-weight: 600;
+            border: none;
+            width: 100%;
+            transition: 0.3s;
+            margin-top: 10px;
+        }
+
+        .btn-main:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(13, 110, 253, 0.2);
+        }
+
+        .is-admin .btn-main {
+            background: var(--admin-dark);
+        }
+
+        .btn-outline-white {
+            background: transparent;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            color: white;
+            border-radius: 16px;
+            padding: 10px 30px;
+            margin-top: 15px;
+            transition: 0.3s;
+        }
+
+        .btn-outline-white:hover {
+            background: white;
+            color: var(--primary);
+            border-color: white;
+        }
+
+        .is-hidden {
+            display: none;
+        }
+
+        .panel-icon {
+            font-size: 3.5rem;
+            margin-bottom: 1rem;
+        }
+
+        /* Alert Styling - แก้ไขบั๊กแถบแดงยาวเกินไป */
+        .alert-mini {
+            padding: 12px 16px;
+            font-size: 0.85rem;
+            border-radius: 14px;
+            margin-bottom: 20px;
+            border: none;
+            display: flex;
+            align-items: center;
+            background-color: #fee2e2;
+            color: #b91c1c;
+            width: 100%;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes cardFloatIn {
+            from {
+                opacity: 0;
+                transform: translateY(18px) scale(0.98);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .global-loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .global-loading-overlay.is-active {
+            display: flex;
+        }
+
+        .global-loading-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 14px 16px;
+            min-width: 260px;
+            box-shadow: 0 16px 36px rgba(16, 24, 40, 0.2);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="globalLoadingOverlay" class="global-loading-overlay" aria-hidden="true">
+        <div class="global-loading-card">
+            <div id="globalLoadingText" class="fw-medium">กำลังเข้าสู่ระบบ...</div>
+            <div class="small text-muted mt-1">กรุณารอสักครู่และอย่ากดซ้ำ</div>
+        </div>
+    </div>
+
+    <div class="auth-container" id="authContainer">
+
+        <div class="form-box">
+
+            <div class="form-content" id="userForm">
+                <h2 class="text-center fw-medium mb-1">ยินดีต้อนรับ</h2>
+                <p class="text-muted text-center mb-4 small">ระบุรหัสพนักงานเพื่อเข้าสู่ทุกระบบ</p>
+
+                {% with messages = get_flashed_messages(category_filter=['user_error']) %}
+                {% if messages %}
+                {% for message in messages %}
+                <div class="alert-mini shadow-sm mb-3">
+                    <i class="fas fa-exclamation-circle me-2"></i> {{ message }}
+                </div>
+                {% endfor %}
+                {% endif %}
+                {% endwith %}
+
+                <form action="/" method="POST" id="loginFormUser">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="input-group-modern">
+                        <span class="input-group-text"><i class="fas fa-id-card"></i></span>
+                        <input type="text" name="emp_id" class="form-control" placeholder="Employee ID" autofocus
+                            autocomplete="off">
+                    </div>
+                    <button type="submit" class="btn-main">เข้าสู่ระบบ</button>
+                </form>
+            </div>
+
+            <div class="form-content is-hidden" id="adminForm">
+                <h2 class="text-center fw-medium mb-1">Admin Access</h2>
+                <p class="text-muted text-center mb-4 small">ลงชื่อเข้าใช้สิทธิ์ผู้ดูแลระบบ</p>
+
+                {% with messages = get_flashed_messages(category_filter=['admin_error']) %}
+                {% if messages %}
+                {% for message in messages %}
+                <div class="alert-mini shadow-sm mb-3">
+                    <i class="fas fa-shield-alt me-2"></i> {{ message }}
+                </div>
+                {% endfor %}
+                {% endif %}
+                {% endwith %}
+
+                <form action="/admin_login" method="POST" id="loginFormAdmin">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="input-group-modern">
+                        <span class="input-group-text"><i class="fas fa-user"></i></span>
+                        <input type="text" name="username" class="form-control" placeholder="Username"
+                            autocomplete="off">
+                    </div>
+                    <div class="input-group-modern">
+                        <span class="input-group-text"><i class="fas fa-key"></i></span>
+                        <input type="password" name="password" id="adminPasswordInput" class="form-control" placeholder="Password" autocomplete="current-password">
+                        <button type="button" class="btn border-0 text-muted px-3" onclick="toggleAdminPassword()" aria-label="แสดงหรือซ่อนรหัสผ่าน"><i class="fas fa-eye" id="adminPasswordIcon"></i></button>
+                    </div>
+                    <button type="submit" class="btn-main">ลงชื่อเข้าใช้ระบบ</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="side-panel">
+            <div id="sideContentUser">
+                <div class="panel-icon"><i class="fas fa-th-large"></i></div>
+                <h3 class="fw-medium">PCM SYSTEM</h3>
+                <p class="small opacity-75 px-3 mb-3">ศูนย์รวมทุกระบบภายในโรงงาน</p>
+                <div class="d-flex flex-column gap-2 mb-4" style="font-size:0.82rem;">
+                    <span><i class="fas fa-screwdriver-wrench me-2 opacity-75"></i>GA Request แจ้งซ่อม / แจ้งปัญหา / SAFETY</span>
+                    <span><i class="fas fa-boxes-stacked me-2 opacity-75"></i>Stock เบิกจ่ายพัสดุอุปกรณ์</span>
+                    <span><i class="fas fa-industry me-2 opacity-75"></i>ระบบเบิกของแผนก MU</span>
+                </div>
+                <button class="btn-outline-white" onclick="toggleMode(true)">แอดมินระบบ?</button>
+            </div>
+
+            <div id="sideContentAdmin" class="is-hidden">
+                <div class="panel-icon"><i class="fas fa-user-shield"></i></div>
+                <h3 class="fw-medium">ADMIN MODE</h3>
+                <p class="small opacity-75 px-3">เข้าถึงสิทธิ์การจัดการหลังบ้าน<br>และดูรายงานสรุปทั้งหมด</p>
+                <button class="btn-outline-white" onclick="toggleMode(false)">ไปหน้าพนักงาน</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        function toggleAdminPassword() {
+            const input = document.getElementById('adminPasswordInput');
+            const icon = document.getElementById('adminPasswordIcon');
+            const show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            icon.className = show ? 'fas fa-eye-slash' : 'fas fa-eye';
+        }
+
+        function showGlobalLoading(text) {
+            const overlay = document.getElementById('globalLoadingOverlay');
+            const label = document.getElementById('globalLoadingText');
+            if (label) label.textContent = text || 'กำลังประมวลผล...';
+            if (overlay) {
+                overlay.classList.add('is-active');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+        }
+
+        function toggleMode(isAdmin) {
+            const container = document.getElementById('authContainer');
+            const sideUser = document.getElementById('sideContentUser');
+            const sideAdmin = document.getElementById('sideContentAdmin');
+            const userForm = document.getElementById('userForm');
+            const adminForm = document.getElementById('adminForm');
+
+            if (isAdmin) {
+                container.classList.add('is-admin');
+                setTimeout(() => {
+                    sideUser.style.display = 'none'; sideAdmin.style.display = 'block';
+                    userForm.style.display = 'none'; adminForm.style.display = 'block';
+                }, 300);
+            } else {
+                container.classList.remove('is-admin');
+                setTimeout(() => {
+                    sideUser.style.display = 'block'; sideAdmin.style.display = 'none';
+                    userForm.style.display = 'block'; adminForm.style.display = 'none';
+                }, 300);
+            }
+        }
+
+        // เช็ค Error จากฝั่ง Admin เพื่อพลิกหน้าอัตโนมัติ
+        window.onload = () => {
+            const hasAdminError = {{ 'true' if get_flashed_messages(category_filter = ['admin_error']) else 'false'
+        }};
+        if (hasAdminError || window.location.search.includes('admin')) {
+            toggleMode(true);
+        }
+        }
+
+        document.addEventListener('submit', function(event) {
+            const form = event.target;
+            if (!(form instanceof HTMLFormElement)) return;
+            if (form.dataset.submitting === '1') {
+                event.preventDefault();
+                return;
+            }
+            form.dataset.submitting = '1';
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'กำลังเข้าสู่ระบบ...';
+            }
+            showGlobalLoading(form.id === 'loginFormAdmin' ? 'กำลังตรวจสอบสิทธิ์แอดมิน...' : 'กำลังเข้าสู่ระบบ...');
+        });
+    </script>
+</body>
+
+</html>

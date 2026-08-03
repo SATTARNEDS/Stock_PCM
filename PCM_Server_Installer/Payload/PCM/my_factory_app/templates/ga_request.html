@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GA Request</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}">
+    <style>
+        :root {
+            --ink: #1b2a3a;
+            --brand: #0d6efd;
+            --warm: #ffb74d;
+            --soft-bg: rgba(255, 255, 255, 0.88);
+        }
+
+        body {
+            font-family: "Mitr", sans-serif;
+            color: var(--ink);
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 10% 15%, rgba(13, 110, 253, 0.12), transparent 34%),
+                radial-gradient(circle at 92% 8%, rgba(255, 183, 77, 0.18), transparent 30%),
+                linear-gradient(145deg, #eef5ff 0%, #f8fbff 52%, #f5faf7 100%);
+        }
+
+        .glass-panel {
+            background: var(--soft-bg);
+            border: 1px solid rgba(12, 67, 135, 0.12);
+            box-shadow: 0 18px 40px rgba(12, 48, 90, 0.08);
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
+        }
+
+        .hero-card {
+            overflow: hidden;
+            position: relative;
+        }
+
+        .hero-card::after {
+            content: "";
+            position: absolute;
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            top: -70px;
+            right: -45px;
+            background: rgba(255, 183, 77, 0.22);
+        }
+
+        .status-badge {
+            min-width: 110px;
+        }
+
+        .preview-image {
+            max-height: 220px;
+            object-fit: cover;
+            border-radius: 16px;
+            border: 1px solid rgba(12, 67, 135, 0.12);
+        }
+
+        .ga-image-viewer-stage {
+            background: #f2f5fb;
+            border: 1px dashed rgba(27, 42, 58, 0.2);
+            border-radius: 14px;
+            min-height: 320px;
+            max-height: 70vh;
+            overflow: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: default;
+        }
+
+        .ga-image-viewer-stage.is-dragging {
+            cursor: grabbing !important;
+        }
+
+        .ga-image-viewer-stage img {
+            max-width: 100%;
+            max-height: none;
+            transform-origin: center center;
+            transition: transform 0.15s ease;
+            -webkit-user-select: none;
+            user-select: none;
+            pointer-events: none;
+        }
+
+        .global-loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .global-loading-overlay.is-active {
+            display: flex;
+        }
+
+        .global-loading-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 14px 16px;
+            min-width: 280px;
+            box-shadow: 0 16px 36px rgba(16, 24, 40, 0.2);
+        }
+
+        .global-loading-bar {
+            height: 6px;
+            border-radius: 999px;
+            background: #e6eefc;
+            overflow: hidden;
+        }
+
+        .global-loading-bar::after {
+            content: "";
+            display: block;
+            width: 36%;
+            height: 100%;
+            background: linear-gradient(90deg, #4f8ff7, #1d67e9);
+            animation: loadingSlide 1.1s infinite ease-in-out;
+        }
+
+        @keyframes loadingSlide {
+            0% { transform: translateX(-120%); }
+            100% { transform: translateX(320%); }
+        }
+        .ga-chat-box { height:320px; overflow-y:auto; scroll-behavior:smooth; }
+        .ga-chat-row { display:flex; margin-bottom:10px; }
+        .ga-chat-row.self { justify-content:flex-end; }
+        .ga-chat-row.other { justify-content:flex-start; }
+        .ga-chat-bubble {
+            position: relative;
+            max-width: 82%;
+            border-radius:16px;
+            padding:10px 14px;
+            word-break:break-word;
+            box-shadow: 0 2px 8px rgba(0,0,0,.08);
+        }
+        .ga-chat-bubble.user-self {
+            background: linear-gradient(135deg, #0d6efd, #1d7df0);
+            color:#fff;
+            border-radius:16px 16px 4px 16px;
+        }
+        .ga-chat-bubble.admin-reply {
+            background:#f0f2f5;
+            color:#243040;
+            border-radius:16px 16px 16px 4px;
+        }
+        .ga-chat-bubble.user-self::after,
+        .ga-chat-bubble.admin-reply::after {
+            content: "";
+            position: absolute;
+            bottom: 0;
+            width: 0;
+            height: 0;
+            border: 8px solid transparent;
+        }
+        .ga-chat-bubble.user-self::after {
+            right: -6px;
+            border-left-color: #1d7df0;
+            border-right: 0;
+            border-bottom: 0;
+        }
+        .ga-chat-bubble.admin-reply::after {
+            left: -6px;
+            border-right-color: #f0f2f5;
+            border-left: 0;
+            border-bottom: 0;
+        }
+        .ga-chat-sender { font-size:12px; font-weight:600; margin-bottom:4px; opacity:.85; }
+        .ga-chat-message { white-space:pre-wrap; line-height:1.45; }
+        .ga-chat-time { font-size:11px; margin-top:4px; text-align:right; opacity:.7; }
+        .chat-notify-container {
+            position: fixed;
+            right: 14px;
+            bottom: 16px;
+            z-index: 1200;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-width: min(92vw, 360px);
+        }
+        .chat-notify-toast {
+            background: #0b1b34;
+            color: #fff;
+            border-radius: 12px;
+            padding: 10px 12px;
+            box-shadow: 0 10px 24px rgba(0,0,0,.22);
+            border-left: 4px solid #2a83ff;
+            animation: chatToastIn .2s ease-out;
+        }
+        .chat-notify-toast .title { font-size: 12px; opacity: .86; }
+        .chat-notify-toast .body { font-size: 13px; font-weight: 600; margin-top: 2px; }
+        .floating-chat-btn {
+            position: fixed;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 1300;
+            border: none;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #0d6efd, #1d7df0);
+            color: #fff;
+            box-shadow: 0 12px 24px rgba(13, 110, 253, 0.28);
+            min-width: 54px;
+            height: 54px;
+            padding: 0 14px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-weight: 600;
+        }
+        .floating-chat-btn .count {
+            font-size: 12px;
+            font-weight: 700;
+            background: #fff;
+            color: #0d6efd;
+            border-radius: 999px;
+            padding: 2px 8px;
+            display: inline-block;
+        }
+        .floating-chat-btn.has-unread { display: inline-flex; }
+        .floating-chat-btn.has-unread {
+            background: linear-gradient(135deg, #d90429, #ff4d6d);
+            box-shadow: 0 14px 28px rgba(217, 4, 41, 0.35);
+            animation: unreadBlinkRed 0.95s infinite ease-in-out;
+        }
+        .chat-unread-badge {
+            margin-left: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            border-radius: 999px;
+            background: #dc3545;
+            color: #fff;
+            padding: 1px 7px;
+            display: none;
+        }
+        .chat-unread-badge.show {
+            display: inline-block;
+            animation: unreadBlinkRed 0.95s infinite ease-in-out;
+        }
+        @keyframes unreadBlinkRed {
+            0% { filter: brightness(1); }
+            50% { filter: brightness(1.34); }
+            100% { filter: brightness(1); }
+        }
+        @keyframes chatToastIn {
+            from { transform: translateY(10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="globalLoadingOverlay" class="global-loading-overlay" aria-hidden="true">
+        <div class="global-loading-card">
+            <div id="globalLoadingText" class="fw-medium mb-2">กำลังประมวลผลคำขอ...</div>
+            <div class="global-loading-bar"></div>
+            <div class="small text-muted mt-2">กรุณารอสักครู่และอย่ากดส่งซ้ำ</div>
+        </div>
+    </div>
+
+    <div class="container py-4 py-lg-5">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+            <div>
+                <div class="small text-muted">{{ user['location'] }} | {{ user['department'] }}</div>
+                <h1 class="h3 mb-0 fw-medium">GA Request</h1>
+            </div>
+            <div class="d-flex gap-2">
+                <a href="{{ url_for('user_services', emp_id=user['emp_id']) }}" class="btn btn-outline-dark rounded-pill px-4">
+                    <i class="fas fa-arrow-left me-1"></i> กลับหน้าเลือกเมนู
+                </a>
+            </div>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="alert alert-{{ category }} border-0 shadow-sm rounded-4 mb-3">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <div class="row g-4 align-items-start">
+            <div class="col-lg-5">
+                <div class="glass-panel rounded-4 p-4 hero-card mb-4">
+                    <div class="position-relative">
+                        <span class="badge bg-primary-subtle text-primary rounded-pill px-3 py-2 mb-3">PCM Internal Services</span>
+                        <h2 class="h4 fw-medium mb-3">แจ้งซ่อม แจ้งปัญหา และขอความช่วยเหลือจากแผนก GA / IT / SAFETY</h2>
+                        <p class="text-muted mb-0">ระบบจะผูก Location จากข้อมูลพนักงานและส่งอีเมลแจ้งผู้รับผิดชอบตามส่วนงานที่เลือก</p>
+                    </div>
+                </div>
+
+                <div class="glass-panel rounded-4 p-4">
+                    <h3 class="h6 fw-medium mb-3"><i class="fas fa-user-circle me-2 text-primary"></i>ข้อมูลผู้แจ้ง</h3>
+                    <div class="row g-3 small">
+                        <div class="col-6">
+                            <div class="text-muted">ชื่อ</div>
+                            <div class="fw-medium">{{ user['name'] }}</div>
+                        </div>
+                        <div class="col-6">
+                            <div class="text-muted">รหัสพนักงาน</div>
+                            <div class="fw-medium">{{ user['emp_id'] }}</div>
+                        </div>
+                        <div class="col-6">
+                            <div class="text-muted">แผนก</div>
+                            <div class="fw-medium">{{ user['department'] or '-' }}</div>
+                        </div>
+                        <div class="col-6">
+                            <div class="text-muted">Location</div>
+                            <div class="fw-medium">{{ user['location'] or '-' }}</div>
+                        </div>
+                        <div class="col-12">
+                            <div class="text-muted">อีเมลพนักงาน</div>
+                            <div class="fw-medium">{{ user['email'] or 'ยังไม่ได้ระบุในระบบ' }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-7">
+                <div class="glass-panel rounded-4 p-4 mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3 gap-2 flex-wrap">
+                        <h2 class="h5 mb-0 fw-medium"><i class="fas fa-pen-to-square me-2 text-primary"></i>ฟอร์มยื่นคำร้อง</h2>
+                        <span class="badge bg-light text-dark rounded-pill px-3 py-2">รองรับรูปภาพประกอบ</span>
+                    </div>
+                    <form method="POST" enctype="multipart/form-data" class="row g-3" id="gaRequestForm" data-loading-text="กำลังส่งคำร้องและอีเมลแจ้งเตือน...">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="emp_id" value="{{ user['emp_id'] }}">
+
+                        <div class="col-md-4">
+                            <label class="form-label fw-medium">ส่งถึงส่วนงาน</label>
+                            <select name="target_team" class="form-select shadow-none" required>
+                                <option value="">-- เลือก --</option>
+                                {% for team in target_teams %}
+                                <option value="{{ team }}">{{ team }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-medium">หัวข้อปัญหา</label>
+                            <input type="text" name="title" class="form-control shadow-none" maxlength="150" placeholder="เช่น คอมพิวเตอร์ใช้งานไม่ได้" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-medium">รายละเอียด</label>
+                            <textarea name="description" rows="6" class="form-control shadow-none" maxlength="2000" placeholder="ระบุอาการปัญหา จุดที่พบ เวลาเกิดปัญหา หรือสิ่งที่ต้องการให้ดำเนินการ" required></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-medium">แนบรูปภาพ (ถ้ามี)</label>
+                            <input type="file" name="image" class="form-control shadow-none" accept="image/png,image/jpeg,image/jpg,image/gif,image/webp" onchange="previewAttachment(event)">
+                            <div class="form-text">ไฟล์รูปภาพเท่านั้น (สูงสุด {{ (config.MAX_CONTENT_LENGTH // (1024 * 1024)) | int }} MB)</div>
+                        </div>
+                        <div class="col-12 d-none" id="previewWrapper">
+                            <img id="attachmentPreview" class="preview-image w-100" alt="attachment preview">
+                        </div>
+                        <div class="col-12 text-end">
+                            <button type="submit" class="btn btn-primary rounded-pill px-4 py-2" id="gaRequestSubmitBtn">
+                                <i class="fas fa-paper-plane me-1"></i> ส่งคำร้อง
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="glass-panel rounded-4 p-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3 gap-2 flex-wrap">
+                        <h2 class="h5 mb-0 fw-medium"><i class="fas fa-clock-rotate-left me-2 text-primary"></i>คำร้องล่าสุดของฉัน</h2>
+                        <span class="small text-muted">แสดง 10 รายการล่าสุด</span>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>เวลา</th>
+                                    <th>ส่วนงาน</th>
+                                    <th>หัวข้อ</th>
+                                    <th class="text-center">สถานะ</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% if recent_requests %}
+                                {% for req in recent_requests %}
+                                <tr>
+                                    <td class="small text-muted">{{ req['created_at'] | format_ts }}</td>
+                                    <td>
+                                        <span class="badge {% if req['target_team'] == 'IT' %}bg-info-subtle text-info{% elif req['target_team'] == 'SAFETY' %}bg-warning-subtle text-warning{% else %}bg-secondary-subtle text-secondary{% endif %} rounded-pill px-3 py-2">{{ req['target_team'] }}</span>
+                                    </td>
+                                    <td>
+                                        <div class="fw-medium">{{ req['title'] }}</div>
+                                        {% if req['image_path'] %}
+                                        <div class="small mt-1">
+                                            <button type="button"
+                                                class="btn btn-link btn-sm p-0 align-baseline"
+                                                data-image-url="{{ ga_image_url(req['image_path']) }}"
+                                                data-image-title="{{ req['title'] | e }}"
+                                                data-request-no="{{ req['id'] }}"
+                                                onclick="openGaImageViewer(this)">
+                                                <i class="fas fa-image me-1"></i>เปิดรูปแนบ
+                                            </button>
+                                        </div>
+                                        {% endif %}
+                                        {% if req['admin_note'] %}
+                                        <div class="small text-muted mt-1">หมายเหตุ: {{ req['admin_note'] }}</div>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-center">
+                                        <span class="badge status-badge {% if req['status'] == 'Pending' %}bg-warning text-dark{% elif req['status'] == 'In Progress' %}bg-primary{% elif req['status'] == 'Resolved' %}bg-success{% else %}bg-danger{% endif %} rounded-pill px-3 py-2">{{ req['status'] }}</span>
+                                        <div class="mt-2">
+                                            <button class="btn btn-sm btn-outline-primary rounded-pill"
+                                                data-ga-chat-request-id="{{ req['id'] }}"
+                                                data-ga-chat-title="{{ req['title']|e }}"
+                                                onclick="openUserGaChat({{ req['id'] }}, '{{ req['title']|e }}')">
+                                                <i class="fas fa-comments me-1"></i>แชท
+                                                <span class="chat-unread-badge" data-user-chat-unread>ใหม่</span>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                                {% else %}
+                                <tr>
+                                    <td colspan="4" class="text-center text-muted py-4">ยังไม่มีคำร้องที่เคยส่ง</td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button id="userFloatingChatBtn" class="floating-chat-btn" type="button" onclick="openUserFloatingChat()" aria-label="เปิดแชท">
+        <i class="fas fa-comments"></i>
+        <span class="count" id="userFloatingChatCount">0</span>
+    </button>
+
+    <div class="modal fade" id="userGaChatModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-dark text-white border-0">
+                    <div>
+                        <h6 class="modal-title fw-bold mb-0"><i class="fas fa-comments me-2 text-warning"></i>แชทกับแอดมิน</h6>
+                        <div class="small text-white-50" id="userChatTitle"></div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <div class="ga-chat-box p-3" id="userChatBox"></div>
+                    <div class="border-top p-3 d-flex gap-2">
+                        <textarea id="userChatInput" class="form-control shadow-none" rows="2" placeholder="พิมพ์ข้อความ... (Enter ส่ง / Shift+Enter ขึ้นบรรทัดใหม่)"></textarea>
+                        <button class="btn btn-primary rounded-pill px-3" onclick="sendUserChat()">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="gaImageViewerModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-dark text-white border-0">
+                    <div>
+                        <h5 class="modal-title fw-medium mb-1"><i class="fas fa-image text-info me-2"></i>รูปแนบ GA Request</h5>
+                        <div class="small text-white-50" id="gaImageViewerMeta">-</div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-3 p-lg-4">
+                    <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+                        <div class="btn-group" role="group" aria-label="zoom-controls">
+                            <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" onclick="zoomGaImage(-0.2)">
+                                <i class="fas fa-magnifying-glass-minus me-1"></i> ย่อ
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" onclick="resetGaImageZoom()">
+                                <i class="fas fa-expand me-1"></i> พอดีจอ
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" onclick="zoomGaImage(0.2)">
+                                <i class="fas fa-magnifying-glass-plus me-1"></i> ขยาย
+                            </button>
+                        </div>
+                        <span class="badge bg-light text-dark" id="gaImageZoomLabel">100%</span>
+                        <a id="gaImageDownloadBtn" href="#" class="btn btn-sm btn-primary rounded-pill" download>
+                            <i class="fas fa-download me-1"></i> ดาวน์โหลดรูปภาพ
+                        </a>
+                    </div>
+                    <div class="ga-image-viewer-stage" id="gaImageViewerStage">
+                        <img id="gaImageViewerImg" src="" alt="GA Attachment">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+    <script>
+        function showGlobalLoading(text) {
+            const overlay = document.getElementById('globalLoadingOverlay');
+            const label = document.getElementById('globalLoadingText');
+            if (label) label.textContent = text || 'กำลังประมวลผล...';
+            if (overlay) {
+                overlay.classList.add('is-active');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+        }
+
+        let gaImageScale = 1;
+        const GA_IMAGE_MIN_SCALE = 0.4;
+        const GA_IMAGE_MAX_SCALE = 3;
+        let gaImageDragging = false;
+        let gaDragStartX = 0;
+        let gaDragStartY = 0;
+        let gaStageStartScrollLeft = 0;
+        let gaStageStartScrollTop = 0;
+
+        function applyGaImageTransform() {
+            const img = document.getElementById('gaImageViewerImg');
+            const zoomLabel = document.getElementById('gaImageZoomLabel');
+            const stage = document.getElementById('gaImageViewerStage');
+            if (!img || !zoomLabel) return;
+            img.style.transform = `scale(${gaImageScale})`;
+            zoomLabel.textContent = `${Math.round(gaImageScale * 100)}%`;
+            if (stage && !gaImageDragging) {
+                stage.style.cursor = gaImageScale > 1 ? 'grab' : 'default';
+            }
+        }
+
+        function resetGaImageZoom() {
+            gaImageScale = 1;
+            applyGaImageTransform();
+        }
+
+        function zoomGaImage(step) {
+            gaImageScale = Math.max(GA_IMAGE_MIN_SCALE, Math.min(GA_IMAGE_MAX_SCALE, gaImageScale + step));
+            applyGaImageTransform();
+        }
+
+        function startGaImageDrag(event) {
+            const stage = document.getElementById('gaImageViewerStage');
+            if (!stage || gaImageScale <= 1) return;
+
+            gaImageDragging = true;
+            gaDragStartX = event.clientX;
+            gaDragStartY = event.clientY;
+            gaStageStartScrollLeft = stage.scrollLeft;
+            gaStageStartScrollTop = stage.scrollTop;
+            stage.classList.add('is-dragging');
+            stage.style.cursor = 'grabbing';
+        }
+
+        function moveGaImageDrag(event) {
+            if (!gaImageDragging) return;
+            const stage = document.getElementById('gaImageViewerStage');
+            if (!stage) return;
+            event.preventDefault();
+
+            const deltaX = event.clientX - gaDragStartX;
+            const deltaY = event.clientY - gaDragStartY;
+            stage.scrollLeft = gaStageStartScrollLeft - deltaX;
+            stage.scrollTop = gaStageStartScrollTop - deltaY;
+        }
+
+        function endGaImageDrag() {
+            gaImageDragging = false;
+            const stage = document.getElementById('gaImageViewerStage');
+            if (stage) {
+                stage.classList.remove('is-dragging');
+                stage.style.cursor = gaImageScale > 1 ? 'grab' : 'default';
+            }
+        }
+
+        // ===== GA Chat (User) =====
+        const _userEmpId = '{{ user["emp_id"] }}';
+        let userChatRequestId = null;
+        let userChatLastId = 0;
+        let userChatPollTimer = null;
+        let userChatPresenceTimer = null;
+        let userChatNotifyTimer = null;
+        let userUnreadSummarySnapshot = [];
+        const userSeenAdminGlobalKey = 'ga_chat_seen_admin_global:' + _userEmpId;
+        let userSeenAdminGlobalId = Number(localStorage.getItem(userSeenAdminGlobalKey) || 0);
+        const userReadAdminByReqKey = 'ga_chat_read_admin_by_req:' + _userEmpId;
+        const userReadAdminByReqMap = (() => {
+            try {
+                const raw = localStorage.getItem(userReadAdminByReqKey);
+                return raw ? JSON.parse(raw) : {};
+            } catch (_) {
+                return {};
+            }
+        })();
+
+        function persistUserSeenAdminGlobalId() {
+            try {
+                localStorage.setItem(userSeenAdminGlobalKey, String(userSeenAdminGlobalId || 0));
+            } catch (_) {
+                // ignore storage errors
+            }
+        }
+
+        function persistUserReadAdminByReqMap() {
+            try {
+                localStorage.setItem(userReadAdminByReqKey, JSON.stringify(userReadAdminByReqMap));
+            } catch (_) {
+                // ignore storage errors
+            }
+        }
+
+        function setUserRequestReadUpto(requestId, messageId) {
+            const rid = String(Number(requestId || 0));
+            const mid = Number(messageId || 0);
+            if (!rid || !mid) return;
+            userReadAdminByReqMap[rid] = Math.max(Number(userReadAdminByReqMap[rid] || 0), mid);
+            persistUserReadAdminByReqMap();
+        }
+
+        function getUserUnreadStats() {
+            let totalUnreadRequests = 0;
+            let firstUnreadRequestId = 0;
+            let firstUnreadTitle = '';
+            (userUnreadSummarySnapshot || []).forEach((s) => {
+                const rid = Number(s.request_id || 0);
+                if (!rid) return;
+                const maxAdminMsgId = Number(s.max_admin_msg_id || 0);
+                const readUpto = Number(userReadAdminByReqMap[String(rid)] || 0);
+                if (maxAdminMsgId > readUpto) {
+                    totalUnreadRequests += 1;
+                    if (!firstUnreadRequestId) {
+                        firstUnreadRequestId = rid;
+                        firstUnreadTitle = s.title || '';
+                    }
+                }
+            });
+            return { totalUnreadRequests, firstUnreadRequestId, firstUnreadTitle };
+        }
+
+        function applyUserUnreadBadges() {
+            const summaryMap = new Map();
+            (userUnreadSummarySnapshot || []).forEach((s) => {
+                const rid = Number(s.request_id || 0);
+                if (!rid) return;
+                summaryMap.set(rid, Number(s.max_admin_msg_id || 0));
+            });
+
+            document.querySelectorAll('[data-ga-chat-request-id]').forEach((btn) => {
+                const rid = Number(btn.getAttribute('data-ga-chat-request-id') || 0);
+                const badge = btn.querySelector('[data-user-chat-unread]');
+                if (!rid || !badge) return;
+                const maxAdminMsgId = Number(summaryMap.get(rid) || 0);
+                const readUpto = Number(userReadAdminByReqMap[String(rid)] || 0);
+                if (maxAdminMsgId > readUpto) {
+                    badge.textContent = 'ใหม่';
+                    badge.classList.add('show');
+                } else {
+                    badge.classList.remove('show');
+                }
+            });
+            updateUserFloatingChatButton();
+        }
+
+        function updateUserFloatingChatButton() {
+            const btn = document.getElementById('userFloatingChatBtn');
+            const count = document.getElementById('userFloatingChatCount');
+            if (!btn || !count) return;
+            const stats = getUserUnreadStats();
+            count.textContent = stats.totalUnreadRequests > 0 ? String(stats.totalUnreadRequests) : '';
+            btn.classList.toggle('has-unread', stats.totalUnreadRequests > 0);
+        }
+
+        function openUserFloatingChat() {
+            const stats = getUserUnreadStats();
+            const targetId = stats.firstUnreadRequestId;
+            if (!targetId) return;  // no unread — button should be hidden anyway
+            const rowBtn = document.querySelector('[data-ga-chat-request-id="' + targetId + '"]');
+            const title = rowBtn ? (rowBtn.getAttribute('data-ga-chat-title') || stats.firstUnreadTitle || '') : (stats.firstUnreadTitle || '');
+            openUserGaChat(targetId, title);
+        }
+
+        function showChatToast(requestId, title, count) {
+            let host = document.getElementById('chatNotifyContainer');
+            if (!host) {
+                host = document.createElement('div');
+                host.id = 'chatNotifyContainer';
+                host.className = 'chat-notify-container';
+                document.body.appendChild(host);
+            }
+            const toast = document.createElement('div');
+            toast.className = 'chat-notify-toast';
+            toast.innerHTML =
+                '<div class="title">มีข้อความใหม่จากแอดมิน</div>' +
+                '<div class="body">GA-' + String(requestId).padStart(5, '0') + ' ' + _escHtml(title || '') + (count > 1 ? (' (+' + count + ')') : '') + '</div>';
+            toast.addEventListener('click', () => openUserGaChat(requestId, title || ''));
+            host.appendChild(toast);
+            setTimeout(() => {
+                toast.remove();
+                if (host && !host.children.length) host.remove();
+            }, 4500);
+        }
+
+        let _userNotifyScanInFlight = false;
+        function scanUserChatNotifications(silentInit = false) {
+            if (_userNotifyScanInFlight) return;
+            _userNotifyScanInFlight = true;
+            fetch('/ga/chat_notifications?emp_id=' + encodeURIComponent(_userEmpId) + '&since_id=' + encodeURIComponent(String(userSeenAdminGlobalId || 0)))
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) return;
+
+                    if (Number(data.max_visible_id || 0) < userSeenAdminGlobalId) {
+                        userSeenAdminGlobalId = Number(data.max_visible_id || 0);
+                        persistUserSeenAdminGlobalId();
+                    }
+
+                    if (Array.isArray(data.summaries)) {
+                        userUnreadSummarySnapshot = data.summaries;
+                        applyUserUnreadBadges();
+                    }
+
+                    if (silentInit) {
+                        const serverMax = Number(data.max_visible_id || 0);
+                        if (serverMax > userSeenAdminGlobalId) {
+                            userSeenAdminGlobalId = serverMax;
+                            persistUserSeenAdminGlobalId();
+                        }
+                        return;
+                    }
+
+                    if (!Array.isArray(data.items) || !data.items.length) return;
+
+                    let maxId = userSeenAdminGlobalId;
+                    const grouped = new Map();
+
+                    data.items.forEach((item) => {
+                        const mid = Number(item.id || 0);
+                        if (mid > maxId) maxId = mid;
+                        const rid = Number(item.request_id || 0);
+                        if (!rid) return;
+                        if (!grouped.has(rid)) {
+                            grouped.set(rid, { requestId: rid, title: item.title || '', count: 0 });
+                        }
+                        grouped.get(rid).count += 1;
+                    });
+
+                    userSeenAdminGlobalId = maxId;
+                    persistUserSeenAdminGlobalId();
+
+                    grouped.forEach((info) => {
+                        const isCurrentOpen = userChatRequestId === info.requestId && !!userChatPollTimer;
+                        if (!isCurrentOpen) {
+                            showChatToast(info.requestId, info.title, info.count);
+                        }
+                    });
+                })
+                .catch(() => {
+                    // ignore polling errors
+                })
+                .finally(() => { _userNotifyScanInFlight = false; });
+        }
+
+        function openUserGaChat(requestId, title) {
+            userChatRequestId = requestId;
+            userChatLastId = 0;
+            document.getElementById('userChatTitle').textContent = 'GA-' + String(requestId).padStart(5,'0') + ' · ' + title;
+            document.getElementById('userChatBox').innerHTML = '<div class="text-center text-muted py-4 small"><i class="fas fa-spinner fa-spin me-1"></i>กำลังโหลด...</div>';
+            document.getElementById('userChatInput').value = '';
+            new bootstrap.Modal(document.getElementById('userGaChatModal')).show();
+            sendUserChatPresence(true);
+            _loadUserChat();
+            clearInterval(userChatPollTimer);
+            userChatPollTimer = setInterval(_loadUserChat, 5000);
+            clearInterval(userChatPresenceTimer);
+            userChatPresenceTimer = setInterval(() => sendUserChatPresence(true), 20000);
+            document.getElementById('userGaChatModal').addEventListener('hidden.bs.modal', () => {
+                clearInterval(userChatPollTimer); userChatPollTimer = null;
+                clearInterval(userChatPresenceTimer); userChatPresenceTimer = null;
+                sendUserChatPresence(false);
+            }, { once: true });
+        }
+
+        function sendUserChatPresence(isOpen) {
+            if (!userChatRequestId) return;
+            const fd = new FormData();
+            fd.append('emp_id', _userEmpId);
+            fd.append('request_id', String(userChatRequestId));
+            fd.append('is_open', isOpen ? '1' : '0');
+            fd.append('csrf_token', document.querySelector('[name=csrf_token]')?.value || '');
+            fetch('/ga/chat_presence', { method: 'POST', body: fd }).catch(() => {
+                // ignore presence ping errors
+            });
+        }
+
+        let _userChatLoading = false;
+        function _loadUserChat() {
+            if (!userChatRequestId || _userChatLoading) return;
+            _userChatLoading = true;
+            fetch('/ga/request/' + userChatRequestId + '/chat?emp_id=' + encodeURIComponent(_userEmpId) + '&since_id=' + userChatLastId)
+                .then(r => r.json()).then(data => {
+                    const box = document.getElementById('userChatBox');
+                    if (!data.success) {
+                        if (userChatLastId === 0 && box) {
+                            box.innerHTML = '<div class="text-center text-danger py-4 small">โหลดข้อความไม่สำเร็จ</div>';
+                        }
+                        return;
+                    }
+                    if (!data.messages.length) {
+                        if (userChatLastId === 0 && box) {
+                            box.innerHTML = '<div class="text-center text-muted py-4 small">ยังไม่มีข้อความ เริ่มคุยได้เลย</div>';
+                        }
+                        return;
+                    }
+                    if (userChatLastId === 0) box.innerHTML = '';
+                    data.messages.forEach(msg => {
+                        userChatLastId = Math.max(userChatLastId, msg.id);
+                        if (msg.sender_type === 'admin') {
+                            setUserRequestReadUpto(userChatRequestId, Number(msg.id || 0));
+                        }
+                        const isUser = msg.sender_type === 'user';
+                        const div = document.createElement('div');
+                        div.className = 'ga-chat-row ' + (isUser ? 'self' : 'other');
+                        div.innerHTML = (
+                            '<div class="ga-chat-bubble ' + (isUser ? 'user-self' : 'admin-reply') + '">' +
+                            '<div class="ga-chat-sender">' + _escHtml(msg.sender_name) + '</div>' +
+                            '<div class="ga-chat-message">' + _escHtml(msg.message) + '</div>' +
+                            '<div class="ga-chat-time">' + _escHtml(msg.created_at) + '</div>' +
+                            '</div>'
+                        );
+                        box.appendChild(div);
+                    });
+                    applyUserUnreadBadges();
+                    box.scrollTop = box.scrollHeight;
+                })
+                .catch(() => {
+                    const box = document.getElementById('userChatBox');
+                    if (userChatLastId === 0 && box) {
+                        box.innerHTML = '<div class="text-center text-danger py-4 small">โหลดข้อความไม่สำเร็จ</div>';
+                    }
+                })
+                .finally(() => { _userChatLoading = false; });
+        }
+
+        let _userChatSending = false;
+        function sendUserChat() {
+            if (!userChatRequestId || _userChatSending) return;
+            const input = document.getElementById('userChatInput');
+            const sendBtn = document.querySelector('#userGaChatModal .btn-primary');
+            const message = input.value.trim();
+            if (!message) return;
+            _userChatSending = true;
+            if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+            const fd = new FormData();
+            fd.append('message', message);
+            fd.append('emp_id', _userEmpId);
+            fd.append('csrf_token', document.querySelector('[name=csrf_token]')?.value || '');
+            fetch('/ga/request/' + userChatRequestId + '/chat', { method: 'POST', body: fd })
+                .then(r => r.json()).then(data => {
+                    if (data.success) { input.value = ''; _loadUserChat(); }
+                })
+                .finally(() => {
+                    _userChatSending = false;
+                    if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i>'; }
+                });
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey && document.activeElement?.id === 'userChatInput') {
+                e.preventDefault(); sendUserChat();
+            }
+        });
+
+        function _escHtml(t) {
+            return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+        // ===== End GA Chat =====
+
+        function openGaImageViewer(triggerEl) {
+            const imageUrl = triggerEl.getAttribute('data-image-url') || '';
+            const title = triggerEl.getAttribute('data-image-title') || '';
+            const requestNo = triggerEl.getAttribute('data-request-no') || '';
+            const img = document.getElementById('gaImageViewerImg');
+            const meta = document.getElementById('gaImageViewerMeta');
+            const downloadBtn = document.getElementById('gaImageDownloadBtn');
+            const stage = document.getElementById('gaImageViewerStage');
+
+            if (!imageUrl || !img || !meta || !downloadBtn) return;
+
+            img.src = imageUrl;
+            img.alt = title ? `GA Attachment - ${title}` : 'GA Attachment';
+            meta.textContent = title ? `${title}${requestNo ? ` | #${requestNo}` : ''}` : (requestNo ? `GA Request #${requestNo}` : 'รูปแนบ');
+            downloadBtn.href = imageUrl;
+            downloadBtn.setAttribute('download', `${requestNo || 'ga-request'}-attachment`);
+
+            resetGaImageZoom();
+            endGaImageDrag();
+            if (stage) {
+                stage.scrollLeft = 0;
+                stage.scrollTop = 0;
+            }
+
+            new bootstrap.Modal(document.getElementById('gaImageViewerModal')).show();
+        }
+
+        function previewAttachment(event) {
+            const file = event.target.files && event.target.files[0];
+            const previewWrapper = document.getElementById('previewWrapper');
+            const preview = document.getElementById('attachmentPreview');
+
+            if (!file) {
+                previewWrapper.classList.add('d-none');
+                preview.removeAttribute('src');
+                return;
+            }
+
+            preview.src = URL.createObjectURL(file);
+            previewWrapper.classList.remove('d-none');
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const gaRequestForm = document.getElementById('gaRequestForm');
+            if (gaRequestForm) {
+                gaRequestForm.addEventListener('submit', (event) => {
+                    if (gaRequestForm.dataset.submitting === '1') {
+                        event.preventDefault();
+                        return;
+                    }
+                    gaRequestForm.dataset.submitting = '1';
+                    const submitBtn = document.getElementById('gaRequestSubmitBtn');
+                    if (submitBtn) {
+                        submitBtn.disabled = true;
+                        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>กำลังส่ง...';
+                    }
+                    showGlobalLoading(gaRequestForm.dataset.loadingText || 'กำลังส่งคำร้องและอีเมลแจ้งเตือน...');
+                });
+            }
+
+            // Prime current state without popup, then start polling for new admin replies.
+            scanUserChatNotifications(true);
+            clearInterval(userChatNotifyTimer);
+            userChatNotifyTimer = setInterval(() => scanUserChatNotifications(false), 15000);
+
+            const gaViewerStage = document.getElementById('gaImageViewerStage');
+            if (gaViewerStage) {
+                gaViewerStage.addEventListener('wheel', (event) => {
+                    event.preventDefault();
+                    zoomGaImage(event.deltaY > 0 ? -0.1 : 0.1);
+                }, { passive: false });
+                gaViewerStage.addEventListener('mousedown', startGaImageDrag);
+                gaViewerStage.addEventListener('mousemove', moveGaImageDrag);
+                gaViewerStage.addEventListener('mouseup', endGaImageDrag);
+                gaViewerStage.addEventListener('mouseleave', endGaImageDrag);
+            }
+
+            document.addEventListener('mouseup', endGaImageDrag);
+
+            const gaViewerModalEl = document.getElementById('gaImageViewerModal');
+            if (gaViewerModalEl) {
+                gaViewerModalEl.addEventListener('hidden.bs.modal', () => {
+                    const img = document.getElementById('gaImageViewerImg');
+                    if (img) img.src = '';
+                    endGaImageDrag();
+                    resetGaImageZoom();
+                });
+            }
+        });
+    </script>
+
+    <!-- ─── Floating Support Chat Widget ─── -->
+    <style>
+        .sup-fab {
+            position: fixed;
+            bottom: 28px;
+            right: 28px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(135deg, #005fcc, #00a1c9);
+            color: #fff;
+            font-size: 22px;
+            cursor: pointer;
+            box-shadow: 0 4px 18px rgba(0, 95, 204, .38);
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform .2s, box-shadow .2s;
+            animation: floatSupportFab 2.6s ease-in-out infinite;
+        }
+        .sup-fab:hover {
+            animation-play-state: paused;
+            transform: scale(1.08) translateY(-1px);
+            box-shadow: 0 6px 22px rgba(0,95,204,.5);
+        }
+        .sup-fab.has-unread {
+            animation-duration: 1.05s;
+            box-shadow: 0 8px 24px rgba(217, 4, 41, 0.38);
+        }
+        @keyframes floatSupportFab { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+        .sup-fab .sup-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            background: #e53935;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            min-width: 18px;
+            height: 18px;
+            border-radius: 9px;
+            padding: 0 4px;
+            line-height: 18px;
+            text-align: center;
+            display: none;
+            animation: supBlink 1.2s infinite;
+        }
+        @keyframes supBlink { 0%,100%{opacity:1} 50%{opacity:.35} }
+        .sup-panel {
+            position: fixed;
+            bottom: 96px;
+            right: 28px;
+            width: 340px;
+            max-height: 480px;
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,.18);
+            z-index: 2001;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            font-family: "Mitr", sans-serif;
+        }
+        .sup-panel.open { display: flex; }
+        .sup-panel-head {
+            background: linear-gradient(135deg, #005fcc, #00a1c9);
+            color: #fff;
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .sup-panel-head .sup-title { flex: 1; font-size: 14px; font-weight: 500; }
+        .sup-panel-head .sup-subtitle { font-size: 11px; opacity: .8; }
+        .sup-panel-head button { background: transparent; border: none; color: #fff; font-size: 18px; line-height: 1; cursor: pointer; padding: 0; }
+        .sup-chat-box {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            background: #f5f8ff;
+        }
+        .sup-bubble { max-width: 82%; padding: 8px 12px; border-radius: 14px; font-size: 13px; line-height: 1.5; word-break: break-word; }
+        .sup-bubble.user { align-self: flex-end; background: #005fcc; color: #fff; border-bottom-right-radius: 4px; }
+        .sup-bubble.admin { align-self: flex-start; background: #fff; color: #1f2d3d; border-bottom-left-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+        .sup-bubble .sup-meta { font-size: 10px; margin-top: 3px; opacity: .65; }
+        .sup-chat-empty { text-align: center; color: #999; font-size: 12px; padding: 20px 10px; }
+        .sup-input-row { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid #e5eaf2; background: #fff; }
+        .sup-input-row textarea { flex: 1; border: 1px solid #d0dce8; border-radius: 10px; padding: 7px 10px; font-size: 13px; font-family: inherit; resize: none; outline: none; max-height: 80px; }
+        .sup-input-row button { background: linear-gradient(135deg,#005fcc,#00a1c9); border: none; border-radius: 10px; color: #fff; padding: 7px 14px; font-size: 16px; cursor: pointer; }
+        .sup-input-row button:disabled { opacity: .4; cursor: not-allowed; }
+    </style>
+    <button class="sup-fab" id="supFab" onclick="toggleSupportChat()" title="แจ้งปัญหาการใช้งาน" aria-label="Support Chat">
+        <i class="fa fa-comments"></i>
+        <span class="sup-badge" id="supBadge">0</span>
+    </button>
+    <div class="sup-panel" id="supPanel">
+        <div class="sup-panel-head">
+            <div>
+                <div class="sup-title"><i class="fa fa-headset"></i> ศูนย์ช่วยเหลือ PCM</div>
+                <div class="sup-subtitle">แจ้งปัญหาการใช้งาน</div>
+            </div>
+            <button onclick="toggleSupportChat()" aria-label="ปิด">✕</button>
+        </div>
+        <div class="sup-chat-box" id="supChatBox">
+            <div class="sup-chat-empty" id="supChatEmpty">ยังไม่มีข้อความ<br>พิมพ์เพื่อแจ้งปัญหาหรือสอบถาม</div>
+        </div>
+        <div class="sup-input-row">
+            <textarea id="supInput" rows="1" placeholder="พิมพ์ข้อความ..." onkeydown="supInputKeydown(event)"></textarea>
+            <button id="supSendBtn" onclick="sendSupportMsg()" title="ส่ง"><i class="fa fa-paper-plane"></i></button>
+        </div>
+    </div>
+    <script>
+    (function () {
+        const _supCsrf = "{{ csrf_token() }}";
+        const SUP_SINCE_KEY = 'sup_since_{{ session["user_id"] | default("") }}';
+        let supSinceId = parseInt(localStorage.getItem(SUP_SINCE_KEY) || '0', 10);
+        let supPanelOpen = false;
+        let supPresenceTimer = null;
+        let supPollTimer = null;
+        let supSending = false;
+
+        function toggleSupportChat() {
+            supPanelOpen = !supPanelOpen;
+            document.getElementById('supPanel').classList.toggle('open', supPanelOpen);
+            if (supPanelOpen) {
+                loadSupportChat();
+                startSupPresence();
+                document.getElementById('supInput').focus();
+            } else {
+                stopSupPresence();
+                fetch('/support/presence', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': _supCsrf }, body: JSON.stringify({ action: 'clear', csrf_token: _supCsrf }) }).catch(() => {});
+            }
+        }
+        window.toggleSupportChat = toggleSupportChat;
+
+        function startSupPresence() {
+            pingSupPresence();
+            if (!supPresenceTimer) supPresenceTimer = setInterval(pingSupPresence, 20000);
+        }
+        function stopSupPresence() { clearInterval(supPresenceTimer); supPresenceTimer = null; }
+        function pingSupPresence() {
+            fetch('/support/presence', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': _supCsrf }, body: JSON.stringify({ action: 'mark', csrf_token: _supCsrf }) }).catch(() => {});
+        }
+
+        function loadSupportChat() {
+            fetch('/support/chat?since_id=0', { headers: { 'X-CSRF-Token': _supCsrf } })
+                .then(r => r.json()).then(data => {
+                    if (!data.messages) return;
+                    const box = document.getElementById('supChatBox');
+                    box.innerHTML = '';
+                    if (data.messages.length === 0) {
+                        box.innerHTML = '<div class="sup-chat-empty">ยังไม่มีข้อความ<br>พิมพ์เพื่อแจ้งปัญหาหรือสอบถาม</div>';
+                    } else {
+                        data.messages.forEach(m => appendSupMsg(m, false));
+                        supSinceId = data.messages[data.messages.length - 1].id;
+                        localStorage.setItem(SUP_SINCE_KEY, supSinceId);
+                    }
+                    scrollSupChat();
+                    setSupUnread(0);
+                    startSupPolling();
+                }).catch(() => {});
+        }
+
+        function startSupPolling() {
+            clearInterval(supPollTimer);
+            supPollTimer = setInterval(() => {
+                if (!supPanelOpen) { pollSupNotify(); return; }
+                fetch('/support/chat?since_id=' + supSinceId, { headers: { 'X-CSRF-Token': _supCsrf } })
+                    .then(r => r.json()).then(data => {
+                        if (!data.messages || data.messages.length === 0) return;
+                        data.messages.forEach(m => appendSupMsg(m, true));
+                        supSinceId = data.messages[data.messages.length - 1].id;
+                        localStorage.setItem(SUP_SINCE_KEY, supSinceId);
+                        scrollSupChat();
+                    }).catch(() => {});
+            }, 12000);
+        }
+
+        function pollSupNotify() {
+            fetch('/support/notifications', { headers: { 'X-CSRF-Token': _supCsrf } })
+                .then(r => r.json()).then(data => setSupUnread(data.unread || 0)).catch(() => {});
+        }
+
+        function appendSupMsg(m, isNew) {
+            const empty = document.getElementById('supChatEmpty');
+            if (empty) empty.remove();
+            const box = document.getElementById('supChatBox');
+            if (m && m.id && box.querySelector('[data-msg-id="' + String(m.id) + '"]')) {
+                return;
+            }
+            const div = document.createElement('div');
+            div.className = 'sup-bubble ' + m.sender_type;
+            if (m && m.id) div.setAttribute('data-msg-id', String(m.id));
+            div.innerHTML = '<div>' + escSupHtml(m.message) + '</div><div class="sup-meta">' + (m.sender_type === 'admin' ? '🛡️ ' + escSupHtml(m.sender_name) + ' · ' : '') + m.created_at + '</div>';
+            box.appendChild(div);
+            if (isNew && m.sender_type === 'admin') scrollSupChat();
+        }
+
+        function scrollSupChat() { const b = document.getElementById('supChatBox'); b.scrollTop = b.scrollHeight; }
+
+        function setSupUnread(n) {
+            const badge = document.getElementById('supBadge');
+            const fab = document.getElementById('supFab');
+            if (n > 0) {
+                badge.textContent = n;
+                badge.style.display = 'block';
+                if (fab) fab.classList.add('has-unread');
+            }
+            else {
+                badge.style.display = 'none';
+                if (fab) fab.classList.remove('has-unread');
+            }
+        }
+
+        function sendSupportMsg() {
+            if (supSending) return;
+            const inp = document.getElementById('supInput');
+            const msg = inp.value.trim();
+            if (!msg) return;
+            supSending = true;
+            document.getElementById('supSendBtn').disabled = true;
+            fetch('/support/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': _supCsrf },
+                body: JSON.stringify({ message: msg, csrf_token: _supCsrf })
+            }).then(r => r.json()).then(data => {
+                if (data.ok) {
+                    inp.value = '';
+                    if (data.message) {
+                        appendSupMsg(data.message, false);
+                        supSinceId = Math.max(supSinceId, Number(data.message.id || 0));
+                        localStorage.setItem(SUP_SINCE_KEY, supSinceId);
+                        scrollSupChat();
+                    }
+                }
+            }).catch(() => {}).finally(() => {
+                supSending = false;
+                document.getElementById('supSendBtn').disabled = false;
+            });
+        }
+        window.sendSupportMsg = sendSupportMsg;
+
+        function supInputKeydown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendSupportMsg(); }
+        }
+        window.supInputKeydown = supInputKeydown;
+
+        function escSupHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            setTimeout(pollSupNotify, 1500);
+            setInterval(pollSupNotify, 20000);
+        });
+    })();
+    </script>
+</body>
+
+</html>
