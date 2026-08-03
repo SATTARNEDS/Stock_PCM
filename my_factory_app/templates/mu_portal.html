@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MU Stock · เบิกของ</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}">
+  <style>
+    :root{--mu:#047857;--cyan:#0891b2;--nav:#102a43;--surface:#fff;--line:#dce5ee}
+    *{box-sizing:border-box}body{font-family:"Mitr",sans-serif;background:#f3f7fa;color:#19324a;margin:0}
+    .topbar{position:sticky;top:0;z-index:100;background:linear-gradient(110deg,#063c35,#047857 55%,#087f9d);color:#fff;box-shadow:0 8px 24px rgba(6,60,53,.18);animation:headerReveal .38s ease-out both}
+    .brand-mark{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:rgba(255,255,255,.16);font-size:1.25rem}
+    .summary-strip{margin-top:-1px;background:#fff;border-bottom:1px solid var(--line)}.summary-item{padding:12px 18px;border-right:1px solid var(--line)}
+    .search-panel{background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:0 10px 30px rgba(21,53,80,.06);animation:panelReveal .4s .08s ease-out both}
+    .form-control,.btn{min-height:44px;border-radius:12px}.product-card{position:relative;background:#fff;border:1px solid var(--line);border-radius:18px;overflow:hidden;transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease;height:100%;animation:cardReveal .42s both;animation-delay:min(calc(var(--card-index,0) * 35ms + 120ms),650ms)}
+    .product-card:hover{transform:translateY(-4px);box-shadow:0 15px 32px rgba(16,42,67,.11);border-color:#9ccfc4}.product-card:focus-within{box-shadow:0 0 0 3px rgba(4,120,87,.16),0 15px 32px rgba(16,42,67,.11)}.product-code{color:var(--mu);font-size:.78rem;font-weight:700;letter-spacing:.04em}
+    .product-card.is-out-of-stock{background:linear-gradient(145deg,#fff7f7,#ffeded);border-color:#ef9a9a;box-shadow:0 6px 18px rgba(185,28,28,.08)}
+    .product-card.is-out-of-stock:hover{border-color:#dc6262;box-shadow:0 12px 28px rgba(185,28,28,.13)}
+    .product-card.is-out-of-stock .product-code,.product-card.is-out-of-stock .stock-value{color:#a61b1b}
+    .product-card.is-out-of-stock .stock-status{color:#b42318!important;font-weight:600}.product-card.is-out-of-stock .stock-empty{background:#dc3545;box-shadow:0 0 0 4px #ffd7da}
+    .product-card.is-out-of-stock .qty-stepper{border-color:#efb0b0;opacity:.7}.product-card.is-out-of-stock .add-cart{background:#cbd2d9;border-color:#cbd2d9;color:#5b6672}
+    .product-card.is-cart-reserved{border-color:#f4b942;background:linear-gradient(145deg,#fff,#fff9e8)}.product-card.is-cart-reserved .stock-status{color:#9a6700!important;font-weight:600}
+    .product-name{min-height:2.9em;font-size:1.2rem;line-height:1.45;font-weight:600;color:var(--nav)}
+    .stock-value{font-size:1.25rem;font-weight:700;color:var(--nav)}.stock-unit{font-size:.82rem;font-weight:400;color:#64748b}.stock-ok{width:9px;height:9px;border-radius:50%;background:#10b981;box-shadow:0 0 0 4px #d1fae5}.stock-empty{background:#94a3b8;box-shadow:0 0 0 4px #e2e8f0}
+    .qty-stepper{display:grid;grid-template-columns:44px 1fr 44px;border:1px solid var(--line);border-radius:12px;overflow:hidden}.qty-stepper button,.qty-stepper input{border:0;background:#fff;text-align:center;min-height:42px}.qty-stepper button{background:#f0f5f8;font-weight:700;transition:background-color .16s ease,transform .12s ease}.qty-stepper button:not(:disabled):hover{background:#dff3ec}.qty-stepper button:not(:disabled):active{transform:scale(.92)}.qty-stepper input{font-size:.9rem;font-weight:600}
+    .cart-fab{position:fixed;right:24px;bottom:24px;z-index:1040;border:2px solid rgba(255,255,255,.7);border-radius:18px;background:linear-gradient(135deg,#047857,#0891b2);color:#fff;padding:16px 22px;box-shadow:0 18px 42px rgba(4,120,87,.42);transition:.2s;font-weight:600}.cart-fab:hover{transform:translateY(-3px) scale(1.02)}.cart-fab.has-items{animation:cartPulse 1.8s ease-in-out infinite}
+    .top-cart{position:relative;background:#fff;color:var(--mu);border:0;font-weight:600}.top-cart:hover{color:#03694d;background:#ecfdf5}
+    .cart-count{display:inline-grid;place-items:center;min-width:24px;height:24px;border-radius:12px;background:#fff;color:var(--mu);font-weight:700;margin-left:8px}
+    .cart-count.is-bumping{animation:countBump .34s ease}.fly-to-cart{position:fixed;z-index:2000;width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#047857,#0891b2);color:#fff;box-shadow:0 10px 24px rgba(4,120,87,.35);pointer-events:none}
+    .history-wrap{background:#fff;border:1px solid var(--line);border-radius:18px;overflow:hidden}.empty-state{padding:56px 20px;text-align:center;color:#64748b}
+    .offcanvas{--bs-offcanvas-width:min(430px,100vw)}.cart-row{border-bottom:1px solid var(--line);padding:14px 0}.cart-total{background:#ecfdf5;border-radius:14px;padding:14px}
+    .product-column{transition:opacity .18s,transform .18s}.product-column.is-filtered{display:none}.live-status{min-width:118px;text-align:right}
+    @keyframes headerReveal{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:none}}@keyframes panelReveal{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}@keyframes cardReveal{from{opacity:0;transform:translateY(16px) scale(.985)}to{opacity:1;transform:none}}@keyframes cartPulse{50%{box-shadow:0 20px 48px rgba(4,120,87,.58);transform:translateY(-3px)}}@keyframes countBump{50%{transform:scale(1.35);background:#fbbf24;color:#17324d}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+    @media(max-width:575px){.summary-item{padding:10px;font-size:.8rem}.topbar .btn span:not(.cart-count){display:none}.cart-fab{right:14px;bottom:14px;padding:14px 17px}.product-card{border-radius:15px}.live-status{display:none}}
+  </style>
+</head>
+<body>
+<header class="topbar">
+  <div class="container-fluid px-3 px-lg-4 py-3 d-flex justify-content-between align-items-center gap-3">
+    <div class="d-flex align-items-center gap-3"><div class="brand-mark"><i class="fas fa-industry"></i></div><div><div class="small opacity-75">Manufacturing Unit</div><h1 class="h4 mb-0">MU Stock System</h1></div></div>
+    <div class="d-flex gap-2"><button class="btn top-cart" type="button" data-bs-toggle="offcanvas" data-bs-target="#cartPanel"><i class="fas fa-basket-shopping me-md-2"></i><span>ตะกร้า</span><span class="cart-count ms-2">0</span></button><a class="btn btn-outline-light" href="{{ url_for('user_services', emp_id=user['emp_id']) }}"><i class="fas fa-grid-2 me-md-2"></i><span>หน้าเมนู</span></a></div>
+  </div>
+</header>
+<div class="summary-strip"><div class="container-fluid px-3 px-lg-4 d-flex flex-wrap">
+  <div class="summary-item"><i class="fas fa-user me-2 text-success"></i>{{ user['name'] }}</div>
+  <div class="summary-item"><i class="fas fa-id-badge me-2 text-info"></i>{{ user['emp_id'] }}</div>
+  <div class="summary-item"><i class="fas fa-boxes-stacked me-2 text-warning"></i>{{ products|length }} รายการที่แสดง</div>
+</div></div>
+<main class="container-fluid px-3 px-lg-4 py-4 pb-5">
+  {% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="alert alert-{{ category }} border-0 shadow-sm">{{ message }}</div>{% endfor %}{% endwith %}
+  <section class="search-panel p-3 mb-4">
+    <form method="get" class="row g-2 align-items-center" onsubmit="return false">
+      <div class="col"><div class="input-group"><span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span><input class="form-control border-start-0" id="liveSearch" name="q" value="{{ search }}" placeholder="พิมพ์เพื่อค้นหาแบบเรียลไทม์..." aria-label="ค้นหาสินค้า" autocomplete="off"></div></div>
+      <div class="col-auto live-status"><span id="liveResultCount" class="badge bg-success-subtle text-success px-3 py-2">{{ products|length }} รายการ</span></div>
+      <div class="col-auto"><button class="btn btn-outline-secondary" id="clearSearch" type="button"><i class="fas fa-xmark me-1"></i>ล้าง</button></div>
+    </form>
+  </section>
+  <section aria-labelledby="productsTitle"><div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3"><div><div class="small text-success fw-semibold">เบิกได้ทันที · ไม่ต้อง Approve</div><h2 id="productsTitle" class="h4 mb-0">รายการของ MU</h2></div><div class="d-flex flex-wrap align-items-center gap-2"><span class="small text-muted">ตัด Lot เก่าสุดก่อน (FIFO)</span><button class="btn btn-outline-success" type="button" data-bs-toggle="modal" data-bs-target="#historyModal"><i class="fas fa-clock-rotate-left me-2"></i>ประวัติการเบิกของฉัน</button></div></div>
+    <div class="row g-3" id="productGrid">
+    {% for item in products %}
+      <div class="col-sm-6 col-lg-4 col-xxl-3 product-column">
+        <article class="product-card {% if item['stock']<=0 %}is-out-of-stock{% endif %} p-3 p-xl-4" style="--card-index:{{ loop.index0 }}" data-product-id="{{ item['id'] }}" data-stock="{{ item['stock'] }}" data-name="{{ item['name']|e }}" data-code="{{ item['code']|e }}" data-unit="{{ item['unit']|e }}" data-search="{{ (item['code'] ~ ' ' ~ item['name'] ~ ' ' ~ item['unit'])|lower|e }}">
+          <div class="d-flex justify-content-between gap-2"><div class="product-code">{{ item['code'] }}</div><div class="stock-status d-flex align-items-center gap-2 small text-muted"><span class="stock-ok {% if item['stock']<=0 %}stock-empty{% endif %}"></span><span class="stock-status-text">{{ 'พร้อมเบิก' if item['stock']>0 else 'หมด' }}</span></div></div>
+          <h3 class="product-name mt-2 mb-3">{{ item['name'] }}</h3>
+          <div class="small text-muted">คงเหลือพร้อมเลือก</div><div class="stock-value"><span class="stock-number">{{ item['stock'] }}</span> <span class="stock-unit">{{ item['unit'] }}</span></div>
+          <div class="qty-stepper mt-3"><button type="button" onclick="stepQty(this,-1)" aria-label="ลดจำนวน" {% if item['stock']<=0 %}disabled{% endif %}>−</button><input class="item-qty" type="number" value="{{ 1 if item['stock']>0 else 0 }}" min="{{ 1 if item['stock']>0 else 0 }}" max="{{ item['stock'] }}" aria-label="จำนวนเบิก" {% if item['stock']<=0 %}disabled{% endif %}><button type="button" onclick="stepQty(this,1)" aria-label="เพิ่มจำนวน" {% if item['stock']<=0 %}disabled{% endif %}>+</button></div>
+          <button class="btn btn-success w-100 mt-2 add-cart" type="button" onclick="addToCart(this)" {% if item['stock']<=0 %}disabled{% endif %}><i class="fas fa-cart-plus me-2"></i>เพิ่มลงตะกร้า</button>
+        </article>
+      </div>
+    {% else %}<div class="col-12"><div class="empty-state search-panel"><i class="fas fa-box-open fs-1 mb-3"></i><div>ไม่พบสินค้าที่ค้นหา</div></div></div>{% endfor %}
+    </div>
+  </section>
+</main>
+<button class="cart-fab" id="cartFab" type="button" data-bs-toggle="offcanvas" data-bs-target="#cartPanel"><i class="fas fa-basket-shopping me-1"></i> เปิดตะกร้า<span class="cart-count">0</span></button>
+<aside class="offcanvas offcanvas-end" tabindex="-1" id="cartPanel" aria-labelledby="cartTitle"><div class="offcanvas-header border-bottom"><div><div class="small text-success">เบิกหลายรายการพร้อมกัน</div><h2 class="offcanvas-title h5" id="cartTitle">ตะกร้าเบิก MU</h2></div><button class="btn-close" data-bs-dismiss="offcanvas" aria-label="ปิด"></button></div><div class="offcanvas-body d-flex flex-column"><div id="cartItems" class="flex-grow-1"></div><div id="cartEmpty" class="empty-state"><i class="fas fa-basket-shopping fs-1 mb-3"></i><div>ยังไม่มีสินค้าในตะกร้า</div></div><div id="cartFooter" class="d-none"><div class="cart-total mb-3 d-flex justify-content-between"><span>รวมทั้งหมด</span><strong><span id="cartUnits">0</span> หน่วย</strong></div><form id="checkoutForm" method="post" action="{{ url_for('mu.withdraw_batch',emp_id=user['emp_id']) }}" onsubmit="return requestCheckoutConfirmation(event)"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="items" id="cartPayload"><button class="btn btn-success w-100 py-2" id="checkoutReviewButton"><i class="fas fa-clipboard-check me-2"></i>ตรวจสอบก่อนเบิก</button></form></div></div></aside>
+<div class="modal fade" id="checkoutConfirmModal" tabindex="-1" aria-labelledby="checkoutConfirmTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header border-0 pb-0"><div><div class="small text-warning fw-semibold"><i class="fas fa-triangle-exclamation me-1"></i>ตรวจสอบก่อนตัดสต็อก</div><h2 class="modal-title h5 mt-1" id="checkoutConfirmTitle">ยืนยันรายการเบิกอีกครั้ง</h2></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="กลับไปแก้ไข"></button></div><div class="modal-body"><p class="text-muted small">เมื่อตกลง ระบบจะตัดสต็อกทันทีตาม FIFO กรุณาตรวจสอบสินค้าและจำนวนให้ถูกต้อง</p><div class="border rounded-3 overflow-hidden" id="checkoutConfirmItems"></div><div class="cart-total mt-3 d-flex justify-content-between"><span>รวมจำนวนเบิก</span><strong><span id="checkoutConfirmUnits">0</span> หน่วย</strong></div></div><div class="modal-footer border-0 pt-0"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal"><i class="fas fa-pen me-1"></i>กลับไปแก้ไข</button><button class="btn btn-danger" id="checkoutConfirmButton" type="button"><i class="fas fa-check-circle me-1"></i>ยืนยันเบิกและตัดสต็อก</button></div></div></div></div>
+<div class="modal fade" id="historyModal" tabindex="-1" aria-labelledby="historyTitle" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered"><div class="modal-content"><div class="modal-header"><div><div class="small text-success fw-semibold">MU STOCK HISTORY</div><h2 class="modal-title h5" id="historyTitle"><i class="fas fa-clock-rotate-left me-2 text-success"></i>ประวัติการเบิกของฉัน</h2></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="ปิด"></button></div><div class="modal-body p-0"><div class="table-responsive history-wrap border-0 rounded-0"><table class="table table-hover align-middle mb-0"><thead class="table-light"><tr><th>วันเวลา</th><th>สินค้า</th><th>จำนวน</th><th>สถานะ</th></tr></thead><tbody>{% for row in history %}<tr><td class="text-nowrap">{{ row['created_at'] }}</td><td><strong>{{ row['code'] }}</strong><div class="small text-muted">{{ row['name'] }}</div></td><td>{{ row['qty'] }} {{ row['unit'] }}</td><td><span class="badge {% if row['status']=='Cancelled' %}bg-secondary{% else %}bg-success{% endif %}">{{ row['status'] }}</span></td></tr>{% else %}<tr><td colspan="4" class="empty-state">ยังไม่มีประวัติการเบิก</td></tr>{% endfor %}</tbody></table></div></div><div class="modal-footer"><button class="btn btn-secondary" type="button" data-bs-dismiss="modal">ปิด</button></div></div></div></div>
+<script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+<script>
+const cart=new Map();
+function stepQty(button,delta){const input=button.parentElement.querySelector('input');const max=Number(input.max||1);input.value=Math.max(1,Math.min(max,Number(input.value||1)+delta))}
+function animateToCart(button){if(window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;const target=document.querySelector('.top-cart')||document.getElementById('cartFab');if(!target)return;const start=button.getBoundingClientRect();const end=target.getBoundingClientRect();const flyer=document.createElement('div');flyer.className='fly-to-cart';flyer.innerHTML='<i class="fas fa-box"></i>';flyer.style.left=`${start.left+start.width/2-21}px`;flyer.style.top=`${start.top+start.height/2-21}px`;document.body.appendChild(flyer);const deltaX=end.left+end.width/2-(start.left+start.width/2);const deltaY=end.top+end.height/2-(start.top+start.height/2);const animation=flyer.animate([{transform:'translate(0,0) scale(1)',opacity:1},{transform:`translate(${deltaX*.55}px,${deltaY*.35-45}px) scale(.86)`,opacity:.95,offset:.55},{transform:`translate(${deltaX}px,${deltaY}px) scale(.3)`,opacity:.2}],{duration:620,easing:'cubic-bezier(.2,.75,.25,1)'});animation.onfinish=()=>flyer.remove()}
+function bumpCartCounts(){document.querySelectorAll('.cart-count').forEach(element=>{element.classList.remove('is-bumping');void element.offsetWidth;element.classList.add('is-bumping');element.addEventListener('animationend',()=>element.classList.remove('is-bumping'),{once:true})})}
+function updateProductAvailability(){document.querySelectorAll('[data-product-id]').forEach(card=>{const id=Number(card.dataset.productId);const stock=Number(card.dataset.stock);const reserved=cart.get(id)?.qty||0;const available=Math.max(0,stock-reserved);card.querySelector('.stock-number').textContent=available;const input=card.querySelector('.item-qty');const stepButtons=card.querySelectorAll('.qty-stepper button');const addButton=card.querySelector('.add-cart');const statusText=card.querySelector('.stock-status-text');const fullyReserved=stock>0&&available===0;card.classList.toggle('is-cart-reserved',reserved>0);statusText.textContent=stock<=0?'หมด':fullyReserved?'อยู่ในตะกร้าครบ':'พร้อมเบิก';input.min=available>0?'1':'0';input.max=String(available);input.disabled=available===0;stepButtons.forEach(button=>button.disabled=available===0);if(available>0){if(Number(input.value)<1||Number(input.value)>available)input.value='1';addButton.disabled=false;addButton.innerHTML='<i class="fas fa-cart-plus me-2"></i>เพิ่มลงตะกร้า'}else{input.value='0';addButton.disabled=true;addButton.innerHTML=stock<=0?'<i class="fas fa-ban me-2"></i>สินค้าหมด':'<i class="fas fa-check me-2"></i>อยู่ในตะกร้าครบ'}})}
+function addToCart(button){const card=button.closest('[data-product-id]');const id=Number(card.dataset.productId);const qty=Number(card.querySelector('.item-qty').value);const stock=Number(card.dataset.stock);const current=cart.get(id)?.qty||0;if(!Number.isInteger(qty)||qty<1||current+qty>stock){button.textContent='จำนวนเกินสต็อก';setTimeout(()=>updateProductAvailability(),1200);return}animateToCart(button);cart.set(id,{productId:id,qty:current+qty,name:card.dataset.name,code:card.dataset.code,unit:card.dataset.unit,stock});renderCart(true);button.innerHTML='<i class="fas fa-check me-2"></i>เพิ่มแล้ว';setTimeout(()=>updateProductAvailability(),900)}
+function changeCart(id,delta){const item=cart.get(id);if(!item)return;item.qty=Math.max(0,Math.min(item.stock,item.qty+delta));if(!item.qty)cart.delete(id);renderCart()}
+function renderCart(shouldBump=false){const box=document.getElementById('cartItems');box.replaceChildren();let units=0;cart.forEach(item=>{units+=item.qty;const row=document.createElement('div');row.className='cart-row';const top=document.createElement('div');top.className='d-flex justify-content-between gap-2';const label=document.createElement('div');label.innerHTML=`<strong>${escapeHtml(item.code)}</strong><div class="small text-muted">${escapeHtml(item.name)}</div>`;const controls=document.createElement('div');controls.className='d-flex align-items-center gap-2';controls.innerHTML=`<button class="btn btn-sm btn-outline-secondary" type="button" aria-label="ลด">−</button><strong>${item.qty}</strong><button class="btn btn-sm btn-outline-success" type="button" aria-label="เพิ่ม">+</button>`;controls.children[0].onclick=()=>changeCart(item.productId,-1);controls.children[2].onclick=()=>changeCart(item.productId,1);top.append(label,controls);row.append(top);box.append(row)});document.querySelectorAll('.cart-count').forEach(el=>el.textContent=cart.size);if(shouldBump)bumpCartCounts();document.getElementById('cartFab').classList.toggle('has-items',cart.size>0);document.getElementById('cartUnits').textContent=units;document.getElementById('cartEmpty').classList.toggle('d-none',cart.size>0);document.getElementById('cartFooter').classList.toggle('d-none',cart.size===0);updateProductAvailability()}
+function escapeHtml(value){const node=document.createElement('span');node.textContent=value;return node.innerHTML}
+let checkoutSubmitting=false;
+function requestCheckoutConfirmation(event){
+  event.preventDefault();
+  if(checkoutSubmitting||!cart.size)return false;
+  const items=[...cart.values()];
+  document.getElementById('cartPayload').value=JSON.stringify(items.map(({productId,qty})=>({productId,qty})));
+  const summary=document.getElementById('checkoutConfirmItems');
+  summary.replaceChildren();
+  let totalUnits=0;
+  items.forEach(item=>{
+    totalUnits+=item.qty;
+    const row=document.createElement('div');
+    row.className='d-flex justify-content-between align-items-center gap-3 p-3 border-bottom bg-white';
+    const description=document.createElement('div');
+    const code=document.createElement('strong');
+    code.textContent=item.code;
+    const name=document.createElement('div');
+    name.className='small text-muted';
+    name.textContent=item.name;
+    description.append(code,name);
+    const quantity=document.createElement('strong');
+    quantity.className='text-nowrap text-danger';
+    quantity.textContent=`${item.qty} ${item.unit}`;
+    row.append(description,quantity);
+    summary.appendChild(row);
+  });
+  document.getElementById('checkoutConfirmUnits').textContent=totalUnits;
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('checkoutConfirmModal')).show();
+  return false;
+}
+document.getElementById('checkoutConfirmButton').addEventListener('click',function(){
+  if(checkoutSubmitting)return;
+  checkoutSubmitting=true;
+  this.disabled=true;
+  this.innerHTML='<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>กำลังเบิก...';
+  document.getElementById('checkoutReviewButton').disabled=true;
+  document.getElementById('checkoutForm').submit();
+});
+const liveSearch=document.getElementById('liveSearch');const productColumns=[...document.querySelectorAll('.product-column')];function filterProducts(){const query=liveSearch.value.trim().toLocaleLowerCase('th');let visible=0;productColumns.forEach(column=>{const match=!query||column.querySelector('[data-search]').dataset.search.includes(query);column.classList.toggle('is-filtered',!match);if(match)visible++});document.getElementById('liveResultCount').textContent=`${visible} รายการ`}liveSearch.addEventListener('input',filterProducts);document.getElementById('clearSearch').addEventListener('click',()=>{liveSearch.value='';filterProducts();liveSearch.focus()});filterProducts();
+</script>
+</body></html>

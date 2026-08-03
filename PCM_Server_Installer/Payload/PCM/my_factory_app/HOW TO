@@ -1,0 +1,35 @@
+
+git bash
+source venv/bin/activate(เข้า venv ที่ทำการติดตั้ง python ไว้เพื่อรันสคริปต์)
+cd my_factory_app(เข้าไปยังโฟลเดอร์โปรเจค)
+
+pip install -r requirements.txt(ติดตั้ง dependencies ที่จำเป็นสำหรับโปรเจค)
+
+PowerShell
+.\venv\Scripts\Activate.ps1 (เข้า venv ที่ทำการติดตั้ง python ไว้เพื่อรันสคริปต์)
+py app.py (รันแอปพลิเคชัน)
+
+Environment variables
+ตอนนี้โปรเจกต์จะอ่านค่าจากไฟล์ .env ในโฟลเดอร์ my_factory_app อัตโนมัติ
+เช่น FLASK_SECRET_KEY, LINE tokens และ STOCK_PCM_CLEAR_PASSWORD
+
+gitbash
+
+python build_db.py (สร้างฐานข้อมูลและตารางที่จำเป็นสำหรับโปรเจค)
+python import_employees.py (นำเข้าข้อมูลพนักงานจากไฟล์ Staff working update 6-2-2026.csv)
+python import_fifo_data.py (นำเข้าข้อมูล FIFO จากไฟล์ DATA_JK.xlsx)
+python update_db.py (อัพเดตฐานข้อมูลด้วยข้อมูลที่นำเข้า)
+python fix_missing_columns.py (แก้ไขปัญหาคอลัมน์ที่ขาดหายไปในฐานข้อมูล)
+python app.py (รันแอปพลิเคชัน)
+
+
+LINE(CC)
+LINE_CHANNEL_ACCESS_TOKEN = ตั้งผ่าน environment variable
+LINE_ADMIN_USER_ID = ตั้งผ่าน environment variable
+
+LINE(PC1)
+LINE_TEST_CHANNEL_ACCESS_TOKEN = ตั้งผ่าน environment variable
+LINE_TEST_ADMIN_USER_ID = ตั้งผ่าน environment variable
+
+
+cd "C:\Users\sattarned\Documents\GitHub\PCM\my_factory_app"; ..\.venv\Scripts\python.exe app.py

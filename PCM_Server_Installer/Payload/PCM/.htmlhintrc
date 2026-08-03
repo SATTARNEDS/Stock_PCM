@@ -1,0 +1,8 @@
+{
+  "attr-unsafe-chars": false,
+  "attr-value-not-empty": false,
+  "tag-pair": true,
+  "tagname-lowercase": true,
+  "id-unique": true,
+  "src-not-empty": true
+}

@@ -1,21 +1,18 @@
 <!DOCTYPE html>
-<html lang="th">
+<html lang="th" data-bs-theme="light">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@200;300;400;500;600;700&display=swap"
-        rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/th.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}">
+    <script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/sweetalert2/sweetalert2.all.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.css') }}">
+    <script src="{{ url_for('static', filename='vendor/flatpickr/flatpickr.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/flatpickr/l10n/th.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 
     <style>
@@ -29,12 +26,15 @@
 
         /* --- 1. โครงสร้าง Sidebar และ Main Content --- */
         :root {
-            --sidebar-width: 260px;
-            --dark-bg: #151d2b;
-            --panel-bg: rgba(255, 255, 255, 0.88);
-            --border-soft: rgba(9, 64, 125, 0.14);
-            --brand: #0d6efd;
-            --brand-dark: #0a4aa4;
+            --sidebar-width: 248px;
+            --sidebar-collapsed-width: 72px;
+            --dark-bg: #212631;
+            --panel-bg: #212631;
+            --border-soft: #323a49;
+            --brand: #321fdb;
+            --brand-dark: #2819ae;
+            --page-bg: #181924;
+            --muted-text: #9da5b1;
             --motion-multiplier: 1;
             --action-primary: #0d6efd;
             --action-primary-dark: #0b57cf;
@@ -49,36 +49,49 @@
         }
 
         body {
-            background:
-                radial-gradient(circle at 9% 10%, #d9ecff 0%, rgba(217, 236, 255, 0) 34%),
-                radial-gradient(circle at 95% 90%, #e3f9ef 0%, rgba(227, 249, 239, 0) 35%),
-                linear-gradient(145deg, #f2f7ff 0%, #f7fbff 52%, #f4faf7 100%);
+            background: var(--page-bg);
+            color: #d8dbe0;
             position: relative;
             min-height: 100vh;
         }
 
         body::before {
-            content: "";
-            position: fixed;
-            inset: 0;
-            pointer-events: none;
-            background-image: linear-gradient(rgba(13, 110, 253, 0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(13, 110, 253, 0.025) 1px, transparent 1px);
-            background-size: 28px 28px;
-            z-index: 0;
+            display: none;
         }
 
         .content-wrapper {
-            margin-left: 260px;
+            margin-left: var(--sidebar-width);
             position: relative;
             z-index: 1;
-            animation: pageRise 0.5s ease;
+            padding-top: 0 !important;
+            animation: pageRise 0.35s ease;
         }
 
         .sidebar {
-            background: linear-gradient(175deg, #101724 0%, #182338 50%, #0f1725 100%);
+            background: #212631 !important;
             min-height: 100vh;
             transition: all 0.3s ease;
             border-right: none;
+        }
+
+        .content-wrapper {
+            transition: width 0.22s ease, margin-left 0.22s ease;
+        }
+
+        .sidebar-toggle-btn {
+            width: 40px;
+            height: 40px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #c4c9d0;
+            border: 0;
+            border-radius: 50%;
+            background: transparent;
+        }
+
+        .sidebar-toggle-btn:hover {
+            background: #323a49;
         }
 
         .offcanvas.sidebar {
@@ -94,13 +107,96 @@
                 left: 0;
                 width: var(--sidebar-width);
                 z-index: 1040;
-                box-shadow: 8px 0 24px rgba(6, 14, 29, 0.25);
+                box-shadow: 2px 0 10px rgba(20, 30, 45, 0.16);
             }
 
             .content-wrapper {
                 margin-left: var(--sidebar-width);
                 width: calc(100% - var(--sidebar-width));
                 min-height: 100vh;
+            }
+
+            body.sidebar-collapsed .sidebar {
+                width: var(--sidebar-collapsed-width);
+            }
+
+            body.sidebar-collapsed .content-wrapper {
+                margin-left: var(--sidebar-collapsed-width);
+                width: calc(100% - var(--sidebar-collapsed-width));
+            }
+
+            body.sidebar-collapsed .sidebar .nav-category,
+            body.sidebar-collapsed .sidebar h5,
+            body.sidebar-collapsed .sidebar small,
+            body.sidebar-collapsed .sidebar .menu-counter-badge,
+            body.sidebar-collapsed .sidebar .px-4.py-3.mt-auto {
+                display: none !important;
+            }
+
+            body.sidebar-collapsed .sidebar .px-4.mb-4 {
+                padding: 0 !important;
+                margin: 4px 0 18px !important;
+            }
+
+            body.sidebar-collapsed .sidebar .px-4.mb-4 .d-flex {
+                justify-content: center;
+            }
+
+            body.sidebar-collapsed .sidebar .nav-link {
+                width: var(--sidebar-collapsed-width);
+                min-height: 48px;
+                padding: 12px 0;
+                justify-content: center;
+                overflow: hidden;
+                white-space: nowrap;
+                font-size: 0;
+            }
+
+            body.sidebar-collapsed .sidebar .nav-link span {
+                font-size: 0;
+            }
+
+            body.sidebar-collapsed .sidebar .nav-link i {
+                width: 28px;
+                margin: 0 !important;
+                font-size: 1.1rem;
+            }
+
+            body.sidebar-collapsed .sidebar:hover {
+                width: var(--sidebar-width);
+                box-shadow: 10px 0 30px rgba(0, 0, 0, 0.34);
+            }
+
+            body.sidebar-collapsed .sidebar:hover .nav-category,
+            body.sidebar-collapsed .sidebar:hover h5,
+            body.sidebar-collapsed .sidebar:hover small,
+            body.sidebar-collapsed .sidebar:hover .menu-counter-badge {
+                display: block !important;
+            }
+
+            body.sidebar-collapsed .sidebar:hover .px-4.mb-4 {
+                padding-left: 1.5rem !important;
+                padding-right: 1.5rem !important;
+            }
+
+            body.sidebar-collapsed .sidebar:hover .px-4.mb-4 .d-flex {
+                justify-content: flex-start;
+            }
+
+            body.sidebar-collapsed .sidebar:hover .nav-link {
+                width: var(--sidebar-width);
+                padding: 10px 20px;
+                justify-content: flex-start;
+                font-size: 0.95rem;
+            }
+
+            body.sidebar-collapsed .sidebar:hover .nav-link span {
+                font-size: 0.95rem;
+            }
+
+            body.sidebar-collapsed .sidebar:hover .nav-link i {
+                width: 25px;
+                margin-right: 10px !important;
             }
         }
 
@@ -128,16 +224,16 @@
         }
 
         .nav-link {
-            color: #ced4da !important;
-            padding: 11px 22px;
+            color: rgba(255, 255, 255, 0.72) !important;
+            padding: 10px 20px;
             font-size: 0.95rem;
             display: flex;
             align-items: center;
             transition: all 0.25s;
             text-decoration: none;
             border-left: 4px solid transparent;
-            border-radius: 0 14px 14px 0;
-            margin-right: 10px;
+            border-radius: 0;
+            margin-right: 0;
         }
 
         .nav-link i {
@@ -148,16 +244,16 @@
 
         .nav-link:hover {
             color: #fff !important;
-            background-color: rgba(115, 170, 255, 0.14);
-            padding-left: 30px;
+            background-color: rgba(255, 255, 255, 0.08);
+            padding-left: 24px;
         }
 
         .nav-link.active {
             color: #fff !important;
-            background: linear-gradient(90deg, rgba(13, 110, 253, 0.22), rgba(13, 110, 253, 0.06));
-            border-left-color: #76adff;
+            background: #321fdb;
+            border-left-color: #8a7cff;
             font-weight: 500;
-            box-shadow: 0 8px 22px rgba(13, 110, 253, 0.18);
+            box-shadow: inset 4px 0 0 #8a7cff;
         }
 
         .navbar-dark.bg-dark {
@@ -170,17 +266,97 @@
         .content-wrapper .card {
             background: var(--panel-bg);
             border: 1px solid var(--border-soft) !important;
-            box-shadow: 0 12px 30px rgba(12, 48, 90, 0.08) !important;
-            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(60, 75, 100, 0.08) !important;
+            border-radius: 6px;
         }
 
         .content-wrapper .card:hover {
-            box-shadow: 0 18px 36px rgba(12, 48, 90, 0.12) !important;
+            box-shadow: 0 4px 14px rgba(60, 75, 100, 0.13) !important;
+        }
+
+        .admin-topbar {
+            min-height: 64px;
+            background: #212631;
+            border-bottom: 1px solid var(--border-soft);
+            box-shadow: 0 1px 4px rgba(60, 75, 100, 0.08);
+        }
+
+        .admin-breadcrumb {
+            color: var(--muted-text);
+            font-size: 0.82rem;
+        }
+
+        .admin-page-title {
+            color: #f0f1f3;
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+
+        .admin-user-chip {
+            min-height: 40px;
+            border-left: 1px solid var(--border-soft);
+            color: #f0f1f3;
+        }
+
+        .admin-avatar {
+            width: 34px;
+            height: 34px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            color: #fff;
+            background: linear-gradient(135deg, #321fdb, #39f);
+            box-shadow: 0 2px 8px rgba(50, 31, 219, 0.25);
+        }
+
+        .admin-header-tool {
+            width: 36px;
+            height: 36px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            color: #4f5d73;
+        }
+
+        .admin-account-menu {
+            min-width: 230px;
+        }
+
+        .admin-user-chip.dropdown-toggle::after {
+            margin-left: 0.35rem;
+            color: var(--muted-text);
+        }
+
+        .dashboard-content {
+            padding-top: 24px;
+            padding-bottom: 32px;
+        }
+
+        .content-wrapper .table {
+            --bs-table-bg: transparent;
+            --bs-table-color: #d8dbe0;
+            --bs-table-border-color: #323a49;
+            --bs-table-hover-bg: rgba(255, 255, 255, 0.035);
+        }
+
+        .content-wrapper .table thead th {
+            background: #1b1f2a !important;
+            color: #c4c9d0 !important;
+        }
+
+        .admin-account-menu {
+            background: #212631;
+            border: 1px solid #323a49 !important;
         }
 
         .stat-card {
             overflow: hidden;
             position: relative;
+            min-height: 128px;
+            color: #fff;
+            border: 0 !important;
             transition: transform 0.25s ease, box-shadow 0.25s ease;
         }
 
@@ -192,11 +368,52 @@
             right: -46px;
             top: -52px;
             border-radius: 50%;
-            background: rgba(13, 110, 253, 0.06);
+            background: rgba(255, 255, 255, 0.12);
+        }
+
+        .stat-card::before {
+            content: "";
+            position: absolute;
+            inset: auto 0 0;
+            height: 34px;
+            background: linear-gradient(90deg, rgba(255, 255, 255, 0.12), transparent);
+        }
+
+        .pending-widget { background: #5856d6 !important; }
+        .low-stock-widget { background: #3399ff !important; }
+        .online-widget { background: #f9b115 !important; }
+        .email-widget { background: #e55353 !important; }
+        .stat-card .text-muted,
+        .stat-card .text-dark { color: #fff !important; }
+        .stat-card .small { color: rgba(255, 255, 255, 0.8) !important; }
+        .stat-card .stat-icon {
+            position: absolute;
+            right: 16px;
+            top: 16px;
+            width: auto;
+            height: auto;
+            padding: 0 !important;
+            color: rgba(255, 255, 255, 0.34) !important;
+            background: transparent !important;
+        }
+        .stat-card .badge {
+            color: #fff !important;
+            background: rgba(255, 255, 255, 0.18) !important;
         }
 
         .stat-card:hover {
             transform: translateY(-4px);
+        }
+
+        /* เมื่อยอดสต็อกมีการอัปเดต ให้ไฮไลต์แถวชั่วคราว */
+        .stock-updated {
+            animation: highlightFade 2.2s ease forwards;
+            box-shadow: 0 6px 18px rgba(13,110,253,0.12) !important;
+        }
+        @keyframes highlightFade {
+            0% { background-color: rgba(13,110,253,0.22); }
+            40% { background-color: rgba(13,110,253,0.12); }
+            100% { background-color: transparent; }
         }
 
         .stat-icon {
@@ -647,6 +864,11 @@
             font-size: 0.7rem;
             min-width: 20px;
         }
+        /* ไม่มีรายการใหม่ต้องซ่อนเสมอ แม้ Sidebar แบบย่อกำลังถูก hover */
+        .sidebar .menu-counter-badge.is-empty,
+        body.sidebar-collapsed .sidebar:hover .menu-counter-badge.is-empty {
+            display: none !important;
+        }
 
         /* ใส่ในส่วน <style> */
         .nav-link i {
@@ -686,14 +908,14 @@
         }
 
         .dashboard-section {
-            opacity: 0;
-            transform: translateY(14px);
+            opacity: 1;
+            transform: none;
             transition: opacity calc(0.45s * var(--motion-multiplier)) ease, transform calc(0.45s * var(--motion-multiplier)) ease;
         }
 
         .dashboard-section.revealed {
             opacity: 1;
-            transform: translateY(0);
+            transform: none;
         }
 
         .stock-cat-selector {
@@ -779,8 +1001,129 @@
         }
 
         .split-detail-box {
-            background: #f0f8ff;
-            border: 1px dashed #86b7fe;
+            background: #f8fbff;
+            border: 1px solid #cfe2ff;
+        }
+
+        .split-section {
+            min-width: 0;
+            padding: 1rem;
+            background: #fff;
+            border: 1px solid #dfe7f1;
+            border-radius: 0.75rem;
+        }
+
+        .split-section + .split-section {
+            margin-top: 1rem;
+        }
+
+        .split-section-title {
+            display: flex;
+            gap: 0.65rem;
+            align-items: flex-start;
+            margin-bottom: 0.85rem;
+            color: #17365d;
+        }
+
+        .split-step-number {
+            display: inline-flex;
+            flex: 0 0 1.65rem;
+            width: 1.65rem;
+            height: 1.65rem;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            color: #fff;
+            background: #0d6efd;
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+
+        .split-flow-preview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            align-items: center;
+            margin: 0.25rem 0 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: 0.65rem;
+            color: #17365d;
+            background: #eaf3ff;
+            font-weight: 700;
+        }
+
+        .split-flow-node {
+            padding: 0.35rem 0.7rem;
+            border: 1px solid #b8d3fb;
+            border-radius: 999px;
+            background: #fff;
+        }
+
+        .split-flow-arrow {
+            color: #5f7693;
+        }
+
+        .split-calculated-field {
+            background: #eef6ff !important;
+            color: #174d88;
+            font-weight: 700;
+        }
+
+        .split-open-stock {
+            border-color: #ffd98a;
+            background: #fffaf0;
+        }
+
+        .split-summary-card {
+            margin: 0;
+            padding: 1rem;
+            border: 1px solid #8dd9ea;
+            border-radius: 0.75rem;
+            color: #123f5a;
+            background: #e9faff;
+        }
+
+        .split-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.65rem;
+            margin-top: 0.75rem;
+        }
+
+        .split-summary-item {
+            min-width: 0;
+            padding: 0.7rem 0.8rem;
+            border-radius: 0.6rem;
+            background: rgba(255, 255, 255, 0.82);
+        }
+
+        .split-summary-item span,
+        .split-summary-item small {
+            display: block;
+        }
+
+        .split-summary-item strong {
+            display: block;
+            margin-top: 0.15rem;
+            color: #0b3760;
+            font-size: 1rem;
+            overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 767.98px) {
+            .split-summary-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .split-flow-preview {
+                align-items: stretch;
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .split-flow-arrow {
+                transform: rotate(90deg);
+            }
         }
 
         .unit-field-group .form-control {
@@ -1238,6 +1581,381 @@
         .card-header-scheduled { background: linear-gradient(135deg, #ff6b35, #f7931e); color: #fff; }
         .modal-header-reschedule { background: linear-gradient(135deg, #0b6cc7, #0e91d8); }
         .low-stock-search-input { width: 160px; }
+
+        /* Light admin theme: ลดความเข้มของหน้าสต็อกโดยไม่เปลี่ยนโครงสร้างและฟังก์ชัน */
+        :root {
+            --page-bg: #eef3f8;
+            --panel-bg: #ffffff;
+            --border-soft: #d9e1ea;
+            --muted-text: #66758a;
+        }
+        body {
+            background: var(--page-bg);
+            color: #27364b;
+        }
+        .sidebar {
+            background: #29384d !important;
+            border-right: 1px solid #364960;
+            transition: none !important;
+        }
+        .content-wrapper {
+            transition: none !important;
+        }
+        .sidebar .nav-category {
+            color: #aebdce;
+            font-weight: 500;
+        }
+        .sidebar .nav-link {
+            color: #e0e7ef !important;
+            transition: background-color .12s ease, color .12s ease;
+        }
+        .sidebar .nav-link:hover {
+            color: #ffffff !important;
+            background: #354a63;
+            padding-left: 20px;
+        }
+        .sidebar .nav-link.active {
+            color: #ffffff !important;
+            background: #3867df;
+            border-left-color: #9fc0ff;
+            box-shadow: inset 4px 0 0 #9fc0ff;
+        }
+        .admin-topbar,
+        .navbar-dark.bg-dark {
+            background: #ffffff !important;
+            color: #27364b;
+            border-bottom-color: var(--border-soft);
+            box-shadow: 0 2px 8px rgba(31, 54, 82, .07);
+        }
+        .admin-page-title,
+        .admin-user-chip {
+            color: #27364b;
+        }
+        .sidebar-toggle-btn {
+            color: #52647a;
+        }
+        .sidebar-toggle-btn:hover {
+            color: #254d82;
+            background: #edf2f7;
+        }
+        .content-wrapper .card {
+            background: #ffffff;
+            color: #27364b;
+            border-color: var(--border-soft) !important;
+            box-shadow: 0 3px 12px rgba(31, 54, 82, .07) !important;
+        }
+        .content-wrapper .table {
+            --bs-table-bg: #ffffff;
+            --bs-table-color: #33445a;
+            --bs-table-border-color: #e1e7ee;
+            --bs-table-hover-bg: #f4f8fc;
+            color: #33445a;
+        }
+        .content-wrapper .table thead th {
+            background: #edf2f7 !important;
+            color: #405269 !important;
+            border-bottom-color: #d6dee8;
+        }
+        .content-wrapper .table tbody td {
+            background-color: #ffffff;
+            color: #33445a;
+        }
+        .content-wrapper .table tbody tr:hover > * {
+            background-color: #f4f8fc !important;
+        }
+        .content-wrapper .table tbody tr.table-danger > * {
+            background-color: #fde8ea !important;
+            color: #842029;
+        }
+        .content-wrapper .table tbody tr.table-warning > * {
+            background-color: #fff4d6 !important;
+            color: #664d03;
+        }
+        .content-wrapper .table tbody tr.table-info > * {
+            background-color: #e4f3fb !important;
+            color: #055160;
+        }
+        .content-wrapper .text-muted {
+            color: #6b798c !important;
+        }
+        .content-wrapper .stat-card .text-muted {
+            color: rgba(255, 255, 255, .86) !important;
+        }
+        .content-wrapper .stat-card .text-dark,
+        .content-wrapper .stat-card .h4 {
+            color: #ffffff !important;
+            text-shadow: 0 1px 2px rgba(20, 30, 50, .18);
+        }
+        .content-wrapper .stat-card .stat-icon {
+            color: rgba(255, 255, 255, .48) !important;
+        }
+        .content-wrapper .stat-card .badge {
+            color: #ffffff !important;
+            background: rgba(31, 41, 55, .24) !important;
+            border: 1px solid rgba(255, 255, 255, .22);
+        }
+        .admin-account-menu {
+            background: #ffffff;
+            color: #27364b;
+            border-color: var(--border-soft) !important;
+        }
+        .admin-account-menu .dropdown-item {
+            color: #33445a;
+        }
+        .admin-account-menu .dropdown-item:hover {
+            background: #edf3f8;
+        }
+        @media (min-width: 992px) {
+            body.sidebar-collapsed .sidebar:hover {
+                box-shadow: 8px 0 24px rgba(31, 54, 82, .16);
+            }
+        }
+
+        /* Compact sidebar: เก็บทุกเมนูให้อยู่ในกรอบและลดพื้นที่ว่างที่ไม่จำเป็น */
+        .sidebar {
+            overflow: hidden;
+            transition: width .18s cubic-bezier(.4, 0, .2, 1) !important;
+            will-change: width;
+        }
+        .sidebar > .d-flex {
+            height: 100%;
+            min-height: 0;
+            padding-top: .75rem !important;
+            padding-bottom: .65rem !important;
+            overflow: hidden;
+        }
+        .sidebar > .d-flex > .px-4.mb-4 {
+            margin-top: 0 !important;
+            margin-bottom: .8rem !important;
+            padding-left: 1.15rem !important;
+            padding-right: 1.15rem !important;
+        }
+        .sidebar > .d-flex > .flex-grow-1 {
+            min-height: 0;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            scrollbar-width: thin;
+            scrollbar-color: #718198 transparent;
+        }
+        .sidebar > .d-flex > .flex-grow-1::-webkit-scrollbar {
+            width: 5px;
+        }
+        .sidebar > .d-flex > .flex-grow-1::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .sidebar > .d-flex > .flex-grow-1::-webkit-scrollbar-thumb {
+            background: #718198;
+            border-radius: 999px;
+        }
+        .sidebar .nav-category {
+            padding: .85rem 1rem .28rem;
+            font-size: .66rem;
+            letter-spacing: .065em;
+            line-height: 1.2;
+        }
+        .sidebar-group-toggle {
+            width: 100%;
+            min-height: 38px;
+            display: flex;
+            align-items: center;
+            gap: .55rem;
+            padding: .48rem 1rem;
+            color: #b9c6d6;
+            background: transparent;
+            border: 0;
+            border-top: 1px solid rgba(255,255,255,.055);
+            font-size: .82rem;
+            font-weight: 600;
+            letter-spacing: .02em;
+            text-align: left;
+            position: relative;
+            overflow: hidden;
+            transition: color .18s ease, background-color .18s ease, box-shadow .18s ease;
+        }
+        .sidebar-group-toggle:hover,
+        .sidebar-group-toggle[aria-expanded="true"] {
+            color: #ffffff;
+            background: rgba(255,255,255,.055);
+        }
+        .sidebar-group-toggle:hover {
+            box-shadow: none;
+        }
+        .sidebar-group-toggle .group-icon {
+            width: 20px;
+            color: #8fa8c2;
+            font-size: 1rem;
+            text-align: center;
+            transition: color .18s ease, transform .18s ease;
+        }
+        .sidebar-group-toggle:hover .group-icon {
+            color: #8eb6ff;
+            transform: none;
+        }
+        .sidebar-group-toggle .group-chevron {
+            margin-left: auto;
+            font-size: .68rem;
+            transition: transform .2s ease, color .18s ease;
+        }
+        .sidebar-group-toggle[aria-expanded="true"] .group-chevron {
+            transform: rotate(90deg);
+        }
+        .sidebar-submenu {
+            padding: .18rem 0 .35rem;
+            background: rgba(11, 25, 43, .13);
+        }
+        .sidebar-submenu .nav-link {
+            padding-left: 1.35rem;
+            position: relative;
+            transition: color .18s ease, background-color .18s ease, box-shadow .18s ease, transform .18s ease;
+        }
+        .sidebar-submenu .nav-link:hover {
+            padding-left: 1.35rem;
+            transform: none;
+            box-shadow: none;
+        }
+        .sidebar-submenu .nav-link i {
+            transition: color .18s ease, transform .18s ease;
+        }
+        .sidebar-submenu .nav-link:hover i {
+            transform: none;
+        }
+        .sidebar .nav-link {
+            min-width: 0;
+            min-height: 40px;
+            padding: .48rem 1rem;
+            font-size: .86rem;
+            line-height: 1.2;
+            gap: .2rem;
+        }
+        .sidebar .nav-link:hover {
+            padding-left: 1rem;
+        }
+        .sidebar .nav-link > span:first-child {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .sidebar .nav-link i {
+            width: 22px;
+            margin-right: .35rem !important;
+            font-size: 1rem;
+            flex: 0 0 22px;
+            text-align: center;
+        }
+        .sidebar .menu-counter-badge {
+            flex: 0 0 auto;
+            margin-left: auto;
+        }
+        .sidebar > .d-flex > .px-4.py-3.mt-auto {
+            padding: .7rem 1rem 0 !important;
+            flex: 0 0 auto;
+        }
+        .sidebar > .d-flex > .px-4.py-3.mt-auto .btn {
+            min-height: 36px;
+            padding: .36rem .65rem;
+            font-size: .82rem;
+        }
+        @media (min-width: 992px) {
+            body.sidebar-collapsed .sidebar:hover .nav-link {
+                padding: .48rem 1rem;
+                font-size: .86rem;
+            }
+            body.sidebar-collapsed .sidebar:hover .nav-link span {
+                font-size: .86rem;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-group-toggle {
+                width: var(--sidebar-collapsed-width);
+                min-height: 46px;
+                justify-content: center;
+                padding: .48rem 0;
+                font-size: 0;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-group-toggle .group-icon {
+                display: inline-block;
+                width: 24px;
+                flex: 0 0 24px;
+                color: #c5d3e3;
+                font-size: 1.05rem;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-group-toggle:hover .group-icon {
+                transform: none;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-group-toggle .group-chevron {
+                display: none;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-submenu .nav-link > span:first-child {
+                width: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                overflow: visible;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-submenu .nav-link > span:first-child i {
+                display: inline-block;
+                font-size: 1.05rem;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-submenu .nav-link.with-counter {
+                position: relative;
+            }
+            body.sidebar-collapsed .sidebar .sidebar-submenu .menu-counter-badge {
+                position: absolute;
+                top: 5px;
+                right: 7px;
+                display: inline-flex !important;
+                align-items: center;
+                justify-content: center;
+                min-width: 18px;
+                height: 18px;
+                padding: 0 5px;
+                margin: 0;
+                font-size: .62rem !important;
+                line-height: 1;
+                z-index: 2;
+            }
+            body.sidebar-collapsed .sidebar:hover .sidebar-group-toggle {
+                width: var(--sidebar-width);
+                justify-content: flex-start;
+                padding: .48rem 1rem;
+                font-size: .82rem;
+            }
+            body.sidebar-collapsed .sidebar:hover .sidebar-submenu .nav-link > span:first-child {
+                width: auto;
+                display: inline;
+                overflow: hidden;
+            }
+            body.sidebar-collapsed .sidebar:hover .sidebar-submenu .menu-counter-badge {
+                display: inline-block !important;
+                position: static;
+                min-width: 20px;
+                height: auto;
+                padding: .35em .65em;
+                margin-left: auto;
+                font-size: .7rem !important;
+            }
+            body.sidebar-collapsed .sidebar:hover .sidebar-group-toggle .group-chevron {
+                display: inline-block;
+            }
+            body.sidebar-collapsed .sidebar:hover .px-4.mb-4 {
+                padding-left: 1.15rem !important;
+                padding-right: 1.15rem !important;
+            }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .sidebar-group-toggle,
+            .sidebar-group-toggle .group-icon,
+            .sidebar-group-toggle .group-chevron,
+            .sidebar-submenu .nav-link,
+            .sidebar-submenu .nav-link i {
+                transition: none !important;
+                transform: none !important;
+            }
+        }
+        /* ต้องอยู่ท้ายสุด: ป้องกันกฎ hover ของ Sidebar แสดง Badge เลข 0 กลับขึ้นมา */
+        #navSupportBadge[hidden],
+        #supportInboxBadge[hidden] {
+            display: none !important;
+        }
     </style>
 </head>
 
@@ -1261,97 +1979,109 @@
     <div class="offcanvas-lg offcanvas-start sidebar bg-dark shadow-sm" id="sidebarMenu" tabindex="-1">
         <div class="d-flex flex-column h-100 py-3">
             <div class="px-4 mb-4 mt-2">
-                <h5 class="text-white fw-medium mb-1"><i class="fas fa-shield-alt text-primary me-2"></i>{{ role|upper
-                    }}
-                </h5>
-                <small class="text-white-50">ยินดีต้อนรับ, {{ session.get('admin_name') }}</small>
+                <div class="d-flex align-items-center gap-3">
+                    <span class="admin-avatar"><i class="fas fa-cubes-stacked"></i></span>
+                    <div>
+                        <h5 class="text-white fw-semibold mb-0">PCM Admin</h5>
+                        <small class="text-white-50">{{ role|upper }}</small>
+                    </div>
+                </div>
             </div>
 
             <div class="flex-grow-1 overflow-auto">
-                <div class="nav-category text-white-50">เมนูระบบ</div>
-                <a href="{{ url_for('admin_dashboard', module='stock') }}" class="nav-link with-counter {% if admin_module == 'stock' %}active{% endif %}">
-                    <span><i class="fas fa-boxes-stacked me-2"></i> Stock เบิกของ</span>
-                    {% if stock_pending_count > 0 %}
-                    <span class="badge bg-danger rounded-pill menu-counter-badge">{{ stock_pending_count }}</span>
-                    {% endif %}
-                </a>
-                <a href="{{ url_for('admin_dashboard', module='ga') }}" class="nav-link with-counter {% if admin_module == 'ga' %}active{% endif %}">
-                    <span><i class="fas fa-screwdriver-wrench me-2 text-warning"></i> GA Request</span>
-                    {% if ga_pending_count > 0 %}
-                    <span class="badge bg-danger rounded-pill menu-counter-badge">{{ ga_pending_count }}</span>
-                    {% endif %}
-                </a>
-                <a href="{{ url_for('admin_dashboard', module='vehicle') }}" class="nav-link {% if admin_module == 'vehicle' %}active{% endif %}">
-                    <i class="fas fa-car-side me-2"></i> ระบบจองรถ
-                </a>
-                <a href="{{ url_for('admin_dashboard', module='support') }}" class="nav-link with-counter {% if admin_module == 'support' %}active{% endif %}" id="navSupportLink">
-                    <span><i class="fas fa-headset me-2 text-info"></i> Support Chat</span>
-                <span class="badge bg-danger rounded-pill menu-counter-badge" id="navSupportBadge" style="display: none;">0</span>
-                </a>
+                <button class="sidebar-group-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarApplications" aria-expanded="true" aria-controls="sidebarApplications"><i class="fas fa-cubes-stacked group-icon"></i><span>Applications</span><i class="fas fa-chevron-right group-chevron"></i></button>
+                <div class="collapse show sidebar-submenu" id="sidebarApplications">
+                    <a href="{{ url_for('admin_dashboard', module='stock') }}" class="nav-link with-counter {% if admin_module == 'stock' %}active{% endif %}">
+                        <span><i class="fas fa-boxes-stacked me-2"></i> Stock เบิกของ</span>
+                        {% if stock_pending_count > 0 %}
+                        <span class="badge bg-danger rounded-pill menu-counter-badge">{{ stock_pending_count }}</span>
+                        {% endif %}
+                    </a>
+                    <a href="{{ url_for('admin_dashboard', module='ga') }}" class="nav-link with-counter {% if admin_module == 'ga' %}active{% endif %}">
+                        <span><i class="fas fa-screwdriver-wrench me-2 text-warning"></i> GA Request</span>
+                        {% if ga_pending_count > 0 %}
+                        <span class="badge bg-danger rounded-pill menu-counter-badge">{{ ga_pending_count }}</span>
+                        {% endif %}
+                    </a>
+                    <a href="{{ url_for('admin_dashboard', module='support') }}" class="nav-link with-counter {% if admin_module == 'support' %}active{% endif %}" id="navSupportLink">
+                        <span><i class="fas fa-headset me-2 text-info"></i> Support Chat</span>
+                        <span class="badge bg-danger rounded-pill menu-counter-badge is-empty" id="navSupportBadge" aria-hidden="true" hidden>0</span>
+                    </a>
+                </div>
 
                 {% if admin_module == 'stock' %}
-                <div class="nav-category text-white-50">จัดการ Stock</div>
-                <a href="javascript:void(0)" class="nav-link" data-bs-toggle="modal" data-bs-target="#addProductModal">
-                    <i class="fas fa-plus-circle me-2 text-success"></i> เพิ่มของใหม่
-                </a>
-                <a href="{{ url_for('export_excel') }}" class="nav-link">
-                    <i class="fas fa-file-excel me-2 text-info"></i> Export ข้อมูล
-                </a>
-                <a href="javascript:void(0)" onclick="document.getElementById('importFile').click()" class="nav-link">
-                    <i class="fas fa-file-import me-2 text-info"></i> Import ข้อมูล
-                </a>
+                <button class="sidebar-group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarStockTools" aria-expanded="false" aria-controls="sidebarStockTools"><i class="fas fa-box-open group-icon"></i><span>จัดการ Stock</span><i class="fas fa-chevron-right group-chevron"></i></button>
+                <div class="collapse sidebar-submenu" id="sidebarStockTools">
+                    <a href="javascript:void(0)" class="nav-link" data-bs-toggle="modal" data-bs-target="#addProductModal">
+                        <i class="fas fa-plus-circle me-2 text-success"></i> เพิ่มของใหม่
+                    </a>
+                    <a href="{{ url_for('export_excel') }}" class="nav-link">
+                        <i class="fas fa-file-excel me-2 text-info"></i> Export ข้อมูล
+                    </a>
+                    <a href="javascript:void(0)" onclick="document.getElementById('importFile').click()" class="nav-link">
+                        <i class="fas fa-file-import me-2 text-info"></i> Import ข้อมูล
+                    </a>
+                </div>
                 {% endif %}
 
-                <div class="nav-category text-white-50">รายงาน & การทำรายการ</div>
+                <button class="sidebar-group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarReports" aria-expanded="false" aria-controls="sidebarReports"><i class="fas fa-chart-column group-icon"></i><span>Reports & Operations</span><i class="fas fa-chevron-right group-chevron"></i></button>
+                <div class="collapse sidebar-submenu" id="sidebarReports">
                 {% if admin_module == 'stock' %}
-                <a href="javascript:void(0)" class="nav-link" onclick="toggleReportSection()">
-                    <i class="fas fa-chart-line me-2 text-warning"></i> รายงานประจำเดือน
-                </a>
-                <a href="javascript:void(0)" class="nav-link" onclick="openAdminPopup('stock-audit')">
-                    <i class="fas fa-clipboard-list me-2 text-info"></i> Stock Audit Report
-                </a>
-                <a href="{{ url_for('print_all_qrs') }}" target="_blank" class="nav-link">
-                    <i class="fas fa-qrcode me-2 text-warning"></i> พิมพ์ QR ทั้งหมด
-                </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="toggleReportSection()">
+                        <i class="fas fa-chart-line me-2 text-warning"></i> รายงานประจำเดือน
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openAdminPopup('stock-audit')">
+                        <i class="fas fa-clipboard-list me-2 text-info"></i> Stock Audit Report
+                    </a>
+                    <a href="{{ url_for('print_all_qrs') }}" target="_blank" class="nav-link">
+                        <i class="fas fa-qrcode me-2 text-warning"></i> พิมพ์ QR ทั้งหมด
+                    </a>
                 {% endif %}
+                </div>
 
-                <div class="nav-category text-white-50">ระบบบุคลากร</div>
-                <a href="javascript:void(0)" class="nav-link" onclick="openUserManagementModal()">
-                    <i class="fas fa-users-cog me-2 text-primary"></i> จัดการพนักงาน
-                </a>
-                <a href="javascript:void(0)" class="nav-link" onclick="openZombieModal()">
-                    <i class="fas fa-user-clock me-2 text-primary"></i> ตรวจสอบพนักงานค้าง
-                </a>
+                <button class="sidebar-group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarPeople" aria-expanded="false" aria-controls="sidebarPeople"><i class="fas fa-users group-icon"></i><span>People</span><i class="fas fa-chevron-right group-chevron"></i></button>
+                <div class="collapse sidebar-submenu" id="sidebarPeople">
+                    <a href="javascript:void(0)" class="nav-link" onclick="openUserManagementModal()">
+                        <i class="fas fa-users-cog me-2 text-primary"></i> จัดการพนักงาน
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openZombieModal()">
+                        <i class="fas fa-user-clock me-2 text-primary"></i> ตรวจสอบพนักงานค้าง
+                    </a>
+                </div>
 
                 {% if role == 'superadmin' %}
-                <div class="nav-category text-white-50">ระบบจัดการขั้นสูง</div>
-                <a href="javascript:void(0)" class="nav-link" onclick="openAdminAccountsModal()">
-                    <i class="fas fa-user-shield me-2 text-warning"></i> จัดการบัญชี Admin
-                </a>
-                <a href="javascript:void(0)" class="nav-link" onclick="openAdminPopup('email-settings')">
-                    <i class="fas fa-envelope me-2 text-success"></i> ⚙️ Email Notifications
-                </a>
-                <a href="javascript:void(0)" class="nav-link" onclick="openAlertSettingModal()">
-                    <i class="fas fa-clock me-2 text-warning"></i> ตั้งเวลาแจ้งเตือน Email
-                </a>
-                <a href="javascript:void(0)" class="nav-link" onclick="openGaEmailSettingModal()">
-                    <i class="fas fa-envelope-open-text me-2 text-warning"></i> ตั้งค่าอีเมล GA Request
-                </a>
-                <a href="javascript:void(0)" class="nav-link" onclick="openBackupModal()">
-                    <i class="fas fa-database me-2 text-info"></i> Backup ฐานข้อมูล
-                </a>
-
-                <a href="javascript:void(0)" class="nav-link text-danger" data-bs-toggle="modal"
-                    data-bs-target="#dangerZoneModal">
-                    <i class="fas fa-radiation me-2"></i> ล้างข้อมูลระบบ (Set Zero)
-                </a>
+                <button class="sidebar-group-toggle collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sidebarSystem" aria-expanded="false" aria-controls="sidebarSystem"><i class="fas fa-gears group-icon"></i><span>System Administration</span><i class="fas fa-chevron-right group-chevron"></i></button>
+                <div class="collapse sidebar-submenu" id="sidebarSystem">
+                    <a href="{{ url_for('mu.admin_dashboard') }}" class="nav-link">
+                        <i class="fas fa-industry me-2 text-info"></i> MU Administration
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openAdminAccountsModal()">
+                        <i class="fas fa-user-shield me-2 text-warning"></i> จัดการบัญชี Admin
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openAdminPopup('email-settings')">
+                        <i class="fas fa-envelope me-2 text-success"></i> Email Notifications
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openAlertSettingModal()">
+                        <i class="fas fa-clock me-2 text-warning"></i> ตั้งเวลาแจ้งเตือน Email
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openGaEmailSettingModal()">
+                        <i class="fas fa-envelope-open-text me-2 text-warning"></i> ตั้งค่าอีเมล GA Request
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link" onclick="openBackupModal()">
+                        <i class="fas fa-database me-2 text-info"></i> Backup ฐานข้อมูล
+                    </a>
+                    <a href="javascript:void(0)" class="nav-link text-danger" data-bs-toggle="modal"
+                        data-bs-target="#dangerZoneModal">
+                        <i class="fas fa-radiation me-2"></i> ล้างข้อมูลระบบ (Set Zero)
+                    </a>
+                </div>
                 {% endif %}
             </div>
 
             <div class="px-4 py-3 mt-auto border-top border-secondary">
                 <button type="button" class="btn btn-outline-light w-100 rounded-pill fw-medium mb-2"
                     onclick="openChangePasswordModal()">
-                    <i class="fas fa-key me-2"></i> เปลี่ยนรหัสผ่าน
+                    <i class="fas fa-id-card me-2"></i> โปรไฟล์ของฉัน
                 </button>
                 <form id="adminLogoutForm" action="/admin/logout" method="POST" class="mb-0">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -1364,12 +2094,58 @@
     </div>
 
 
-    <main class="content-wrapper py-4">
-        <div class="container-fluid px-3 px-md-4 px-lg-5">
+    <main class="content-wrapper">
+        <header class="admin-topbar d-none d-lg-flex align-items-center justify-content-between px-4" aria-label="ส่วนหัวผู้ดูแลระบบ">
+            <div class="d-flex align-items-center gap-3">
+                <button type="button" class="sidebar-toggle-btn" id="adminSidebarToggle"
+                    aria-label="ย่อหรือขยายเมนูด้านข้าง" aria-controls="sidebarMenu" aria-expanded="true">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div>
+                    <div class="admin-breadcrumb mb-1">PCM / Admin / {{ admin_module|upper }}</div>
+                    <div class="admin-page-title">
+                        {% if admin_module == 'ga' %}
+                        GA Request
+                        {% elif admin_module == 'support' %}
+                        Support Chat
+                        {% else %}
+                        Stock Dashboard
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="dropdown">
+                <button type="button"
+                    class="admin-user-chip btn btn-link text-decoration-none d-flex align-items-center gap-3 ps-4 dropdown-toggle"
+                    data-bs-toggle="dropdown" aria-expanded="false" aria-label="เปิดเมนูบัญชีผู้ดูแล">
+                    <span class="admin-avatar" aria-hidden="true"><i class="fas fa-user"></i></span>
+                    <span class="lh-sm text-start">
+                        <span class="d-block small fw-semibold">{{ session.get('admin_name') }}</span>
+                        <span class="d-block admin-breadcrumb">{{ role|upper }}</span>
+                    </span>
+                </button>
+                <div class="dropdown-menu dropdown-menu-end shadow border-0 mt-2 p-2 admin-account-menu">
+                    <div class="px-3 py-2 border-bottom mb-2">
+                        <div class="small fw-semibold text-dark">{{ session.get('admin_name') }}</div>
+                        <div class="small text-muted">{{ session.get('admin_username') }}</div>
+                    </div>
+                    <button type="button" class="dropdown-item rounded py-2" onclick="openChangePasswordModal()">
+                        <i class="fas fa-id-card me-2 text-primary"></i>จัดการโปรไฟล์
+                    </button>
+                    <form action="/admin/logout" method="POST" class="mb-0">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="dropdown-item rounded py-2 text-danger">
+                            <i class="fas fa-sign-out-alt me-2"></i>ออกจากระบบ
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </header>
+        <div class="container-fluid dashboard-content px-3 px-md-4">
 
             <div class="row g-3 mb-4 dashboard-section {% if admin_module != 'stock' %}is-hidden{% endif %}">
                 <div class="col-6 col-xl-3">
-                    <div class="card border-0 shadow-sm bg-white h-100 stat-card">
+                    <div class="card border-0 shadow-sm h-100 stat-card pending-widget">
                         <div class="card-body d-flex align-items-center">
                             <div class="flex-shrink-0 bg-warning-subtle text-warning rounded-3 p-3 stat-icon">
                                 <i class="fas fa-clock fa-2x"></i>
@@ -1384,7 +2160,7 @@
                 </div>
 
                 <div class="col-6 col-xl-3">
-                    <div class="card border-0 shadow-sm bg-white h-100 stat-card">
+                    <div class="card border-0 shadow-sm h-100 stat-card low-stock-widget">
                         <div class="card-body d-flex align-items-center">
                             <div class="flex-shrink-0 bg-danger-subtle text-danger rounded-3 p-3 stat-icon">
                                 <i class="fas fa-exclamation-triangle fa-2x"></i>
@@ -1398,7 +2174,7 @@
                 </div>
 
                 <div class="col-6 col-xl-3">
-                    <div class="card border-0 shadow-sm bg-white h-100 stat-card">
+                    <div class="card border-0 shadow-sm h-100 stat-card online-widget">
                         <div class="card-body d-flex align-items-center">
                             <div class="flex-shrink-0 bg-primary-subtle text-primary rounded-3 p-3 stat-icon">
                                 <i class="fas fa-users fa-2x"></i>
@@ -1412,7 +2188,7 @@
                 </div>
 
                 <div class="col-6 col-xl-3">
-                    <div class="card border-0 shadow-sm bg-white h-100 stat-card">
+                    <div class="card border-0 shadow-sm h-100 stat-card email-widget">
                         <div class="card-body d-flex align-items-center">
                             <div class="flex-shrink-0 bg-success-subtle text-success rounded-3 p-3 stat-icon">
                                 <i class="fas fa-envelope fa-2x"></i>
@@ -1843,8 +2619,10 @@
                         </thead>
                         <tbody id="stockTableBody">
                             {% for item in items %}
+                            {% set display_stock = item['display_stock'] if 'display_stock' in item.keys() else item['stock'] %}
+                            {% set effective_stock = item['effective_stock'] if 'effective_stock' in item.keys() else display_stock %}
                             <tr
-                                class="align-middle {% if item['stock'] <= 0 %}table-danger{% elif item['is_active'] == 0 %}table-secondary opacity-75{% endif %}">
+                                class="align-middle {% if effective_stock <= 0 %}table-danger{% elif item['is_active'] == 0 %}table-secondary opacity-75{% endif %}">
                                 <td class="ps-4"><code>{{ item['code'] }}</code></td>
                                 <td class="fw-medium {% if item['is_active'] == 0 %}text-muted{% endif %}">
                                     {{ item['name'] }}
@@ -1854,18 +2632,21 @@
                                     {% if item['is_active'] == 0 %}
                                     <span class="badge bg-danger ms-1 tiny-status-badge">ปิดใช้งาน</span>
                                     {% endif %}
-                                    {% if item['stock'] <= 0 %}
+                                    {% if effective_stock <= 0 %}
                                     <span class="badge bg-danger ms-1 tiny-status-badge">หมดสต็อก</span>
                                     {% endif %}
                                 </td>
                                 <td><span class="badge bg-light text-dark border">{{ item['category'] }}</span></td>
                                 <td
-                                    class="text-center fw-medium {{ 'text-danger' if item['stock'] <= item['safety_stock'] else 'text-success' }}">
+                                    class="text-center fw-medium {{ 'text-danger' if effective_stock <= item['safety_stock'] else 'text-success' }}">
                                     {% if item['is_split_tablet_medicine'] %}
                                     <div>{{ item['backend_stock_text'] }}</div>
                                     <small class="text-muted">แสดงหน้าเบิก: {{ item['frontend_stock_text'] }}</small>
                                     {% else %}
-                                    {{ item['stock'] }}
+                                    <div>{{ display_stock }}</div>
+                                    {% if item['stock_source'] == 'lot' and display_stock != item['stock'] %}
+                                    <small class="text-muted">รวมจาก Lot / stock หลัก {{ item['stock'] }}</small>
+                                    {% endif %}
                                     {% endif %}
                                 </td>
                                 <td class="text-center text-muted">{{ item['safety_stock'] }}</td>
@@ -2251,7 +3032,7 @@
     </datalist>
 
     <div class="modal fade" id="addProductModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl">
             <div class="modal-content border-0 shadow-lg">
                 <div class="modal-header bg-dark text-white border-0">
                     <h5 class="modal-title fw-medium"><i
@@ -2300,7 +3081,7 @@
                             <div class="col-md-6">
                                 <label class="form-label fw-medium text-muted small">หน่วยนับ (Unit)</label>
                                 <input type="text" id="add_unit" name="unit" class="form-control shadow-none" required
-                                    oninput="updateStockUnitHints('add')">
+                                    oninput="updateStockUnitHints('add'); updateSplitModeVisual('add'); renderAddSplitSummaryFromForm()">
                             </div>
                             <div class="col-lg-3 col-md-6">
                                 <label class="form-label fw-medium text-muted small" id="addSafetyLabel">จุดสั่งซื้อ (Safety)</label>
@@ -2335,65 +3116,107 @@
                                     <input class="form-check-input" type="checkbox" id="addEnableSplit"
                                         onchange="toggleAddSplitDetail()">
                                     <label class="form-check-label fw-medium small" for="addEnableSplit">
-                                        <i class="fas fa-pills me-1 text-info"></i>แยกหน่วยย่อย (เช่น กล่อง → เม็ด)
+                                        <i class="fas fa-pills me-1 text-info"></i>ยานี้สามารถเปิดแบ่งจ่ายได้
                                     </label>
                                 </div>
                             </div>
                             <div class="col-12 is-hidden" id="addSplitDetailRow">
-                                <div class="row g-3 p-3 rounded-3 split-detail-box">
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small">รูปแบบการแยก</label>
-                                        <select id="add_split_mode" name="split_mode" class="form-select shadow-none"
-                                            onchange="renderAddSplitSummaryFromForm()">
-                                            <option value="single">แยกชั้นเดียว</option>
-                                            <option value="multi">แยกหลายชั้น</option>
-                                        </select>
+                                <div class="p-3 p-md-4 rounded-3 split-detail-box">
+                                    <div class="row g-3 align-items-end mb-3">
+                                        <div class="col-lg-7">
+                                            <label class="form-label fw-semibold" for="add_split_mode">ยาแบ่งออกมาเป็นแบบไหน</label>
+                                            <select id="add_split_mode" name="split_mode" class="form-select shadow-none"
+                                                aria-describedby="add_split_mode_hint"
+                                                onchange="updateSplitModeVisual('add'); renderAddSplitSummaryFromForm()">
+                                                <option value="single">2 ระดับ — หน่วยเต็ม → เม็ด</option>
+                                                <option value="multi">3 ระดับ — หน่วยเต็ม → หน่วยกลาง → เม็ด</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-lg-5">
+                                            <small class="text-muted d-block" id="add_split_mode_hint">เลือกแบบที่ตรงกับของจริงในคลัง</small>
+                                        </div>
                                     </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small">หน่วยแพ็ค/กล่อง/กระปุก</label>
-                                        <input type="text" id="add_package_unit" name="package_unit" class="form-control shadow-none"
-                                            list="medicineSplitUnitOptions"
-                                            placeholder="เช่น กล่อง, ขวด, กระปุก" oninput="updateStockUnitHints('add'); renderAddSplitSummaryFromForm()">
+
+                                    <div class="split-flow-preview" id="addSplitFlowPreview" aria-live="polite">
+                                        <span class="split-flow-node" id="addFlowPackageUnit">หน่วยเต็ม</span>
+                                        <i class="fas fa-arrow-right split-flow-arrow" aria-hidden="true"></i>
+                                        <span class="split-flow-node" id="addFlowBaseUnit">เม็ด</span>
+                                        <i class="fas fa-arrow-right split-flow-arrow is-hidden" id="addFlowTabletArrow" aria-hidden="true"></i>
+                                        <span class="split-flow-node is-hidden" id="addFlowTabletUnit">เม็ด</span>
                                     </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small">หน่วยย่อย</label>
-                                        <input type="text" id="add_base_unit" name="base_unit" class="form-control shadow-none"
-                                            list="medicineSplitUnitOptions"
-                                            placeholder="เช่น ห่อ, ซอง, เม็ด" oninput="renderAddSplitSummaryFromForm()">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small">1 แพ็ค มีจำนวน (หน่วยย่อย)</label>
-                                        <input type="number" id="add_conversion_rate" name="conversion_rate" class="form-control shadow-none"
-                                            min="1" step="1" value="1" oninput="renderAddSplitSummaryFromForm()">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small text-primary">1 หน่วยนำเข้า = กี่เม็ด</label>
-                                        <input type="number" id="add_package_tablet_total" name="package_tablet_total" class="form-control shadow-none"
-                                            min="0" step="1" value="0" placeholder="เช่น 100" oninput="renderAddSplitSummaryFromForm()">
-                                    </div>
-                                    <div class="col-md-3" id="add_base_to_tablet_col">
-                                        <label class="form-label fw-medium text-muted small text-primary">1 หน่วยย่อย = กี่เม็ด</label>
-                                        <input type="number" id="add_base_unit_to_tablet_rate" name="base_unit_to_tablet_rate" class="form-control shadow-none"
-                                            min="0" step="1" value="0" placeholder="เช่น 10" oninput="renderAddSplitSummaryFromForm()">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small text-warning">
-                                            <i class="fas fa-box-open me-1"></i>หน่วยย่อยที่เปิดแล้ว
-                                        </label>
-                                        <input type="number" id="add_open_base_qty" name="open_base_qty" class="form-control shadow-none border-warning"
-                                            min="0" step="1" value="0" oninput="renderAddSplitSummaryFromForm()">
-                                    </div>
-                                    <div class="col-md-3">
-                                        <label class="form-label fw-medium text-muted small text-warning">
-                                            <i class="fas fa-pills me-1"></i>เศษเม็ดที่เปิดแล้ว
-                                        </label>
-                                        <input type="number" id="add_open_extra_tablet_qty" name="open_extra_tablet_qty" class="form-control shadow-none border-warning"
-                                            min="0" step="1" value="0" oninput="renderAddSplitSummaryFromForm()">
-                                    </div>
+
+                                    <fieldset class="split-section">
+                                        <legend class="split-section-title h6">
+                                            <span class="split-step-number">1</span>
+                                            <span>บอกโครงสร้างของยา <small class="d-block mt-1 fw-normal text-muted">กรอกตามข้อความบนฉลาก โดยระบบจะคำนวณจำนวนหน่วยกลางให้เอง</small></span>
+                                        </legend>
+                                        <div class="row g-3">
+                                            <div class="col-md-4">
+                                                <label class="form-label fw-medium small" for="add_package_unit">หน่วยเต็มที่ยังไม่เปิด เรียกว่า</label>
+                                                <input type="text" id="add_package_unit" name="package_unit" class="form-control shadow-none"
+                                                    list="medicineSplitUnitOptions" placeholder="เช่น หลอด, กล่อง, ขวด"
+                                                    oninput="updateStockUnitHints('add'); updateSplitModeVisual('add'); renderAddSplitSummaryFromForm()">
+                                                <small class="text-muted">ควรตรงกับ “หน่วยนับ” ด้านบน</small>
+                                            </div>
+                                            <div class="col-md-4" id="add_base_unit_col">
+                                                <label class="form-label fw-medium small" for="add_base_unit">หน่วยกลางที่แบ่งออกมา เรียกว่า</label>
+                                                <input type="text" id="add_base_unit" name="base_unit" class="form-control shadow-none"
+                                                    list="medicineSplitUnitOptions" placeholder="เช่น ตลับ, แผง, ซอง"
+                                                    oninput="updateSplitModeVisual('add'); renderAddSplitSummaryFromForm()">
+                                            </div>
+                                            <div class="col-md-4">
+                                                <label class="form-label fw-medium small" for="add_package_tablet_total">จำนวนเม็ดทั้งหมดใน 1 หน่วยเต็ม</label>
+                                                <input type="number" id="add_package_tablet_total" name="package_tablet_total" class="form-control shadow-none"
+                                                    min="0" step="1" value="0" inputmode="numeric" placeholder="เช่น 100"
+                                                    oninput="updateSplitModeVisual('add'); renderAddSplitSummaryFromForm()">
+                                            </div>
+                                            <div class="col-md-4" id="add_base_to_tablet_col">
+                                                <label class="form-label fw-medium small" for="add_base_unit_to_tablet_rate">จำนวนเม็ดใน 1 หน่วยกลาง</label>
+                                                <input type="number" id="add_base_unit_to_tablet_rate" name="base_unit_to_tablet_rate" class="form-control shadow-none"
+                                                    min="0" step="1" value="0" inputmode="numeric" placeholder="เช่น 10"
+                                                    oninput="updateSplitModeVisual('add'); renderAddSplitSummaryFromForm()">
+                                            </div>
+                                            <div class="col-md-4" id="add_conversion_rate_col">
+                                                <label class="form-label fw-medium small" for="add_conversion_rate" id="addConversionRateLabel">ระบบคำนวณ: ได้กี่หน่วยกลาง</label>
+                                                <input type="number" id="add_conversion_rate" name="conversion_rate"
+                                                    class="form-control split-calculated-field" min="0" step="1" value="0" readonly aria-readonly="true">
+                                                <small class="text-muted" id="addConversionRateHint">ไม่ต้องกรอกช่องนี้</small>
+                                            </div>
+                                        </div>
+                                    </fieldset>
+
+                                    <fieldset class="split-section split-open-stock">
+                                        <legend class="split-section-title h6">
+                                            <span class="split-step-number">2</span>
+                                            <span>กรอกเฉพาะของที่เปิดออกมาแล้ว <small class="d-block mt-1 fw-normal text-muted">ไม่ต้องรวมหน่วยเต็มที่กรอกใน “จำนวนเริ่มต้น” ด้านบน</small></span>
+                                        </legend>
+                                        <div class="row g-3">
+                                            <div class="col-md-6">
+                                                <label class="form-label fw-medium small" for="add_open_base_qty" id="addOpenBaseLabel">
+                                                    <i class="fas fa-box-open me-1 text-warning" aria-hidden="true"></i>จำนวนที่เปิดออกมาแล้ว
+                                                </label>
+                                                <div class="input-group unit-field-group">
+                                                    <input type="number" id="add_open_base_qty" name="open_base_qty" class="form-control shadow-none border-warning"
+                                                        min="0" step="1" value="0" inputmode="numeric" oninput="renderAddSplitSummaryFromForm()">
+                                                    <span class="input-group-text" id="addOpenBaseUnitBadge">หน่วย</span>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6" id="add_open_extra_col">
+                                                <label class="form-label fw-medium small" for="add_open_extra_tablet_qty" id="addOpenExtraLabel">
+                                                    <i class="fas fa-pills me-1 text-warning" aria-hidden="true"></i>เม็ดที่เหลือไม่ครบ 1 หน่วยกลาง
+                                                </label>
+                                                <div class="input-group unit-field-group">
+                                                    <input type="number" id="add_open_extra_tablet_qty" name="open_extra_tablet_qty" class="form-control shadow-none border-warning"
+                                                        min="0" step="1" value="0" inputmode="numeric" oninput="renderAddSplitSummaryFromForm()">
+                                                    <span class="input-group-text">เม็ด</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </fieldset>
                                 </div>
                             </div>
                             <div class="col-12 is-hidden" id="addSplitSummaryRow">
-                                <div class="alert alert-info mb-0 py-2 px-3 small" id="addSplitSummaryBox">
+                                <div class="split-summary-card" id="addSplitSummaryBox" role="status" aria-live="polite">
                                     -
                                 </div>
                             </div>
@@ -2411,7 +3234,7 @@
     </div>
 
     <div class="modal fade" id="editProductModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl">
             <div class="modal-content border-0 shadow-lg">
                 <div class="modal-header bg-dark text-white border-0">
                     <h5 class="modal-title fw-medium"><i class="fas fa-edit text-warning me-2"></i>แก้ไขข้อมูล</h5>
@@ -2436,82 +3259,8 @@
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-medium text-muted small">หน่วยนับ</label>
-                            <input type="text" id="edit_unit" name="unit" class="form-control shadow-none" required>
-                        </div>
-                        <div class="col-12 is-hidden" id="editSplitUnitToggleRow">
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" id="editEnableSplit"
-                                    onchange="toggleEditSplitDetail()">
-                                <label class="form-check-label fw-medium small" for="editEnableSplit">
-                                    <i class="fas fa-pills me-1 text-info"></i>แยกหน่วยย่อย (เช่น กล่อง -> เม็ด)
-                                </label>
-                            </div>
-                        </div>
-                        <div class="col-12 is-hidden" id="editSplitDetailRow">
-                            <div class="row g-3 p-3 rounded-3 split-detail-box">
-                                <div class="col-md-3">
-                                    <label class="form-label fw-medium text-muted small">รูปแบบการแยก</label>
-                                    <select id="edit_split_mode" name="split_mode" class="form-select shadow-none"
-                                        onchange="updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
-                                        <option value="single">แยกชั้นเดียว</option>
-                                        <option value="multi">แยกหลายชั้น</option>
-                                    </select>
-                                    <small class="text-muted d-block mt-1" id="edit_split_mode_hint">ชั้นเดียว: กรอกเม็ดรวมต่อหน่วยนำเข้า</small>
-                                </div>
-                                <div class="col-md-3">
-                                    <label class="form-label fw-medium text-muted small">หน่วยแพ็ค/กล่อง/กระปุก</label>
-                                    <input type="text" id="edit_package_unit" name="package_unit" class="form-control shadow-none"
-                                        list="medicineSplitUnitOptions"
-                                        placeholder="เช่น กล่อง, ขวด, กระปุก">
-                                </div>
-                                <div class="col-md-3" id="edit_base_unit_col">
-                                    <label class="form-label fw-medium text-muted small">หน่วยย่อย</label>
-                                    <input type="text" id="edit_base_unit" name="base_unit" class="form-control shadow-none"
-                                        list="medicineSplitUnitOptions"
-                                        placeholder="เช่น เม็ด">
-                                </div>
-                                <div class="col-md-3" id="edit_conversion_rate_col">
-                                    <label class="form-label fw-medium text-muted small">1 แพ็ค มีจำนวน (หน่วยย่อย)</label>
-                                    <input type="number" id="edit_conversion_rate" name="conversion_rate" class="form-control shadow-none"
-                                        min="1" step="1" value="1" oninput="renderEditSplitSummaryFromForm()">
-                                </div>
-                                <div class="col-md-3">
-                                    <label class="form-label fw-medium text-muted small text-primary">1 หน่วยนำเข้า = กี่เม็ด</label>
-                                    <input type="number" id="edit_package_tablet_total" name="package_tablet_total" class="form-control shadow-none"
-                                        min="0" step="1" value="0" oninput="renderEditSplitSummaryFromForm()" placeholder="เช่น 100">
-                                </div>
-                                <div class="col-md-3" id="edit_base_to_tablet_col">
-                                    <label class="form-label fw-medium text-muted small text-primary">1 หน่วยย่อย = กี่เม็ด</label>
-                                    <input type="number" id="edit_base_unit_to_tablet_rate" name="base_unit_to_tablet_rate" class="form-control shadow-none"
-                                        min="0" step="1" value="0" oninput="renderEditSplitSummaryFromForm()" placeholder="เช่น 10">
-                                </div>
-                                <div class="col-md-3">
-                                    <label class="form-label fw-medium text-muted small text-warning">
-                                        <i class="fas fa-box-open me-1"></i>หน่วยย่อยที่เปิดแล้ว
-                                    </label>
-                                    <input type="number" id="edit_open_base_qty" name="open_base_qty" class="form-control shadow-none border-warning"
-                                        min="0" step="1" value="0" oninput="renderEditSplitSummaryFromForm()"
-                                        title="จำนวนหน่วยย่อยจากแพ็คที่เปิดใช้งานแล้ว (เช่น ขวดที่แงะออกจากแพ็ค)">
-                                </div>
-                                <div class="col-md-3">
-                                    <label class="form-label fw-medium text-muted small text-warning">
-                                        <i class="fas fa-pills me-1"></i>เศษเม็ดที่เปิดแล้ว
-                                    </label>
-                                    <input type="number" id="edit_open_extra_tablet_qty" name="open_extra_tablet_qty" class="form-control shadow-none border-warning"
-                                        min="0" step="1" value="0" oninput="renderEditSplitSummaryFromForm()"
-                                        title="จำนวนเศษเม็ดที่เหลือจากแพ็คที่เปิดแล้ว">
-                                </div>
-                                <div class="col-12">
-                                    <div id="editLiveStockHint" class="alert alert-primary mb-0 py-2 px-3 small">
-                                        รวมคงเหลือแบบเรียลไทม์จะแสดงที่นี่
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-12 is-hidden" id="editSplitSummaryRow">
-                            <div class="alert alert-info mb-0 py-2 px-3 small" id="editSplitSummaryBox">
-                                -
-                            </div>
+                            <input type="text" id="edit_unit" name="unit" class="form-control shadow-none" required
+                                oninput="updateStockUnitHints('edit'); updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-medium text-muted small">สถานที่เก็บ</label>
@@ -2523,21 +3272,132 @@
                             <label class="form-label fw-medium text-muted small" id="editSafetyLabel">จุดสั่งซื้อ (Safety)</label>
                             <div class="input-group unit-field-group">
                                 <input type="number" id="edit_safety_stock" name="safety_stock"
-                                    class="form-control shadow-none">
+                                    class="form-control shadow-none" min="0" step="1">
                                 <span class="input-group-text small" id="editSafetyUnitBadge">หน่วย</span>
                             </div>
                         </div>
                         <div class="col-lg-3 col-md-6">
-                            <label class="form-label fw-medium text-muted small" id="editStockLabel">จำนวนคงเหลือ</label>
+                            <label class="form-label fw-medium text-muted small" id="editStockLabel">จำนวนหน่วยเต็มที่ยังไม่เปิด</label>
                             <div class="input-group unit-field-group">
-                                <input type="number" id="edit_stock" name="stock" class="form-control shadow-none" oninput="renderEditSplitSummaryFromForm()">
+                                <input type="number" id="edit_stock" name="stock" class="form-control shadow-none"
+                                    min="0" step="1" oninput="renderEditSplitSummaryFromForm()">
                                 <span class="input-group-text small" id="editStockUnitBadge">หน่วย</span>
                             </div>
+                            <small class="text-muted is-hidden" id="editStockHelp">ช่องนี้ปรับเฉพาะหน่วยเต็มใน Lot ไม่เพิ่มยอดของที่เปิดแล้ว</small>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-medium text-muted small">วันหมดอายุ</label>
                             <input type="text" id="edit_date_picker_expiry" name="expiry_date" placeholder="DD/MM/YYYY"
                                 class="form-control shadow-none">
+                        </div>
+                        <div class="col-12 is-hidden" id="editSplitUnitToggleRow">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="editEnableSplit"
+                                    onchange="toggleEditSplitDetail()">
+                                <label class="form-check-label fw-medium small" for="editEnableSplit">
+                                    <i class="fas fa-pills me-1 text-info"></i>ยานี้สามารถเปิดแบ่งจ่ายได้
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-12 is-hidden" id="editSplitDetailRow">
+                            <div class="p-3 p-md-4 rounded-3 split-detail-box">
+                                <div class="row g-3 align-items-end mb-3">
+                                    <div class="col-lg-7">
+                                        <label class="form-label fw-semibold" for="edit_split_mode">ยาแบ่งออกมาเป็นแบบไหน</label>
+                                        <select id="edit_split_mode" name="split_mode" class="form-select shadow-none"
+                                            aria-describedby="edit_split_mode_hint"
+                                            onchange="updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
+                                            <option value="single">2 ระดับ — หน่วยเต็ม → เม็ด</option>
+                                            <option value="multi">3 ระดับ — หน่วยเต็ม → หน่วยกลาง → เม็ด</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-lg-5">
+                                        <small class="text-muted d-block" id="edit_split_mode_hint">เลือกแบบที่ตรงกับของจริงในคลัง</small>
+                                    </div>
+                                </div>
+
+                                <div class="split-flow-preview" id="editSplitFlowPreview" aria-live="polite">
+                                    <span class="split-flow-node" id="editFlowPackageUnit">หน่วยเต็ม</span>
+                                    <i class="fas fa-arrow-right split-flow-arrow" aria-hidden="true"></i>
+                                    <span class="split-flow-node" id="editFlowBaseUnit">เม็ด</span>
+                                    <i class="fas fa-arrow-right split-flow-arrow is-hidden" id="editFlowTabletArrow" aria-hidden="true"></i>
+                                    <span class="split-flow-node is-hidden" id="editFlowTabletUnit">เม็ด</span>
+                                </div>
+
+                                <fieldset class="split-section">
+                                    <legend class="split-section-title h6">
+                                        <span class="split-step-number">1</span>
+                                        <span>บอกโครงสร้างของยา <small class="d-block mt-1 fw-normal text-muted">กรอกตามข้อความบนฉลาก โดยระบบจะคำนวณจำนวนหน่วยกลางให้เอง</small></span>
+                                    </legend>
+                                    <div class="row g-3">
+                                        <div class="col-md-4">
+                                            <label class="form-label fw-medium small" for="edit_package_unit">หน่วยเต็มที่ยังไม่เปิด เรียกว่า</label>
+                                            <input type="text" id="edit_package_unit" name="package_unit" class="form-control shadow-none"
+                                                list="medicineSplitUnitOptions" placeholder="เช่น หลอด, กล่อง, ขวด"
+                                                oninput="updateStockUnitHints('edit'); updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
+                                            <small class="text-muted">ควรตรงกับ “หน่วยนับ” ด้านบน</small>
+                                        </div>
+                                        <div class="col-md-4" id="edit_base_unit_col">
+                                            <label class="form-label fw-medium small" for="edit_base_unit">หน่วยกลางที่แบ่งออกมา เรียกว่า</label>
+                                            <input type="text" id="edit_base_unit" name="base_unit" class="form-control shadow-none"
+                                                list="medicineSplitUnitOptions" placeholder="เช่น ตลับ, แผง, ซอง"
+                                                oninput="updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label fw-medium small" for="edit_package_tablet_total">จำนวนเม็ดทั้งหมดใน 1 หน่วยเต็ม</label>
+                                            <input type="number" id="edit_package_tablet_total" name="package_tablet_total" class="form-control shadow-none"
+                                                min="0" step="1" value="0" inputmode="numeric" placeholder="เช่น 100"
+                                                oninput="updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
+                                        </div>
+                                        <div class="col-md-4" id="edit_base_to_tablet_col">
+                                            <label class="form-label fw-medium small" for="edit_base_unit_to_tablet_rate">จำนวนเม็ดใน 1 หน่วยกลาง</label>
+                                            <input type="number" id="edit_base_unit_to_tablet_rate" name="base_unit_to_tablet_rate" class="form-control shadow-none"
+                                                min="0" step="1" value="0" inputmode="numeric" placeholder="เช่น 10"
+                                                oninput="updateSplitModeVisual('edit'); renderEditSplitSummaryFromForm()">
+                                        </div>
+                                        <div class="col-md-4" id="edit_conversion_rate_col">
+                                            <label class="form-label fw-medium small" for="edit_conversion_rate" id="editConversionRateLabel">ระบบคำนวณ: ได้กี่หน่วยกลาง</label>
+                                            <input type="number" id="edit_conversion_rate" name="conversion_rate"
+                                                class="form-control split-calculated-field" min="0" step="1" value="0" readonly aria-readonly="true">
+                                            <small class="text-muted" id="editConversionRateHint">ไม่ต้องกรอกช่องนี้</small>
+                                        </div>
+                                    </div>
+                                </fieldset>
+
+                                <fieldset class="split-section split-open-stock">
+                                    <legend class="split-section-title h6">
+                                        <span class="split-step-number">2</span>
+                                        <span>กรอกเฉพาะของที่เปิดออกมาแล้ว <small class="d-block mt-1 fw-normal text-muted">ไม่ต้องรวมหน่วยเต็มที่กรอกใน “จำนวนหน่วยเต็มที่ยังไม่เปิด” ด้านบน</small></span>
+                                    </legend>
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label fw-medium small" for="edit_open_base_qty" id="editOpenBaseLabel">
+                                                <i class="fas fa-box-open me-1 text-warning" aria-hidden="true"></i>จำนวนที่เปิดออกมาแล้ว
+                                            </label>
+                                            <div class="input-group unit-field-group">
+                                                <input type="number" id="edit_open_base_qty" name="open_base_qty" class="form-control shadow-none border-warning"
+                                                    min="0" step="1" value="0" inputmode="numeric" oninput="renderEditSplitSummaryFromForm()">
+                                                <span class="input-group-text" id="editOpenBaseUnitBadge">หน่วย</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6" id="edit_open_extra_col">
+                                            <label class="form-label fw-medium small" for="edit_open_extra_tablet_qty" id="editOpenExtraLabel">
+                                                <i class="fas fa-pills me-1 text-warning" aria-hidden="true"></i>เม็ดที่เหลือไม่ครบ 1 หน่วยกลาง
+                                            </label>
+                                            <div class="input-group unit-field-group">
+                                                <input type="number" id="edit_open_extra_tablet_qty" name="open_extra_tablet_qty" class="form-control shadow-none border-warning"
+                                                    min="0" step="1" value="0" inputmode="numeric" oninput="renderEditSplitSummaryFromForm()">
+                                                <span class="input-group-text">เม็ด</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </fieldset>
+                            </div>
+                        </div>
+                        <div class="col-12 is-hidden" id="editSplitSummaryRow">
+                            <div class="split-summary-card" id="editSplitSummaryBox" role="status" aria-live="polite">
+                                -
+                            </div>
                         </div>
                     </div>
                     <div class="modal-body border-top bg-light text-end">
@@ -2813,6 +3673,7 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body bg-light">
+
                     <form id="writeOffForm">
                         <input type="hidden" name="product_id" id="writeOff_product_id">
 
@@ -2841,6 +3702,14 @@
                                 <input type="text" id="writeOff_current_stock" class="form-control text-muted bg-white"
                                     readonly>
                             </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label text-muted small fw-medium">เลือก Lot ที่จะตัด (ไม่เลือก = ตัดอัตโนมัติตาม FIFO)</label>
+                            <select id="writeOff_lot_select" name="lot_id" class="form-select shadow-none">
+                                <option value="">ตัดอัตโนมัติ (เก่าที่สุดก่อน)</option>
+                            </select>
+                            <div class="form-text mt-2 text-muted">สามารถเลือก Lot ที่ต้องการตัดได้ หากต้องการ</div>
                         </div>
 
                         <div class="mb-3 is-hidden" id="writeOff_unit_hint_wrap">
@@ -3136,22 +4005,49 @@
         <i class="fas fa-chevron-up"></i>
     </button>
 
-    <!-- Change Password Modal -->
+    <!-- Admin Profile Modal -->
     <div class="modal fade" id="changePasswordModal" tabindex="-1">
-        <div class="modal-dialog modal-sm">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content border-0 shadow-lg">
                 <div class="modal-header bg-dark text-white border-0">
-                    <h5 class="modal-title fw-medium"><i class="fas fa-key text-warning me-2"></i>เปลี่ยนรหัสผ่าน</h5>
+                    <h5 class="modal-title fw-medium"><i class="fas fa-id-card text-info me-2"></i>โปรไฟล์ของฉัน</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body p-4">
                     <div id="changePwAlert" class="d-none"></div>
+                    <div class="d-flex flex-wrap align-items-center gap-3 p-3 mb-4 rounded border bg-body-tertiary">
+                        <span class="admin-avatar" style="width:54px;height:54px;font-size:1.25rem"><i class="fas fa-user-shield"></i></span>
+                        <div class="flex-grow-1">
+                            <div class="fw-semibold fs-5">{{ session.get('admin_name') }}</div>
+                            <div class="text-muted small">{{ session.get('admin_username') }} · {{ role|upper }}</div>
+                        </div>
+                        <span class="badge bg-success-subtle text-success border border-success">บัญชีพร้อมใช้งาน</span>
+                    </div>
+                    <div class="small fw-semibold text-uppercase text-muted mb-2">ข้อมูลบัญชี</div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium text-muted small">Username</label>
+                            <input type="text" class="form-control shadow-none" value="{{ session.get('admin_username') }}" readonly>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium text-muted small">สิทธิ์</label>
+                            <input type="text" class="form-control shadow-none" value="{{ role|upper }}" readonly>
+                        </div>
+                    </div>
                     <div class="mb-3">
-                        <label class="form-label fw-medium text-muted small">รหัสผ่านเดิม</label>
+                        <label class="form-label fw-medium text-muted small">ชื่อที่แสดง</label>
+                        <input type="text" id="adminProfileName" class="form-control shadow-none" value="{{ session.get('admin_name') }}" maxlength="100">
+                    </div>
+                    <div class="small fw-semibold text-uppercase text-muted mt-4 mb-2">ความปลอดภัย</div>
+                    <div class="alert alert-info small">
+                        <i class="fas fa-shield-halved me-2"></i>การแก้ไขโปรไฟล์ต้องยืนยันรหัสผ่านปัจจุบัน และคำขอถูกป้องกันด้วย CSRF
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-medium text-muted small">รหัสผ่านปัจจุบัน <span class="text-danger">*</span></label>
                         <input type="password" id="oldPassword" class="form-control shadow-none" autocomplete="current-password">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label fw-medium text-muted small">รหัสผ่านใหม่</label>
+                        <label class="form-label fw-medium text-muted small">รหัสผ่านใหม่ <span class="fw-normal">(เว้นว่างหากไม่เปลี่ยน)</span></label>
                         <input type="password" id="newPassword" class="form-control shadow-none" autocomplete="new-password">
                     </div>
                     <div class="mb-1">
@@ -3231,7 +4127,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="file" id="importFile" name="file" accept=".xlsx, .xls" onchange="submitImport()">
     </form>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
     <script>
         // ==========================================
         // 1. ตัวแปร Global และการตั้งค่าเริ่มต้น
@@ -3459,6 +4355,53 @@
             return response;
         }
 
+        // Simple HTML escape to avoid injection when inserting user-controlled strings into SweetAlert HTML
+        function escapeHtml(unsafe) {
+            if (unsafe === null || unsafe === undefined) return '';
+            return String(unsafe)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function syncWriteOffQtyToLot() {
+            const lotSelect = document.getElementById('writeOff_lot_select');
+            const qtyEl = document.getElementById('writeOff_qty');
+            const unitSelect = document.getElementById('writeOff_qty_unit');
+            const maxHintEl = document.getElementById('writeOff_qty_max_hint');
+            const ctx = window.writeOffContext || {};
+            if (!lotSelect || !qtyEl || !unitSelect) return;
+
+            const selectedLotOption = lotSelect.options[lotSelect.selectedIndex] || {};
+            const selectedLotQty = parseInt(selectedLotOption.dataset.qty || '0', 10) || 0;
+            if (!selectedLotQty) {
+                qtyEl.readOnly = false;
+                updateWriteOffQtyControl();
+                renderWriteOffUnitHint();
+                return;
+            }
+
+            const conversionRate = parseInt(ctx.conversion_rate || 1, 10) || 1;
+            const splitEnabled = !!(ctx.base_unit && ctx.package_unit && conversionRate > 1);
+            const qtyUnit = unitSelect.value || 'package';
+            const lotLimit = splitEnabled && qtyUnit === 'package'
+                ? Math.floor(selectedLotQty / conversionRate)
+                : selectedLotQty;
+            const unitLabel = splitEnabled && qtyUnit === 'base'
+                ? (ctx.base_unit || 'หน่วยย่อย')
+                : (ctx.package_unit || ctx.unit || 'ชิ้น');
+
+            qtyEl.max = String(Math.max(0, lotLimit));
+            qtyEl.readOnly = false;
+            if (maxHintEl) {
+                maxHintEl.textContent = `สูงสุด ${Math.max(0, lotLimit)} ${unitLabel} จาก Lot ที่เลือก`;
+            }
+            normalizeWriteOffQtyInput();
+            renderWriteOffUnitHint();
+        }
+
         async function parseJsonResponseStrict(res) {
             const contentType = (res.headers.get('content-type') || '').toLowerCase();
             const raw = await res.text();
@@ -3517,6 +4460,7 @@
             document.getElementById('oldPassword').value = '';
             document.getElementById('newPassword').value = '';
             document.getElementById('confirmPassword').value = '';
+            document.getElementById('adminProfileName').value = {{ session.get('admin_name')|tojson }};
             const alert = document.getElementById('changePwAlert');
             alert.className = 'd-none'; alert.textContent = '';
             new bootstrap.Modal(document.getElementById('changePasswordModal')).show();
@@ -3527,28 +4471,29 @@
             new bootstrap.Modal(modalEl).show();
         }
         function submitChangePassword() {
+            const displayName = document.getElementById('adminProfileName').value.trim();
             const oldPw = document.getElementById('oldPassword').value;
             const newPw = document.getElementById('newPassword').value;
             const confirmPw = document.getElementById('confirmPassword').value;
             const alertEl = document.getElementById('changePwAlert');
             alertEl.className = 'd-none'; alertEl.textContent = '';
-            if (!oldPw || !newPw || !confirmPw) {
-                alertEl.className = 'alert alert-warning small py-2'; alertEl.textContent = 'กรุณากรอกข้อมูลให้ครบ'; return;
+            if (!displayName || !oldPw) {
+                alertEl.className = 'alert alert-warning small py-2'; alertEl.textContent = 'กรุณากรอกชื่อและรหัสผ่านปัจจุบัน'; return;
             }
-            if (newPw !== confirmPw) {
+            if (newPw && newPw !== confirmPw) {
                 alertEl.className = 'alert alert-danger small py-2'; alertEl.textContent = 'รหัสผ่านใหม่ไม่ตรงกัน'; return;
             }
-            if (newPw.length < 8) {
+            if (newPw && newPw.length < 8) {
                 alertEl.className = 'alert alert-warning small py-2'; alertEl.textContent = 'รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร'; return;
             }
-            fetch('/admin/change_password', {
+            fetch('/admin/update_profile', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': adminCsrfToken },
-                body: JSON.stringify({ old_password: oldPw, new_password: newPw, csrf_token: adminCsrfToken })
+                body: JSON.stringify({ display_name: displayName, current_password: oldPw, new_password: newPw })
             }).then(checkAuth).then(r => r.json()).then(data => {
                 if (data.success) {
                     bootstrap.Modal.getInstance(document.getElementById('changePasswordModal')).hide();
-                    Swal.fire({ icon: 'success', title: 'เปลี่ยนรหัสผ่านสำเร็จ', timer: 1800, showConfirmButton: false });
+                    Swal.fire({ icon: 'success', title: 'บันทึกโปรไฟล์สำเร็จ', timer: 1500, showConfirmButton: false }).then(() => window.location.reload());
                 } else {
                     alertEl.className = 'alert alert-danger small py-2';
                     alertEl.textContent = data.message || 'เกิดข้อผิดพลาด';
@@ -3557,6 +4502,28 @@
         }
 
         document.addEventListener('DOMContentLoaded', function () {
+            const sidebarToggle = document.getElementById('adminSidebarToggle');
+            const applySidebarState = (collapsed) => {
+                document.body.classList.toggle('sidebar-collapsed', collapsed);
+                if (sidebarToggle) sidebarToggle.setAttribute('aria-expanded', String(!collapsed));
+            };
+            try {
+                applySidebarState(localStorage.getItem('pcmAdminSidebarCollapsed') === '1');
+            } catch (error) {
+                applySidebarState(false);
+            }
+            if (sidebarToggle) {
+                sidebarToggle.addEventListener('click', () => {
+                    const collapsed = !document.body.classList.contains('sidebar-collapsed');
+                    applySidebarState(collapsed);
+                    try {
+                        localStorage.setItem('pcmAdminSidebarCollapsed', collapsed ? '1' : '0');
+                    } catch (error) {
+                        // บางเบราว์เซอร์อาจปิด localStorage แต่เมนูยังย่อได้ตามปกติ
+                    }
+                });
+            }
+
             const rootStyle = document.documentElement.style;
             const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
             const lowSpecDevice = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4)
@@ -3574,18 +4541,24 @@
                 bar.style.width = `${Math.max(0, Math.min(100, width))}%`;
             });
 
-            const sectionObserver = new IntersectionObserver((entries) => {
+            const sectionObserverCallback = (entries, observer) => {
                 entries.forEach((entry) => {
                     if (entry.isIntersecting) {
                         entry.target.classList.add('revealed');
-                        sectionObserver.unobserve(entry.target);
+                        observer.unobserve(entry.target);
                     }
                 });
-            }, { threshold: 0.08 });
+            };
+
+            const sectionObserver = window.IntersectionObserver ? new IntersectionObserver(sectionObserverCallback, { threshold: 0.08 }) : null;
 
             document.querySelectorAll('.dashboard-section').forEach((section, index) => {
                 section.style.transitionDelay = `${Math.min(index, 6) * 45}ms`;
-                sectionObserver.observe(section);
+                if (sectionObserver) {
+                    sectionObserver.observe(section);
+                } else {
+                    section.classList.add('revealed');
+                }
             });
 
             const gaViewerStage = document.getElementById('gaImageViewerStage');
@@ -3840,6 +4813,19 @@
             fetch(`/admin/filter_stock?cat=${encodeURIComponent(cat)}&search=${encodeURIComponent(search)}`)
                 .then(checkAuth).then(res => res.text()).then(html => {
                     document.getElementById('stockTableBody').innerHTML = html;
+                    // ถ้ามีคำขอให้เน้นสินค้าตัวใดตัวหนึ่ง ให้ทำการหาและแอนิเมทแถว
+                    try {
+                        const pendingId = window.pendingHighlightProductId;
+                        if (pendingId) {
+                            window.pendingHighlightProductId = null;
+                            const row = document.querySelector(`#stockTableBody tr[data-product-id="${String(pendingId).trim()}"]`);
+                            if (row) {
+                                row.classList.add('stock-updated');
+                                try { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+                                setTimeout(() => row.classList.remove('stock-updated'), 2200);
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
                 });
         }
 
@@ -3897,6 +4883,7 @@
             const stockLabelEl = document.getElementById(isAddMode ? 'addStockLabel' : 'editStockLabel');
             const safetyBadgeEl = document.getElementById(isAddMode ? 'addSafetyUnitBadge' : 'editSafetyUnitBadge');
             const stockBadgeEl = document.getElementById(isAddMode ? 'addStockUnitBadge' : 'editStockUnitBadge');
+            const stockHelpEl = document.getElementById(isAddMode ? 'addStockHelp' : 'editStockHelp');
 
             if (!categoryEl || !unitEl || !safetyLabelEl || !stockLabelEl) return;
 
@@ -3908,41 +4895,109 @@
 
             const stockUnit = (isMedicine && splitEnabled && packageUnit) ? packageUnit : (unit || 'หน่วย');
             safetyLabelEl.textContent = 'จุดสั่งซื้อ (Safety)';
-            stockLabelEl.textContent = isAddMode ? 'จำนวนเริ่มต้น' : 'จำนวนคงเหลือ';
+            stockLabelEl.textContent = (isMedicine && splitEnabled)
+                ? (isAddMode ? `จำนวน${stockUnit}เต็มเริ่มต้น` : `จำนวน${stockUnit}เต็มที่ยังไม่เปิด (ปรับยอด Lot)`)
+                : (isAddMode ? 'จำนวนเริ่มต้น' : 'จำนวนคงเหลือ');
             if (safetyBadgeEl) safetyBadgeEl.textContent = stockUnit;
             if (stockBadgeEl) stockBadgeEl.textContent = stockUnit;
+            if (stockHelpEl) stockHelpEl.classList.toggle('is-hidden', !(isMedicine && splitEnabled));
         }
 
         function updateSplitModeVisual(mode) {
             const isAddMode = mode === 'add';
-            const modeEl = document.getElementById(isAddMode ? 'add_split_mode' : 'edit_split_mode');
-            const hintEl = document.getElementById(isAddMode ? 'add_split_mode_hint' : 'edit_split_mode_hint');
-            const baseToTabletCol = document.getElementById(isAddMode ? 'add_base_to_tablet_col' : 'edit_base_to_tablet_col');
-            const baseUnitInput = document.getElementById(isAddMode ? 'add_base_unit' : 'edit_base_unit');
-            const baseToTabletInput = document.getElementById(isAddMode ? 'add_base_unit_to_tablet_rate' : 'edit_base_unit_to_tablet_rate');
+            const prefix = isAddMode ? 'add' : 'edit';
+            const modeEl = document.getElementById(`${prefix}_split_mode`);
+            const hintEl = document.getElementById(`${prefix}_split_mode_hint`);
+            const packageUnitInput = document.getElementById(`${prefix}_package_unit`);
+            const baseUnitInput = document.getElementById(`${prefix}_base_unit`);
+            const packageTabletInput = document.getElementById(`${prefix}_package_tablet_total`);
+            const baseToTabletInput = document.getElementById(`${prefix}_base_unit_to_tablet_rate`);
+            const conversionRateInput = document.getElementById(`${prefix}_conversion_rate`);
+            const baseUnitCol = document.getElementById(`${prefix}_base_unit_col`);
+            const baseToTabletCol = document.getElementById(`${prefix}_base_to_tablet_col`);
+            const conversionRateCol = document.getElementById(`${prefix}_conversion_rate_col`);
+            const openExtraCol = document.getElementById(`${prefix}_open_extra_col`);
+            const openExtraInput = document.getElementById(`${prefix}_open_extra_tablet_qty`);
+            const conversionLabel = document.getElementById(`${prefix}ConversionRateLabel`);
+            const conversionHint = document.getElementById(`${prefix}ConversionRateHint`);
+            const openBaseLabel = document.getElementById(`${prefix}OpenBaseLabel`);
+            const openBaseBadge = document.getElementById(`${prefix}OpenBaseUnitBadge`);
+            const flowPackage = document.getElementById(`${prefix}FlowPackageUnit`);
+            const flowBase = document.getElementById(`${prefix}FlowBaseUnit`);
+            const flowTabletArrow = document.getElementById(`${prefix}FlowTabletArrow`);
+            const flowTablet = document.getElementById(`${prefix}FlowTabletUnit`);
 
             if (!modeEl) return;
             const splitMode = modeEl.value || 'single';
+            const isMulti = splitMode === 'multi';
+
+            if (splitMode === 'single' && baseUnitInput) {
+                const currentBaseUnit = (baseUnitInput.value || '').trim();
+                if (currentBaseUnit && currentBaseUnit !== 'เม็ด') {
+                    baseUnitInput.dataset.multiValue = currentBaseUnit;
+                }
+                baseUnitInput.value = 'เม็ด';
+            } else if (isMulti && baseUnitInput && (baseUnitInput.value || '').trim() === 'เม็ด') {
+                baseUnitInput.value = baseUnitInput.dataset.multiValue || '';
+            }
 
             if (hintEl) {
-                hintEl.textContent = splitMode === 'multi'
-                    ? 'หลายชั้น: หน่วยนำเข้า -> หน่วยย่อย -> เม็ด'
-                    : 'ชั้นเดียว: หน่วยนำเข้า -> เม็ด';
+                hintEl.textContent = isMulti
+                    ? 'ใช้เมื่อมีหน่วยกลาง เช่น หลอด → ตลับ → เม็ด'
+                    : 'ใช้เมื่อเปิดหน่วยเต็มแล้วนับเป็นเม็ดทันที เช่น กล่อง → เม็ด';
             }
 
-            if (baseToTabletCol) {
-                baseToTabletCol.classList.toggle('is-hidden', splitMode !== 'multi');
-            }
+            if (baseUnitCol) baseUnitCol.classList.toggle('is-hidden', !isMulti);
+            if (baseToTabletCol) baseToTabletCol.classList.toggle('is-hidden', !isMulti);
+            if (conversionRateCol) conversionRateCol.classList.toggle('is-hidden', !isMulti);
+            if (openExtraCol) openExtraCol.classList.toggle('is-hidden', !isMulti);
 
-            if (splitMode === 'single') {
-                if (baseUnitInput && (!baseUnitInput.value || baseUnitInput.value.trim() === '')) {
-                    baseUnitInput.value = 'เม็ด';
+            if (!isMulti && baseToTabletInput) {
+                if ((parseInt(baseToTabletInput.value || '0', 10) || 0) > 0) {
+                    baseToTabletInput.dataset.multiValue = baseToTabletInput.value;
                 }
+                baseToTabletInput.value = '0';
+            } else if (isMulti && baseToTabletInput && (parseInt(baseToTabletInput.value || '0', 10) || 0) === 0) {
+                baseToTabletInput.value = baseToTabletInput.dataset.multiValue || '0';
+            }
+            if (!isMulti && openExtraInput) {
+                if ((parseInt(openExtraInput.value || '0', 10) || 0) > 0) {
+                    openExtraInput.dataset.multiValue = openExtraInput.value;
+                }
+                openExtraInput.value = '0';
+            } else if (isMulti && openExtraInput && (parseInt(openExtraInput.value || '0', 10) || 0) === 0) {
+                openExtraInput.value = openExtraInput.dataset.multiValue || '0';
             }
 
-            if (splitMode !== 'multi' && baseToTabletInput) {
-                baseToTabletInput.value = '0';
+            const packageUnit = (packageUnitInput?.value || 'หน่วยเต็ม').trim() || 'หน่วยเต็ม';
+            const baseUnit = (baseUnitInput?.value || (isMulti ? 'หน่วยกลาง' : 'เม็ด')).trim() || (isMulti ? 'หน่วยกลาง' : 'เม็ด');
+            const packageTabletTotal = Math.max(0, parseInt(packageTabletInput?.value || '0', 10) || 0);
+            const baseToTablet = Math.max(0, parseInt(baseToTabletInput?.value || '0', 10) || 0);
+            const conversionRate = isMulti
+                ? (baseToTablet > 0 ? Math.floor(packageTabletTotal / baseToTablet) : 0)
+                : packageTabletTotal;
+            const remainderTablet = isMulti && baseToTablet > 0
+                ? packageTabletTotal % baseToTablet
+                : 0;
+
+            if (conversionRateInput) conversionRateInput.value = String(conversionRate);
+            if (conversionLabel) conversionLabel.textContent = `ระบบคำนวณ: จำนวน${baseUnit}ต่อ${packageUnit}`;
+            if (conversionHint) {
+                conversionHint.textContent = packageTabletTotal > 0 && baseToTablet > 0
+                    ? `แบ่งได้ ${conversionRate} ${baseUnit}${remainderTablet > 0 ? ` และเหลือ ${remainderTablet} เม็ด` : ' พอดี ไม่มีเศษ'}`
+                    : 'กรอกจำนวนเม็ด 2 ช่อง แล้วระบบจะคำนวณให้';
             }
+            if (openBaseLabel) {
+                openBaseLabel.textContent = isMulti
+                    ? `จำนวน${baseUnit}ที่แยกออกมาแล้ว`
+                    : 'จำนวนเม็ดที่เปิดออกมาแล้ว';
+            }
+            if (openBaseBadge) openBaseBadge.textContent = isMulti ? baseUnit : 'เม็ด';
+
+            if (flowPackage) flowPackage.textContent = packageUnit;
+            if (flowBase) flowBase.textContent = isMulti ? baseUnit : 'เม็ด';
+            if (flowTabletArrow) flowTabletArrow.classList.toggle('is-hidden', !isMulti);
+            if (flowTablet) flowTablet.classList.toggle('is-hidden', !isMulti);
         }
 
         function toggleAddSplitFields() {
@@ -3980,6 +5035,13 @@
             const summaryRow = document.getElementById('addSplitSummaryRow');
             detailRow.classList.toggle('is-hidden', !cb.checked);
             if (summaryRow) summaryRow.classList.toggle('is-hidden', !cb.checked);
+            if (cb.checked) {
+                const packageUnitEl = document.getElementById('add_package_unit');
+                const stockUnitEl = document.getElementById('add_unit');
+                if (packageUnitEl && !(packageUnitEl.value || '').trim()) {
+                    packageUnitEl.value = (stockUnitEl?.value || '').trim();
+                }
+            }
             if (!cb.checked) {
                 ['add_package_unit','add_base_unit','add_conversion_rate','add_base_unit_to_tablet_rate','add_package_tablet_total','add_open_base_qty','add_open_extra_tablet_qty'].forEach(id => {
                     const el = document.getElementById(id);
@@ -4006,84 +5068,73 @@
                 return;
             }
 
-            const convRate = parseInt(document.getElementById('add_conversion_rate')?.value || 1, 10) || 1;
+            const convRate = Math.max(0, parseInt(document.getElementById('add_conversion_rate')?.value || 0, 10) || 0);
             const baseToTablet = parseInt(document.getElementById('add_base_unit_to_tablet_rate')?.value || 0, 10) || 0;
             const packageTabletTotal = parseInt(document.getElementById('add_package_tablet_total')?.value || 0, 10) || 0;
             const splitMode = document.getElementById('add_split_mode')?.value || 'single';
             const stock = parseInt(document.getElementById('add_stock')?.value || 0, 10) || 0;
             const openBase = parseInt(document.getElementById('add_open_base_qty')?.value || 0, 10) || 0;
-            const openExtraEl = document.getElementById('add_open_extra_tablet_qty');
-            const openExtraTablet = parseInt(openExtraEl?.value || 0, 10) || 0;
-            const pkgUnit = (document.getElementById('add_package_unit')?.value || 'แพ็ค').trim() || 'แพ็ค';
-            const baseUnit = (document.getElementById('add_base_unit')?.value || 'หน่วยย่อย').trim() || 'หน่วยย่อย';
-            const activeId = document.activeElement ? document.activeElement.id : '';
-            const convRateEl = document.getElementById('add_conversion_rate');
-            const packageTabletTotalEl = document.getElementById('add_package_tablet_total');
+            const openExtraTablet = splitMode === 'multi'
+                ? (parseInt(document.getElementById('add_open_extra_tablet_qty')?.value || 0, 10) || 0)
+                : 0;
+            const pkgUnitRaw = (document.getElementById('add_package_unit')?.value || 'หน่วยเต็ม').trim() || 'หน่วยเต็ม';
+            const baseUnitRaw = splitMode === 'multi'
+                ? ((document.getElementById('add_base_unit')?.value || 'หน่วยกลาง').trim() || 'หน่วยกลาง')
+                : 'เม็ด';
+            const pkgUnit = escapeHtml(pkgUnitRaw);
+            const baseUnit = escapeHtml(baseUnitRaw);
+            const hasInvalidConfig = packageTabletTotal <= 0
+                || (splitMode === 'multi' && (baseToTablet <= 0 || convRate <= 0));
 
-            let effectiveConvRate = convRate;
-            let effectiveBaseToTablet = baseToTablet;
-
-            if (splitMode === 'multi' && packageTabletTotal > 0 && baseToTablet > 0) {
-                if (activeId === 'add_conversion_rate') {
-                    if (packageTabletTotalEl) packageTabletTotalEl.value = String(convRate * baseToTablet);
-                    effectiveConvRate = convRate;
-                } else {
-                    effectiveConvRate = Math.floor(packageTabletTotal / baseToTablet);
-                    if (convRateEl) convRateEl.value = String(effectiveConvRate);
-                }
-            } else if (splitMode === 'single' && packageTabletTotal > 0) {
-                effectiveConvRate = packageTabletTotal;
-                effectiveBaseToTablet = 0;
-                if (convRateEl) convRateEl.value = String(effectiveConvRate);
-            }
-
-            const multiRemainder = (splitMode === 'multi' && packageTabletTotal > 0 && baseToTablet > 0)
+            const multiRemainder = (splitMode === 'multi' && !hasInvalidConfig)
                 ? (packageTabletTotal % baseToTablet)
                 : 0;
-            // รวมเศษจากทุกแพ็ค + เศษที่เปิดแล้ว แล้วค่อยแปลงเป็นหน่วยย่อยทันที
+            // คิดยอดรวมเมื่อแปลงหน่วยเต็มทั้งหมด เพื่อให้เทียบสต็อกได้ในหน่วยเดียวกัน
             const packageRemainderTablets = (splitMode === 'multi' && multiRemainder > 0)
                 ? (stock * multiRemainder)
                 : 0;
-            let manualOpenExtraTablet = openExtraTablet;
-            if (openExtraEl) {
-                if (activeId === 'add_open_extra_tablet_qty') {
-                    openExtraEl.dataset.manualValue = String(manualOpenExtraTablet);
-                } else {
-                    manualOpenExtraTablet = parseInt(openExtraEl.dataset.manualValue || openExtraEl.value || '0', 10) || 0;
-                }
-            }
-            const totalRemainderTablets = packageRemainderTablets + manualOpenExtraTablet;
+            const totalRemainderTablets = packageRemainderTablets + openExtraTablet;
             const extraBundlesFromRemainder = (baseToTablet > 0)
                 ? Math.floor(totalRemainderTablets / baseToTablet) : 0;
             const trueRemainderTablets = (baseToTablet > 0 && totalRemainderTablets > 0)
                 ? totalRemainderTablets % baseToTablet : 0;
-            const totalBase = stock * effectiveConvRate + openBase + extraBundlesFromRemainder;
-            const perPackageBundleText = (splitMode === 'multi' && effectiveBaseToTablet > 0)
-                ? `1 ${pkgUnit} = ${effectiveConvRate} ${baseUnit} (${effectiveBaseToTablet} เม็ด/${baseUnit})${multiRemainder > 0 ? ` + เหลือ ${multiRemainder} เม็ด/แพ็ค` : ''}`
-                : `1 ${pkgUnit} = ${effectiveConvRate} ${baseUnit}`;
-
+            const totalBase = stock * convRate + openBase + extraBundlesFromRemainder;
             const totalTablet = splitMode === 'multi'
-                ? (packageTabletTotal > 0
-                    ? (stock * packageTabletTotal) + (openBase * effectiveBaseToTablet) + totalRemainderTablets
-                    : (effectiveBaseToTablet > 0 ? (stock * effectiveConvRate + openBase) * effectiveBaseToTablet + totalRemainderTablets : 0))
-                : (packageTabletTotal > 0 ? (stock * packageTabletTotal) + openBase + totalRemainderTablets : null);
-            const remainderLine = (splitMode === 'multi' && extraBundlesFromRemainder > 0)
-                ? `<br><span class="text-success"><i class="fas fa-recycle me-1"></i>เศษจากแพ็ค ${packageRemainderTablets} เม็ด + เศษเปิดแล้ว ${manualOpenExtraTablet} เม็ด = ${totalRemainderTablets} เม็ด → จัดเพิ่มได้ ${extraBundlesFromRemainder} ${baseUnit}${trueRemainderTablets > 0 ? ` + เหลือสุดท้าย ${trueRemainderTablets} เม็ด` : ''}</span>`
-                : (splitMode === 'multi' && trueRemainderTablets > 0
-                    ? `<br><span class="text-warning">เศษจากแพ็ค ${packageRemainderTablets} เม็ด + เศษเปิดแล้ว ${manualOpenExtraTablet} เม็ด = ${totalRemainderTablets} เม็ด (ยังไม่ครบ 1 ${baseUnit})</span>`
-                    : '');
-            const totalPackText = (totalTablet !== null && typeof totalTablet === 'number')
-                ? `รวม ${stock} ${pkgUnit} + เปิดแล้ว ${openBase} ${baseUnit} = ${totalBase} ${baseUnit} = ${totalTablet} เม็ด`
-                : `รวม ${stock} ${pkgUnit} + เปิดแล้ว ${openBase} ${baseUnit} = ${totalBase} ${baseUnit}`;
-            const remainderFieldHint = (splitMode === 'multi' && baseToTablet > 0)
-                ? `<br><span class="text-primary fw-semibold">เศษสุดท้ายที่ควรแสดงในช่อง "เศษเม็ดที่เปิดแล้ว" = ${trueRemainderTablets} เม็ด</span>`
-                : '';
+                ? (stock * packageTabletTotal) + (openBase * baseToTablet) + openExtraTablet
+                : (stock * packageTabletTotal) + openBase;
 
-            if (openExtraEl && splitMode === 'multi' && baseToTablet > 0 && activeId !== 'add_open_extra_tablet_qty') {
-                openExtraEl.value = String(trueRemainderTablets);
+            summaryBox.className = `split-summary-card${hasInvalidConfig ? ' border-danger' : ''}`;
+            if (hasInvalidConfig) {
+                summaryBox.innerHTML = `
+                    <strong class="text-danger"><i class="fas fa-circle-exclamation me-1" aria-hidden="true"></i>ข้อมูลยังไม่ครบ</strong>
+                    <div class="mt-1">${splitMode === 'multi'
+                        ? 'กรอกจำนวนเม็ดใน 1 หน่วยเต็ม และจำนวนเม็ดใน 1 หน่วยกลางให้ครบ'
+                        : 'กรอกจำนวนเม็ดทั้งหมดใน 1 หน่วยเต็ม'}</div>
+                `;
+                summaryRow.classList.remove('is-hidden');
+                return;
             }
 
-            summaryBox.innerHTML = `<strong>สรุปตั้งค่า:</strong> ${perPackageBundleText}<br>${totalPackText}${remainderLine}${remainderFieldHint}`;
+            const openedText = splitMode === 'multi'
+                ? `${openBase} ${baseUnit}${openExtraTablet > 0 ? ` + ${openExtraTablet} เม็ด` : ''}`
+                : `${openBase} เม็ด`;
+            const totalUnitText = splitMode === 'multi'
+                ? `${totalBase} ${baseUnit}${trueRemainderTablets > 0 ? ` + ${trueRemainderTablets} เม็ด` : ''}`
+                : `${totalTablet} เม็ด`;
+            const structureText = splitMode === 'multi'
+                ? `1 ${pkgUnit} มี ${convRate} ${baseUnit} — ${baseUnit}ละ ${baseToTablet} เม็ด${multiRemainder > 0 ? ` และมีเศษ ${multiRemainder} เม็ด` : ''}`
+                : `1 ${pkgUnit} มี ${packageTabletTotal} เม็ด`;
+
+            summaryBox.innerHTML = `
+                <strong><i class="fas fa-check-circle me-1 text-success" aria-hidden="true"></i>ตรวจสอบก่อนบันทึก</strong>
+                <div class="small mt-1">${structureText}</div>
+                <div class="split-summary-grid">
+                    <div class="split-summary-item"><span class="small text-muted">หน่วยเต็มที่ยังไม่เปิด</span><strong>${stock} ${pkgUnit}</strong></div>
+                    <div class="split-summary-item"><span class="small text-muted">ของที่เปิดออกมาแล้ว</span><strong>${openedText}</strong></div>
+                    <div class="split-summary-item"><span class="small text-muted">รวมเมื่อแปลงเป็นหน่วยเดียว</span><strong>${totalUnitText}</strong><small class="text-primary">รวม ${totalTablet} เม็ด</small></div>
+                </div>
+                <div class="mt-2 fw-semibold">ของจริงในคลัง: ${stock} ${pkgUnit} (ยังไม่เปิด) + ${openedText}</div>
+            `;
             summaryRow.classList.remove('is-hidden');
         }
 
@@ -4130,6 +5181,13 @@
 
             detailRow.classList.toggle('is-hidden', !cb.checked);
             summaryRow.classList.toggle('is-hidden', !cb.checked);
+            if (cb.checked) {
+                const packageUnitEl = document.getElementById('edit_package_unit');
+                const stockUnitEl = document.getElementById('edit_unit');
+                if (packageUnitEl && !(packageUnitEl.value || '').trim()) {
+                    packageUnitEl.value = (stockUnitEl?.value || '').trim();
+                }
+            }
             if (!cb.checked) {
                 ['edit_package_unit', 'edit_base_unit', 'edit_conversion_rate', 'edit_base_unit_to_tablet_rate'].forEach(id => {
                     const el = document.getElementById(id);
@@ -4146,162 +5204,94 @@
             }
             updateStockUnitHints('edit');
             updateSplitModeVisual('edit');
-        }
-
-        function renderEditSplitSummary(data) {
-            const summaryRow = document.getElementById('editSplitSummaryRow');
-            const summaryBox = document.getElementById('editSplitSummaryBox');
-            if (!summaryRow || !summaryBox) return;
-
-            const conversionRate = parseInt(data.conversion_rate || 1, 10);
-            const isSplitMedicine = data.category === 'ยา'
-                && !!(data.package_unit && data.base_unit)
-                && conversionRate > 1;
-
-            if (!isSplitMedicine || !data.split_summary) {
-                summaryRow.classList.add('is-hidden');
-                summaryBox.textContent = '-';
-                return;
-            }
-
-            const summary = data.split_summary;
-            const packageQty = parseInt(summary.stock_package_qty || 0, 10);
-            const openBaseQty = parseInt(summary.open_base_qty || 0, 10);
-            const openExtraTabletQty = parseInt(summary.open_extra_tablet_qty || 0, 10);
-            const totalBaseQty = parseInt(summary.total_base_qty || 0, 10);
-            const packageUnit = data.package_unit || data.unit || 'แพ็ก';
-            const baseUnit = data.base_unit || 'หน่วยย่อย';
-            const baseToTablet = parseInt(data.base_unit_to_tablet_rate || 0, 10) || 0;
-            const totalPackageEquivalent = (totalBaseQty / conversionRate).toFixed(2);
-            const totalTabletQty = parseInt(summary.total_tablet_qty || 0, 10);
-            const totalTabletText = baseToTablet > 0 ? `<br><span class="text-primary">≈ ${totalTabletQty} เม็ด</span>` : '';
-            const extraText = openExtraTabletQty > 0 ? `<br><span class="text-warning">เศษเม็ดจากหน่วยเปิด: ${openExtraTabletQty} เม็ด</span>` : '';
-
-            summaryBox.innerHTML = `
-                <strong>สรุปคงเหลือปัจจุบัน:</strong>
-                ในคลัง ${packageQty} ${packageUnit}
-                + เปิดใช้แล้ว ${openBaseQty} ${baseUnit}
-                = รวมทั้งหมด ${totalBaseQty} ${baseUnit} (${totalPackageEquivalent} ${packageUnit})
-                ${extraText}
-                ${totalTabletText}
-            `;
-            summaryRow.classList.remove('is-hidden');
+            renderEditSplitSummaryFromForm();
         }
 
         function renderEditSplitSummaryFromForm() {
             const summaryRow = document.getElementById('editSplitSummaryRow');
             const summaryBox = document.getElementById('editSplitSummaryBox');
-            const liveHintEl = document.getElementById('editLiveStockHint');
             if (!summaryRow || !summaryBox) return;
-            // แสดงสรุปเฉพาะหมวด "ยา" เท่านั้น
             const category = document.getElementById('edit_category')?.value || '';
             const splitEnabled = (document.getElementById('editEnableSplit') || {}).checked;
             if (category !== 'ยา' || !splitEnabled) {
                 summaryRow.classList.add('is-hidden');
-                if (liveHintEl) liveHintEl.style.display = 'none';
                 return;
             }
-            if (liveHintEl) liveHintEl.style.display = '';
-            const convRate = parseInt(document.getElementById('edit_conversion_rate')?.value || 1, 10) || 1;
+
+            const convRate = Math.max(0, parseInt(document.getElementById('edit_conversion_rate')?.value || 0, 10) || 0);
             const baseToTablet = parseInt(document.getElementById('edit_base_unit_to_tablet_rate')?.value || 0, 10) || 0;
             const packageTabletTotal = parseInt(document.getElementById('edit_package_tablet_total')?.value || 0, 10) || 0;
             const splitMode = document.getElementById('edit_split_mode')?.value || 'single';
             const stock = parseInt(document.getElementById('edit_stock')?.value || 0, 10) || 0;
             const safetyStock = parseInt(document.getElementById('edit_safety_stock')?.value || 0, 10) || 0;
             const openBase = parseInt(document.getElementById('edit_open_base_qty')?.value || 0, 10) || 0;
-            const openExtraEl = document.getElementById('edit_open_extra_tablet_qty');
-            const openExtraTablet = parseInt(openExtraEl?.value || 0, 10) || 0;
-            const pkgUnit = document.getElementById('edit_package_unit')?.value || 'แพ็ค';
-            const baseUnit = document.getElementById('edit_base_unit')?.value || 'หน่วยย่อย';
-            const activeId = document.activeElement ? document.activeElement.id : '';
-            const convRateEl = document.getElementById('edit_conversion_rate');
-            const packageTabletTotalEl = document.getElementById('edit_package_tablet_total');
+            const openExtraTablet = splitMode === 'multi'
+                ? (parseInt(document.getElementById('edit_open_extra_tablet_qty')?.value || 0, 10) || 0)
+                : 0;
+            const pkgUnitRaw = (document.getElementById('edit_package_unit')?.value || 'หน่วยเต็ม').trim() || 'หน่วยเต็ม';
+            const baseUnitRaw = splitMode === 'multi'
+                ? ((document.getElementById('edit_base_unit')?.value || 'หน่วยกลาง').trim() || 'หน่วยกลาง')
+                : 'เม็ด';
+            const pkgUnit = escapeHtml(pkgUnitRaw);
+            const baseUnit = escapeHtml(baseUnitRaw);
+            const hasInvalidConfig = packageTabletTotal <= 0
+                || (splitMode === 'multi' && (baseToTablet <= 0 || convRate <= 0));
 
-            let effectiveConvRate = convRate;
-            let effectiveBaseToTablet = baseToTablet;
-            if (splitMode === 'multi' && packageTabletTotal > 0 && baseToTablet > 0) {
-                if (activeId === 'edit_conversion_rate') {
-                    if (packageTabletTotalEl) packageTabletTotalEl.value = String(convRate * baseToTablet);
-                    effectiveConvRate = convRate;
-                } else {
-                    effectiveConvRate = Math.floor(packageTabletTotal / baseToTablet);
-                    if (convRateEl) convRateEl.value = String(effectiveConvRate);
-                }
-            } else if (splitMode === 'single' && packageTabletTotal > 0) {
-                effectiveConvRate = packageTabletTotal;
-                effectiveBaseToTablet = 0;
-                if (convRateEl) convRateEl.value = String(effectiveConvRate);
-            }
-
-            const multiRemainder = (splitMode === 'multi' && packageTabletTotal > 0 && baseToTablet > 0)
+            const multiRemainder = (splitMode === 'multi' && !hasInvalidConfig)
                 ? (packageTabletTotal % baseToTablet)
                 : 0;
-            // รวมเศษจากทุกแพ็ค + เศษที่เปิดแล้ว แล้วค่อยแปลงเป็นหน่วยย่อยทันที
+            // คิดยอดรวมเมื่อแปลงหน่วยเต็มทั้งหมด เพื่อให้เทียบสต็อกได้ในหน่วยเดียวกัน
             const packageRemainderTablets = (splitMode === 'multi' && multiRemainder > 0)
                 ? (stock * multiRemainder)
                 : 0;
-            let manualOpenExtraTablet = openExtraTablet;
-            if (openExtraEl) {
-                if (activeId === 'edit_open_extra_tablet_qty') {
-                    openExtraEl.dataset.manualValue = String(manualOpenExtraTablet);
-                } else {
-                    manualOpenExtraTablet = parseInt(openExtraEl.dataset.manualValue || openExtraEl.value || '0', 10) || 0;
-                }
-            }
-            const totalRemainderTablets = packageRemainderTablets + manualOpenExtraTablet;
+            const totalRemainderTablets = packageRemainderTablets + openExtraTablet;
             const extraBundlesFromRemainder = (baseToTablet > 0)
                 ? Math.floor(totalRemainderTablets / baseToTablet) : 0;
             const trueRemainderTablets = (baseToTablet > 0 && totalRemainderTablets > 0)
                 ? totalRemainderTablets % baseToTablet : 0;
-            const totalBase = stock * effectiveConvRate + openBase + extraBundlesFromRemainder;
-            const totalPackageEquivalent = effectiveConvRate > 0 ? ((stock * effectiveConvRate + openBase) / effectiveConvRate) : stock;
+            const totalBase = stock * convRate + openBase + extraBundlesFromRemainder;
             const totalTablet = splitMode === 'multi'
-                ? (packageTabletTotal > 0
-                    ? (stock * packageTabletTotal) + (openBase * effectiveBaseToTablet) + totalRemainderTablets
-                    : (effectiveBaseToTablet > 0 ? (stock * effectiveConvRate + openBase) * effectiveBaseToTablet + totalRemainderTablets : 0))
-                : (packageTabletTotal > 0 ? (stock * packageTabletTotal) + openBase + totalRemainderTablets : null);
-            const hasInvalidConfig = splitMode === 'multi' && (packageTabletTotal <= 0 || baseToTablet <= 0 || effectiveConvRate <= 0);
+                ? (stock * packageTabletTotal) + (openBase * baseToTablet) + openExtraTablet
+                : (stock * packageTabletTotal) + openBase;
+            const totalPackageEquivalent = packageTabletTotal > 0 ? totalTablet / packageTabletTotal : stock;
             const isSafetyRisk = !hasInvalidConfig && safetyStock > 0 && totalPackageEquivalent <= safetyStock;
-            const remainderInfoHtml = (splitMode === 'multi' && extraBundlesFromRemainder > 0)
-                ? `<br><span class="text-success"><i class="fas fa-recycle me-1"></i>เศษจากแพ็ค ${packageRemainderTablets} เม็ด + เศษเปิดแล้ว ${manualOpenExtraTablet} เม็ด = ${totalRemainderTablets} เม็ด → จัดเพิ่มได้ <strong>${extraBundlesFromRemainder} ${baseUnit}</strong>${trueRemainderTablets > 0 ? ` + เหลือสุดท้าย ${trueRemainderTablets} เม็ด` : ''}</span>`
-                : (splitMode === 'multi' && trueRemainderTablets > 0
-                    ? `<br><span class="text-warning">เศษจากแพ็ค ${packageRemainderTablets} เม็ด + เศษเปิดแล้ว ${manualOpenExtraTablet} เม็ด = ${totalRemainderTablets} เม็ด (ยังไม่ครบ 1 ${baseUnit})</span>`
-                    : '');
-            const remainderFieldHint = (splitMode === 'multi' && baseToTablet > 0)
-                ? `<br><span class="text-primary fw-semibold">เศษสุดท้ายที่ควรแสดงในช่อง "เศษเม็ดที่เปิดแล้ว" = ${trueRemainderTablets} เม็ด</span>`
-                : '';
 
-            if (openExtraEl && splitMode === 'multi' && baseToTablet > 0 && activeId !== 'edit_open_extra_tablet_qty') {
-                openExtraEl.value = String(trueRemainderTablets);
+            summaryBox.className = `split-summary-card${hasInvalidConfig ? ' border-danger' : (isSafetyRisk ? ' border-warning' : '')}`;
+            if (hasInvalidConfig) {
+                summaryBox.innerHTML = `
+                    <strong class="text-danger"><i class="fas fa-circle-exclamation me-1" aria-hidden="true"></i>ข้อมูลยังไม่ครบ</strong>
+                    <div class="mt-1">${splitMode === 'multi'
+                        ? 'กรอกจำนวนเม็ดใน 1 หน่วยเต็ม และจำนวนเม็ดใน 1 หน่วยกลางให้ครบ'
+                        : 'กรอกจำนวนเม็ดทั้งหมดใน 1 หน่วยเต็ม'}</div>
+                `;
+                summaryRow.classList.remove('is-hidden');
+                return;
             }
+
+            const openedText = splitMode === 'multi'
+                ? `${openBase} ${baseUnit}${openExtraTablet > 0 ? ` + ${openExtraTablet} เม็ด` : ''}`
+                : `${openBase} เม็ด`;
+            const totalUnitText = splitMode === 'multi'
+                ? `${totalBase} ${baseUnit}${trueRemainderTablets > 0 ? ` + ${trueRemainderTablets} เม็ด` : ''}`
+                : `${totalTablet} เม็ด`;
+            const structureText = splitMode === 'multi'
+                ? `1 ${pkgUnit} มี ${convRate} ${baseUnit} — ${baseUnit}ละ ${baseToTablet} เม็ด${multiRemainder > 0 ? ` และมีเศษ ${multiRemainder} เม็ด` : ''}`
+                : `1 ${pkgUnit} มี ${packageTabletTotal} เม็ด`;
+            const safetyText = safetyStock > 0
+                ? `${isSafetyRisk ? '<span class="text-danger fw-semibold">ถึงจุดสั่งซื้อแล้ว</span>' : 'จุดสั่งซื้อ'}: ${safetyStock} ${pkgUnit}`
+                : 'ยังไม่ได้กำหนดจุดสั่งซื้อ';
+
             summaryBox.innerHTML = `
-                <strong>สรุปหลังแก้ไข:</strong>
-                ในคลัง ${stock} ${pkgUnit} × ${effectiveConvRate} + เปิด ${openBase} ${baseUnit}
-                ${extraBundlesFromRemainder > 0 ? `+ เศษรวม → เพิ่ม ${extraBundlesFromRemainder} ${baseUnit}` : ''}
-                = รวมทั้งหมด <strong>${totalBase} ${baseUnit}</strong>
-                ${splitMode === 'multi' && effectiveBaseToTablet > 0 ? `<br><span class="text-muted">1 ${pkgUnit} = ${effectiveConvRate} ${baseUnit} (${effectiveBaseToTablet} เม็ด/${baseUnit})${multiRemainder > 0 ? ` + เหลือ ${multiRemainder} เม็ด/แพ็ค` : ''}</span>` : ''}
-                ${remainderInfoHtml}
-                ${remainderFieldHint}
-                <br><span class="text-muted">เทียบเท่า ${totalPackageEquivalent.toFixed(2)} ${pkgUnit}</span>
-                ${totalTablet !== null ? `<br><span class="text-primary">≈ ${typeof totalTablet === 'number' ? totalTablet : 0} เม็ด</span>` : ''}
+                <strong><i class="fas fa-check-circle me-1 text-success" aria-hidden="true"></i>คงเหลือหลังบันทึก</strong>
+                <div class="small mt-1">${structureText}</div>
+                <div class="split-summary-grid">
+                    <div class="split-summary-item"><span class="small text-muted">หน่วยเต็มที่ยังไม่เปิด</span><strong>${stock} ${pkgUnit}</strong></div>
+                    <div class="split-summary-item"><span class="small text-muted">ของที่เปิดออกมาแล้ว</span><strong>${openedText}</strong></div>
+                    <div class="split-summary-item"><span class="small text-muted">รวมเมื่อแปลงเป็นหน่วยเดียว</span><strong>${totalUnitText}</strong><small class="text-primary">รวม ${totalTablet} เม็ด</small></div>
+                </div>
+                <div class="mt-2 fw-semibold">ของจริงในคลัง: ${stock} ${pkgUnit} (ยังไม่เปิด) + ${openedText}</div>
+                <div class="small mt-1 text-muted">${safetyText}</div>
             `;
-            if (liveHintEl) {
-                const tabletText = totalTablet !== null ? ` | ≈${typeof totalTablet === 'number' ? totalTablet : 0} เม็ด` : '';
-                const remainderText = (splitMode === 'multi' && extraBundlesFromRemainder > 0)
-                    ? ` | เศษรวมจัดได้ +${extraBundlesFromRemainder} ${baseUnit}${trueRemainderTablets > 0 ? ` เหลือ ${trueRemainderTablets} เม็ด` : ''}`
-                    : (splitMode === 'multi' && trueRemainderTablets > 0 ? ` | เศษสุดท้าย ${trueRemainderTablets} เม็ด` : '');
-                const safetyText = safetyStock > 0 ? ` | Safety ${safetyStock} ${pkgUnit}` : '';
-                if (hasInvalidConfig) {
-                    liveHintEl.className = 'alert alert-danger mb-0 py-2 px-3 small';
-                    liveHintEl.textContent = 'ข้อมูลยังไม่ครบสำหรับโหมดหลายชั้น: ต้องระบุเม็ดต่อหน่วยนำเข้าและเม็ดต่อหน่วยย่อยให้ถูกต้อง';
-                } else if (isSafetyRisk) {
-                    liveHintEl.className = 'alert alert-warning mb-0 py-2 px-3 small';
-                    liveHintEl.textContent = `ใกล้จุดสั่งซื้อ: ${stock} ${pkgUnit} + ${openBase} ${baseUnit} = รวม ${totalBase} ${baseUnit} (≈ ${totalPackageEquivalent.toFixed(2)} ${pkgUnit})${safetyText}${tabletText}${remainderText}`;
-                } else {
-                    liveHintEl.className = 'alert alert-primary mb-0 py-2 px-3 small';
-                    liveHintEl.textContent = `สด: ${stock} ${pkgUnit} + ${openBase} ${baseUnit} = รวม ${totalBase} ${baseUnit} (≈ ${totalPackageEquivalent.toFixed(2)} ${pkgUnit})${safetyText}${tabletText}${remainderText}`;
-                }
-            }
             summaryRow.classList.remove('is-hidden');
         }
 
@@ -4314,17 +5304,21 @@
                 const baseUnit = (document.getElementById('add_base_unit')?.value || '').trim();
                 const baseToTablet = parseInt(document.getElementById('add_base_unit_to_tablet_rate')?.value || 0, 10) || 0;
                 const packageTotalTablet = parseInt(document.getElementById('add_package_tablet_total')?.value || 0, 10) || 0;
+                if (packageTotalTablet <= 0) {
+                    Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณากรอกจำนวนเม็ดทั้งหมดใน 1 หน่วยเต็ม' });
+                    return;
+                }
                 if (splitMode === 'multi') {
-                    if (packageTotalTablet <= 0) {
-                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณาระบุ 1 หน่วยนำเข้า มีกี่เม็ด' });
-                        return;
-                    }
                     if (!baseUnit) {
-                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณาระบุหน่วยย่อย เช่น ซอง/ห่อ' });
+                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณาระบุชื่อหน่วยกลาง เช่น ตลับ แผง หรือซอง' });
                         return;
                     }
                     if (baseToTablet <= 0) {
-                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: `กรุณาระบุ 1 ${baseUnit} มีกี่เม็ด` });
+                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: `กรุณากรอกจำนวนเม็ดใน 1 ${baseUnit}` });
+                        return;
+                    }
+                    if (packageTotalTablet < baseToTablet) {
+                        Swal.fire({ icon: 'warning', title: 'ตัวเลขไม่ถูกต้อง', text: `จำนวนเม็ดใน 1 ${baseUnit} ต้องไม่มากกว่าจำนวนเม็ดในหน่วยเต็ม` });
                         return;
                     }
                     const convRateEl = document.getElementById('add_conversion_rate');
@@ -4480,6 +5474,9 @@
                 = ${qtyPackage.toFixed(2)} ${packageUnit} / ${qtyBase} ${baseUnit}
                 <span class="text-muted">(ก่อนเพิ่ม: ${currentPkg} ${packageUnit} + เปิดใช้แล้ว ${openBase} ${baseUnit})</span>
             `;
+            if (isBaseMode && qty > 0 && qty < conversionRate) {
+                hintBox.innerHTML += `<div class="text-warning small mt-2">จำนวนนี้จะถูกเก็บเป็นสต็อกเปิดและจะไม่แสดงในรายการ Lot</div>`;
+            }
             hintWrap.classList.remove('is-hidden');
         }
 
@@ -4516,23 +5513,31 @@
                 document.getElementById('edit_category_display').value = data.category;
                 document.getElementById('edit_unit').value = data.unit;
                 document.getElementById('edit_package_unit').value = data.package_unit || data.unit || '';
-                document.getElementById('edit_base_unit').value = data.base_unit || 'เม็ด';
+                const editBaseUnitEl = document.getElementById('edit_base_unit');
+                editBaseUnitEl.value = data.base_unit || 'เม็ด';
+                editBaseUnitEl.dataset.multiValue = data.split_mode === 'multi' ? (data.base_unit || '') : '';
                 document.getElementById('edit_conversion_rate').value = data.conversion_rate || 1;
                 document.getElementById('edit_base_unit_to_tablet_rate').value = data.base_unit_to_tablet_rate || 0;
                 document.getElementById('edit_split_mode').value = data.split_mode || 'single';
                 document.getElementById('edit_package_tablet_total').value = data.package_tablet_total || 0;
                 document.getElementById('edit_open_base_qty').value = (data.split_summary?.open_base_qty || 0);
-                document.getElementById('edit_open_extra_tablet_qty').value = (data.split_summary?.open_extra_tablet_qty || 0);
-                const hasSplitData = (parseInt(data.conversion_rate || 1, 10) > 1)
-                    && !!(data.package_unit && data.base_unit);
-                toggleEditSplitFields(data.category, hasSplitData);
-                updateSplitModeVisual('edit');
-                renderEditSplitSummary(data);
-                updateStockUnitHints('edit');
+                document.getElementById('edit_open_extra_tablet_qty').value = (
+                    data.split_summary?.open_extra_tablet_qty_raw
+                    ?? data.split_summary?.open_extra_tablet_qty
+                    ?? 0
+                );
+                document.getElementById('edit_open_base_qty').dataset.initialValue = document.getElementById('edit_open_base_qty').value;
+                document.getElementById('edit_open_extra_tablet_qty').dataset.initialValue = document.getElementById('edit_open_extra_tablet_qty').value;
                 document.getElementById('edit_location').value = data.location;
                 document.getElementById('edit_location_display').value = data.location;
                 document.getElementById('edit_safety_stock').value = data.safety_stock;
                 document.getElementById('edit_stock').value = data.stock;
+                const hasSplitData = (parseInt(data.conversion_rate || 1, 10) > 1)
+                    && !!(data.package_unit && data.base_unit);
+                toggleEditSplitFields(data.category, hasSplitData);
+                updateSplitModeVisual('edit');
+                updateStockUnitHints('edit');
+                renderEditSplitSummaryFromForm();
                 if (document.getElementById('edit_date_picker_expiry')._flatpickr) {
                     document.getElementById('edit_date_picker_expiry')._flatpickr.setDate(data.expiry_date || '');
                 }
@@ -4547,6 +5552,7 @@
                     return;
                 }
 
+                window.editLotContext = data;
                 document.getElementById('editLot_product_id').value = data.id;
                 document.getElementById('editLot_product_display').value = `[${data.code}] ${data.name}`;
                 document.getElementById('editLot_lot_id').value = '';
@@ -4567,20 +5573,59 @@
             body.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-4">กำลังโหลดข้อมูล Lot...</td></tr>`;
 
             fetch(`/admin/get_product_lots/${productId}`).then(checkAuth).then(res => res.json()).then(data => {
-                const rows = (data.lots || []).map(lot => {
+                const openStockRow = getEditLotOpenStockRow(window.editLotContext);
+                const lotRows = (data.lots || []).map(lot => {
                     return `
                         <tr onclick="selectLot(${lot.id})" class="lot-row" data-lot-id="${lot.id}">
-                            <td>${lot.lot_number || '-'}</td>
+                            <td>${escapeHtml(lot.lot_number || '-')}</td>
                             <td class="text-center">${lot.qty}</td>
-                            <td>${lot.received_date || '-'}</td>
-                            <td>${lot.expiry_date || '-'}</td>
+                            <td>${escapeHtml(lot.received_date || '-')}</td>
+                            <td>${escapeHtml(lot.expiry_date || '-')}</td>
                             <td class="text-center"><button type="button" class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); selectLot(${lot.id});">เลือก</button></td>
                         </tr>`;
                 }).join('');
+                const fifoSeedRow = getEditLotFifoSeedRow(data);
+                const rows = [openStockRow, fifoSeedRow, lotRows].filter(Boolean).join('');
                 body.innerHTML = rows.length ? rows : `<tr><td colspan="5" class="text-center text-muted py-4">ไม่มี Lot สำหรับสินค้านี้</td></tr>`;
             }).catch(() => {
                 body.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">ไม่สามารถโหลดข้อมูล Lot ได้</td></tr>`;
             });
+        }
+
+        function getEditLotOpenStockRow(ctx) {
+            if (!ctx || !ctx.split_summary) return '';
+            const openBase = parseInt(ctx.split_summary.open_base_qty || 0, 10) || 0;
+            const openExtra = parseInt(ctx.split_summary.open_extra_tablet_qty || 0, 10) || 0;
+            if (openBase <= 0 && openExtra <= 0) return '';
+            const baseUnit = ctx.base_unit || 'หน่วย';
+            const parts = [];
+            if (openBase > 0) parts.push(`${openBase} ${baseUnit}`);
+            if (openExtra > 0) parts.push(`${openExtra} extra`);
+            return `
+                <tr class="table-secondary">
+                    <td>สต็อกเปิด</td>
+                    <td class="text-center">-</td>
+                    <td colspan="3">${parts.join(' + ')}</td>
+                </tr>`;
+        }
+
+        function getEditLotFifoSeedRow(data) {
+            const missingQty = parseInt((data || {}).missing_fifo_qty || 0, 10) || 0;
+            if (!data || !data.supports_fifo_seed || missingQty <= 0) return '';
+            const productStock = parseInt(data.product_stock || 0, 10) || 0;
+            const lotTotal = parseInt(data.lot_total_qty || 0, 10) || 0;
+            return `
+                <tr class="table-warning">
+                    <td colspan="4">
+                        <div class="fw-medium">ยอดคงเหลือ ${productStock} แต่ยอดใน Lot มี ${lotTotal}</div>
+                        <div class="small text-muted">ต้องสร้าง Lot ตั้งต้น ${missingQty} เพื่อให้ FIFO มีวันที่รับเข้า/หมดอายุสำหรับเรียงตัดสต็อก</div>
+                    </td>
+                    <td class="text-center">
+                        <button type="button" class="btn btn-sm btn-warning" onclick="event.stopPropagation(); createFifoLotFromStock(${data.product_id});">
+                            สร้าง Lot FIFO
+                        </button>
+                    </td>
+                </tr>`;
         }
 
         function selectLot(lotId) {
@@ -4593,8 +5638,30 @@
                 document.getElementById('editLot_lot_id').value = lot.id;
                 document.getElementById('editLot_number').value = lot.lot_number;
                 document.getElementById('editLot_qty').value = lot.qty;
-                document.getElementById('editLot_received_date').value = lot.received_date;
-                document.getElementById('editLot_expiry_date').value = lot.expiry_date;
+                const receivedDateInput = document.getElementById('editLot_received_date');
+                const expiryDateInput = document.getElementById('editLot_expiry_date');
+                if (receivedDateInput && receivedDateInput._flatpickr) {
+                    if (lot.received_date) {
+                        receivedDateInput._flatpickr.setDate(lot.received_date, true);
+                        receivedDateInput.value = lot.received_date;
+                    } else {
+                        receivedDateInput._flatpickr.clear();
+                        receivedDateInput.value = '';
+                    }
+                } else if (receivedDateInput) {
+                    receivedDateInput.value = lot.received_date;
+                }
+                if (expiryDateInput && expiryDateInput._flatpickr) {
+                    if (lot.expiry_date) {
+                        expiryDateInput._flatpickr.setDate(lot.expiry_date, true);
+                        expiryDateInput.value = lot.expiry_date;
+                    } else {
+                        expiryDateInput._flatpickr.clear();
+                        expiryDateInput.value = '';
+                    }
+                } else if (expiryDateInput) {
+                    expiryDateInput.value = lot.expiry_date;
+                }
                 document.getElementById('deleteLotButton').disabled = false;
                 document.getElementById('saveLotButton').disabled = false;
             });
@@ -4630,8 +5697,13 @@
             fetch('/admin/update_product_lot', { method: 'POST', body: formData, headers: { 'X-CSRF-Token': adminCsrfToken } })
                 .then(checkAuth).then(res => res.json()).then(data => {
                     if (data.success) {
-                        showToast('success', 'บันทึก Lot แล้ว');
+                        showToast('success', data.message || 'บันทึก Lot แล้ว');
+                        // ให้หน้า stock รีเฟรชและเน้นสินค้าเดียวกัน
+                        if (window.editLotContext && window.editLotContext.id) {
+                            window.pendingHighlightProductId = window.editLotContext.id;
+                        }
                         loadProductLots(document.getElementById('editLot_product_id').value);
+                        if (typeof loadStock === 'function') loadStock();
                     } else {
                         showToast('error', data.message || 'เกิดข้อผิดพลาด');
                     }
@@ -4646,6 +5718,43 @@
                         document.getElementById('deleteLotButton').disabled = true;
                     }
                 });
+        }
+
+        function createFifoLotFromStock(productId) {
+            const ctx = window.editLotContext || {};
+            const formData = new FormData();
+            const lotNumberInput = document.getElementById('editLot_number');
+            const receivedInput = document.getElementById('editLot_received_date');
+            const expiryInput = document.getElementById('editLot_expiry_date');
+            formData.append('product_id', productId);
+            formData.append('lot_number', lotNumberInput?.value || '');
+            formData.append('received_date', receivedInput?.value || '');
+            formData.append('expiry_date', expiryInput?.value || '');
+            formData.append('csrf_token', adminCsrfToken);
+
+            Swal.fire({
+                title: 'สร้าง Lot ตั้งต้นสำหรับ FIFO?',
+                text: 'ระบบจะนำยอดคงเหลือที่ยังไม่มี Lot มาสร้างเป็น Lot ใหม่ เพื่อให้การตัดสต็อกเรียง FIFO ได้',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'สร้าง Lot',
+                cancelButtonText: 'ยกเลิก'
+            }).then(result => {
+                if (!result.isConfirmed) return;
+                fetch('/admin/create_fifo_lot_from_stock', { method: 'POST', body: formData, headers: { 'X-CSRF-Token': adminCsrfToken } })
+                    .then(checkAuth).then(res => res.json()).then(data => {
+                        if (data.success) {
+                            showToast('success', data.message || 'สร้าง Lot FIFO แล้ว');
+                            if (ctx.id) window.pendingHighlightProductId = ctx.id;
+                            loadProductLots(productId);
+                            if (typeof loadStock === 'function') loadStock();
+                        } else {
+                            showToast('error', data.message || 'ไม่สามารถสร้าง Lot FIFO ได้');
+                        }
+                    }).catch(() => {
+                        showToast('error', 'ไม่สามารถติดต่อเซิร์ฟเวอร์');
+                    });
+            });
         }
 
         function confirmDeleteLot() {
@@ -4677,8 +5786,14 @@
             fetch(`/admin/delete_product_lot/${lotId}`, { method: 'POST', headers: { 'X-CSRF-Token': adminCsrfToken } })
                 .then(checkAuth).then(res => res.json()).then(data => {
                     if (data.success) {
-                        showToast('success', 'ลบ Lot เรียบร้อย');
+                        showToast('success', data.message || 'ลบ Lot เรียบร้อย');
+                        // ให้หน้า stock รีเฟรชและเน้นสินค้าเดียวกัน
+                        if (window.editLotContext && window.editLotContext.id) {
+                            window.pendingHighlightProductId = window.editLotContext.id;
+                        }
                         loadProductLots(document.getElementById('editLot_product_id').value);
+                        // รีเฟรชตารางสินค้าให้ยอดสต็อกแสดงผลทันที
+                        if (typeof loadStock === 'function') loadStock();
                         document.getElementById('editLot_lot_id').value = '';
                         document.getElementById('deleteLotButton').disabled = true;
                         document.getElementById('saveLotButton').disabled = true;
@@ -4715,17 +5830,21 @@
                 const baseUnitText = (document.getElementById('edit_base_unit')?.value || '').trim();
                 const baseToTabletVal = parseInt(document.getElementById('edit_base_unit_to_tablet_rate')?.value || 0, 10) || 0;
                 const packageTotalTablet = parseInt(document.getElementById('edit_package_tablet_total')?.value || 0, 10) || 0;
+                if (category === 'ยา' && packageTotalTablet <= 0) {
+                    Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณากรอกจำนวนเม็ดทั้งหมดใน 1 หน่วยเต็ม' });
+                    return;
+                }
                 if (category === 'ยา' && splitMode === 'multi') {
-                    if (packageTotalTablet <= 0) {
-                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณาระบุ 1 หน่วยนำเข้า มีกี่เม็ด' });
-                        return;
-                    }
                     if (!baseUnitText) {
-                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณาระบุหน่วยย่อย เช่น ซอง/ห่อ' });
+                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: 'กรุณาระบุชื่อหน่วยกลาง เช่น ตลับ แผง หรือซอง' });
                         return;
                     }
                     if (baseToTabletVal <= 0) {
-                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: `กรุณาระบุ 1 ${baseUnitText} มีกี่เม็ด` });
+                        Swal.fire({ icon: 'warning', title: 'ข้อมูลไม่ครบ', text: `กรุณากรอกจำนวนเม็ดใน 1 ${baseUnitText}` });
+                        return;
+                    }
+                    if (packageTotalTablet < baseToTabletVal) {
+                        Swal.fire({ icon: 'warning', title: 'ตัวเลขไม่ถูกต้อง', text: `จำนวนเม็ดใน 1 ${baseUnitText} ต้องไม่มากกว่าจำนวนเม็ดในหน่วยเต็ม` });
                         return;
                     }
                     const convRateEl = document.getElementById('edit_conversion_rate');
@@ -4737,6 +5856,13 @@
             }
             const formData = new FormData(form);
             formData.set('split_enabled', splitEnabled ? '1' : '0');
+            const openBaseEl = document.getElementById('edit_open_base_qty');
+            const openExtraEl = document.getElementById('edit_open_extra_tablet_qty');
+            const openStockChanged = splitEnabled && (
+                (openBaseEl?.value || '0') !== (openBaseEl?.dataset.initialValue || '0')
+                || (openExtraEl?.value || '0') !== (openExtraEl?.dataset.initialValue || '0')
+            );
+            formData.set('open_stock_changed', openStockChanged ? '1' : '0');
             formData.append('csrf_token', adminCsrfToken);
             fetch('/admin/edit_product', { method: 'POST', body: formData, headers: { 'X-CSRF-Token': adminCsrfToken } })
                 .then(checkAuth).then(res => res.json()).then(data => {
@@ -5238,6 +6364,54 @@
             });
         }
 
+        async function confirmRejectAction(form, triggerBtn = null) {
+            if (!form || typeof form.submit !== 'function') return;
+
+            let reason = '';
+            if (window.Swal && typeof Swal.fire === 'function') {
+                const result = await Swal.fire({
+                    title: 'ปฏิเสธรายการนี้?',
+                    input: 'textarea',
+                    inputLabel: 'เหตุผลในการปฏิเสธ',
+                    inputPlaceholder: 'เช่น สต็อกไม่เพียงพอ / รายการซ้ำ / เลือกของผิดประเภท',
+                    inputAttributes: {
+                        maxlength: 500,
+                        'aria-label': 'เหตุผลในการปฏิเสธ'
+                    },
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'ปฏิเสธรายการ',
+                    cancelButtonText: 'ยกเลิก',
+                    inputValidator: (value) => {
+                        if (!value || !value.trim()) return 'กรุณาระบุเหตุผลในการปฏิเสธ';
+                        if (value.trim().length > 500) return 'เหตุผลต้องไม่เกิน 500 ตัวอักษร';
+                        return null;
+                    }
+                });
+                if (!result.isConfirmed) return;
+                reason = (result.value || '').trim();
+            } else {
+                reason = (window.prompt('กรุณาระบุเหตุผลในการปฏิเสธ') || '').trim();
+                if (!reason) return;
+            }
+
+            let reasonInput = form.querySelector('input[name="rejection_reason"]');
+            if (!reasonInput) {
+                reasonInput = document.createElement('input');
+                reasonInput.type = 'hidden';
+                reasonInput.name = 'rejection_reason';
+                form.appendChild(reasonInput);
+            }
+            reasonInput.value = reason;
+
+            if (triggerBtn) {
+                triggerBtn.classList.add('is-submitting');
+                const row = triggerBtn.closest('tr');
+                if (row) row.classList.add('pending-row-processing');
+            }
+            form.submit();
+        }
+
         function clearStaleModalBackdrop() {
             const backdrops = document.querySelectorAll('.modal-backdrop');
             if (backdrops.length > 1) {
@@ -5386,8 +6560,12 @@
             fetch('/admin/save_alert_time', { method: 'POST', body: formData, headers: { 'X-CSRF-Token': adminCsrfToken } }).then(checkAuth).then(res => res.json()).then(data => {
                 if (data.success) {
                     bootstrap.Modal.getInstance(document.getElementById('alertSettingModal')).hide();
-                    Swal.fire('บันทึกสำเร็จ!', '', 'success');
+                    Swal.fire('บันทึกสำเร็จ!', data.message || '', 'success');
+                } else {
+                    Swal.fire('ผิดพลาด', data.message || 'ไม่สามารถบันทึกการตั้งค่าได้', 'error');
                 }
+            }).catch(() => {
+                Swal.fire('ผิดพลาด', 'ไม่สามารถเชื่อมต่อระบบได้', 'error');
             });
         }
 
@@ -5635,26 +6813,29 @@
             nativeFetch('/admin/ga_request/' + gaChatRequestId + '/chat?since_id=' + gaChatLastId)
                 .then(checkAuth).then(r => r.json()).then(data => {
                     const box = document.getElementById('gaChatBox');
-                    if (!data.success) {
-                        if (gaChatLastId === 0 && box) {
-                            box.innerHTML = '<div class="text-center text-danger py-4 small">โหลดข้อความไม่สำเร็จ</div>';
-                        }
-                        return;
-                    }
-                    if (!data.messages.length) {
+                    if (!data || !data.success) {
                         if (gaChatLastId === 0 && box) {
                             box.innerHTML = '<div class="text-center text-muted py-4 small">ยังไม่มีข้อความ เริ่มคุยได้เลย</div>';
                         }
                         return;
                     }
+
+                    if (!data.messages || !data.messages.length) {
+                        if (gaChatLastId === 0 && box) {
+                            box.innerHTML = '<div class="text-center text-muted py-4 small">ยังไม่มีข้อความ เริ่มคุยได้เลย</div>';
+                        }
+                        return;
+                    }
+
                     if (gaChatLastId === 0) box.innerHTML = '';
                     data.messages.forEach(msg => {
-                        gaChatLastId = Math.max(gaChatLastId, msg.id);
+                        gaChatLastId = Math.max(gaChatLastId, msg.id || 0);
                         if (msg.sender_type === 'user') {
                             adminSeenUserGlobalId = Math.max(adminSeenUserGlobalId, Number(msg.id || 0));
                             setAdminRequestReadUpto(gaChatRequestId, Number(msg.id || 0));
                         }
-                        const isAdmin = msg.sender_type === 'admin';                        const div = document.createElement('div');
+                        const isAdmin = msg.sender_type === 'admin';
+                        const div = document.createElement('div');
                         div.className = 'ga-chat-row ' + (isAdmin ? 'self' : 'other');
                         div.innerHTML = (
                             '<div class="ga-chat-bubble ' + (isAdmin ? 'admin' : 'user') + '">' +
@@ -5666,8 +6847,6 @@
                         box.appendChild(div);
                     });
                     persistAdminSeenUserGlobalId();
-                    // Optimistically clear unread count for this request in local snapshot
-                    // (server has already marked messages as read via GET request)
                     const snapIdx = adminUnreadSummarySnapshot.findIndex(s => Number(s.request_id) === gaChatRequestId);
                     if (snapIdx >= 0) {
                         adminUnreadSummarySnapshot[snapIdx].unread_count = 0;
@@ -5929,6 +7108,28 @@
                 updateWriteOffQtyControl();
                 document.getElementById('writeOff_qty').value = ''; // เคลียร์ค่าเดิม
                 renderWriteOffUnitHint();
+                // load product lots and populate lot select for manual choice
+                const lotSelect = document.getElementById('writeOff_lot_select');
+                if (lotSelect) {
+                    lotSelect.innerHTML = `<option value="">ตัดอัตโนมัติ (เก่าที่สุดก่อน)</option>`;
+                    fetch(`/admin/get_product_lots/${data.id}`).then(checkAuth).then(res => res.json()).then(payload => {
+                        const lots = payload.lots || [];
+                        lots.forEach(lot => {
+                            const label = `${lot.lot_number || '(no lot)'} — ${lot.qty} ชิ้น — ${lot.received_date || '-'} `;
+                            const opt = document.createElement('option');
+                            opt.value = lot.id;
+                            opt.textContent = label;
+                            opt.dataset.qty = String(lot.qty || 0);
+                            lotSelect.appendChild(opt);
+                        });
+                        lotSelect.value = '';
+                        lotSelect.onchange = syncWriteOffQtyToLot;
+                        syncWriteOffQtyToLot();
+                    }).catch(() => {
+                        // ignore load errors - keep auto option
+                        document.getElementById('writeOff_qty').readOnly = false;
+                    });
+                }
 
                 new bootstrap.Modal(document.getElementById('writeOffModal')).show();
             });
@@ -6042,16 +7243,18 @@
 
         // ส่งข้อมูลไปบันทึก
         function submitWriteOff() {
-            const qty = document.getElementById('writeOff_qty').value;
-            if (!qty || qty <= 0) {
+            let qty = document.getElementById('writeOff_qty').value;
+            const ctx = window.writeOffContext || {};
+            const lotSelect = document.getElementById('writeOff_lot_select');
+            const qtyUnit = (document.getElementById('writeOff_qty_unit') || {}).value || 'package';
+            const conversionRate = parseInt(ctx.conversion_rate || 1, 10) || 1;
+
+            if (!qty || parseInt(qty, 10) <= 0) {
                 Swal.fire('แจ้งเตือน', 'กรุณาระบุจำนวนที่ต้องการตัดจำหน่าย', 'warning');
                 return;
             }
 
-            const ctx = window.writeOffContext || {};
-            const conversionRate = parseInt(ctx.conversion_rate || 1, 10);
             const splitEnabled = !!(ctx.base_unit && ctx.package_unit && conversionRate > 1);
-            const qtyUnit = (document.getElementById('writeOff_qty_unit') || {}).value || 'package';
             let confirmText = 'สต็อกจะถูกหักออกและบันทึกลงประวัติทันที';
             if (splitEnabled) {
                 const packageUnit = ctx.package_unit || ctx.unit || 'แพ็ก';
@@ -6067,9 +7270,103 @@
                 }
             }
 
+            // If admin selected a specific lot, show it in the confirmation text and remaining qty
+            if (lotSelect) {
+                const selVal = (lotSelect.value || '').toString();
+                const selOption = lotSelect.options[lotSelect.selectedIndex] || {};
+                const selText = selOption.text || '';
+                if (selVal) {
+                    // compute remaining in that lot after this cut (convert units if needed)
+                    const lotQty = parseInt(selOption.dataset.qty || '0', 10);
+                    let cutInLotUnits = 0;
+                    if (splitEnabled) {
+                        if (qtyUnit === 'base') {
+                            cutInLotUnits = parseInt(qty || '0', 10);
+                        } else {
+                            const conv = parseInt(ctx.conversion_rate || 1, 10) || 1;
+                            cutInLotUnits = parseInt(qty || '0', 10) * conv;
+                        }
+                    } else {
+                        cutInLotUnits = parseInt(qty || '0', 10);
+                    }
+                    const remainingInLot = Math.max(0, lotQty - cutInLotUnits);
+                    confirmText += `\n\nจะตัดจากล็อต: ${selText.trim()}\nคงเหลือในล็อตหลังตัด: ${remainingInLot} ชิ้น`;
+                    if (cutInLotUnits > lotQty) {
+                        confirmText += '\n(จำนวนมากกว่าที่มีในล็อตนี้ ระบบจะดึงจากล็อตถัดไปเพิ่มเติมจนกว่าจะครบ)';
+                    }
+                } else {
+                    confirmText += '\n\n(จะตัดตาม FIFO — ล็อตที่เก่าที่สุดก่อน หากไม่ระบุ)';
+                }
+            }
+
+            // build HTML confirmation for nicer formatting
+            const productDisplay = ctx.code ? `[${ctx.code}] ${ctx.name || ''}` : (ctx.name || '');
+            // compute package/base display and remaining product stock
+            let cutPackageDisplay = '';
+            let cutBaseDisplay = '';
+            let cutInPackages = 0;
+            if (splitEnabled) {
+                const conv = parseInt(ctx.conversion_rate || 1, 10) || 1;
+                if (qtyUnit === 'base') {
+                    const qtyBase = parseInt(qty || '0', 10);
+                    cutBaseDisplay = `${qtyBase} ${ctx.base_unit || 'หน่วยย่อย'}`;
+                    cutInPackages = qtyBase / conv;
+                    cutPackageDisplay = `${cutInPackages.toFixed(2)} ${ctx.package_unit || ctx.unit || 'แพ็ก'}`;
+                } else {
+                    const qtyPackage = parseInt(qty || '0', 10);
+                    cutPackageDisplay = `${qtyPackage} ${ctx.package_unit || ctx.unit || 'แพ็ก'}`;
+                    cutInPackages = qtyPackage;
+                    const qtyBase = qtyPackage * conv;
+                    cutBaseDisplay = `${qtyBase} ${ctx.base_unit || 'หน่วยย่อย'}`;
+                }
+            } else {
+                const qtyNum = parseInt(qty || '0', 10);
+                cutPackageDisplay = `${qtyNum} ${ctx.unit || ''}`;
+                cutInPackages = qtyNum;
+            }
+
+            const packageStock = parseFloat(parseInt(ctx.stock || 0, 10));
+            const remainingProductStock = Math.max(0, (packageStock - cutInPackages));
+
+            let confirmHtml = `<div style="text-align:left">`;
+            confirmHtml += `<div><strong>สินค้า:</strong> ${escapeHtml(productDisplay)}</div>`;
+            confirmHtml += `<div><strong>จำนวนที่ต้องการตัด:</strong> ${escapeHtml(cutPackageDisplay)}${cutBaseDisplay ? ' (' + escapeHtml(cutBaseDisplay) + ')' : ''}</div>`;
+
+            if (lotSelect) {
+                const selVal = (lotSelect.value || '').toString();
+                const selOption = lotSelect.options[lotSelect.selectedIndex] || {};
+                const selText = selOption.text || '';
+                if (selVal) {
+                    const lotQty = parseInt(selOption.dataset.qty || '0', 10);
+                    let cutInLotUnits = 0;
+                    if (splitEnabled) {
+                        if (qtyUnit === 'base') {
+                            cutInLotUnits = parseInt(qty || '0', 10);
+                        } else {
+                            const conv = parseInt(ctx.conversion_rate || 1, 10) || 1;
+                            cutInLotUnits = parseInt(qty || '0', 10) * conv;
+                        }
+                    } else {
+                        cutInLotUnits = parseInt(qty || '0', 10);
+                    }
+                    const remainingInLot = Math.max(0, lotQty - cutInLotUnits);
+                    confirmHtml += `<div><strong>ล็อตที่เลือก:</strong> ${escapeHtml(selText.trim())}</div>`;
+                    confirmHtml += `<div><strong>คงเหลือในล็อตหลังตัด:</strong> ${remainingInLot} ชิ้น</div>`;
+                    if (cutInLotUnits > lotQty) {
+                        confirmHtml += `<div style="color:#b92635"><strong>หมายเหตุ:</strong> จำนวนที่ตัดมากกว่าที่มีในล็อตนี้ ระบบจะใช้ล็อตถัดไป (FIFO) อัตโนมัติ</div>`;
+                    }
+                } else {
+                    confirmHtml += `<div><strong>โหมด:</strong> ตัดอัตโนมัติ (FIFO — ล็อตที่เก่าที่สุดก่อน หากไม่ระบุ)</div>`;
+                }
+            }
+
+            confirmHtml += `<div style="margin-top:.5rem"><strong>คงเหลือรวมของสินค้า (ประมาณ):</strong> ${remainingProductStock.toFixed(2)} ${ctx.package_unit || ctx.unit || ''}</div>`;
+            confirmHtml += `<div class="small text-muted" style="margin-top:.35rem">สต็อกจริงอาจเปลี่ยนแปลงหากมีรายการอื่นระหว่างเวลา</div>`;
+            confirmHtml += `</div>`;
+
             Swal.fire({
                 title: 'ยืนยันการตัดจำหน่าย?',
-                text: confirmText,
+                html: confirmHtml,
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonColor: '#dc3545',
@@ -6108,6 +7405,7 @@
             writeOffQtyUnitInput.addEventListener('change', () => {
                 updateWriteOffQtyControl();
                 renderWriteOffUnitHint();
+                syncWriteOffQtyToLot();
             });
         }
 
@@ -6227,6 +7525,7 @@
                                         <option value="admin_pc1">Admin PC1 (เห็นเฉพาะ PC1)</option>
                                         <option value="admin_cc">Admin CC (เห็นเฉพาะ CC)</option>
                                         <option value="admin_all">Admin All (เห็นทั้ง 2 ฝั่ง)</option>
+                                        <option value="admin_mu">Admin MU (เข้าหลังบ้าน Manufacturing)</option>
                                     </select>
                                 </div>
                             </div>
@@ -6270,6 +7569,7 @@
         'admin_pc1':  '<span class="badge bg-primary">Admin PC1</span>',
         'admin_cc':   '<span class="badge bg-info text-dark">Admin CC</span>',
         'admin_all':  '<span class="badge bg-success">Admin All</span>',
+        'admin_mu':   '<span class="badge bg-warning text-dark">Admin MU</span>',
     };
 
     function openAdminAccountsModal() {
@@ -6444,6 +7744,16 @@
             return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
         }
 
+        function updateSupportBadge(badge, total, suffix) {
+            if (!badge) return;
+            const unreadTotal = Math.max(0, Number(total) || 0);
+            badge.textContent = suffix ? unreadTotal + suffix : unreadTotal;
+            badge.classList.toggle('is-empty', unreadTotal === 0);
+            badge.hidden = unreadTotal === 0;
+            badge.style.display = unreadTotal > 0 ? 'inline-block' : 'none';
+            badge.setAttribute('aria-hidden', String(unreadTotal === 0));
+        }
+
         /* ── Load inbox ── */
         function loadSupportInbox(silent) {
             if (_supInboxLoading) return;
@@ -6454,9 +7764,9 @@
                     const total = data.total_unread || 0;
                     // update nav badge
                     const navBadge = document.getElementById('navSupportBadge');
-                    if (navBadge) { navBadge.textContent = total; navBadge.style.display = total > 0 ? '' : 'none'; }
+                    updateSupportBadge(navBadge, total);
                     const inboxBadge = document.getElementById('supportInboxBadge');
-                    if (inboxBadge) { inboxBadge.textContent = total + ' ใหม่'; inboxBadge.style.display = total > 0 ? '' : 'none'; }
+                    updateSupportBadge(inboxBadge, total, ' ใหม่');
                     const nextConvs = data.conversations || [];
                     const nextSnapshot = JSON.stringify(nextConvs);
                     if (!silent || nextSnapshot !== _supInboxSnapshot) {
@@ -6579,23 +7889,12 @@
 
         /* ── Poll for badge even when not on support tab ── */
         function pollSupportBadge() {
-            console.log('[pollSupportBadge] Starting fetch to /admin/support_notifications');
             fetch('/admin/support_notifications', { headers: { 'X-CSRF-Token': adminCsrfToken } })
-                .then(r => {
-                    console.log('[pollSupportBadge] Got response:', r.status, r.statusText);
-                    return r.json();
-                })
+                .then(r => r.json())
                 .then(data => {
-                    console.log('[pollSupportBadge] Response data:', data);
                     const total = data.total || 0;
-                    console.log('[pollSupportBadge] Unread total:', total);
                     const navBadge = document.getElementById('navSupportBadge');
-                    console.log('[pollSupportBadge] navBadge element:', navBadge ? 'found' : 'NOT FOUND');
-                    if (navBadge) { 
-                        navBadge.textContent = total;
-                        navBadge.style.display = total > 0 ? 'inline-block' : 'none';
-                        console.log('[pollSupportBadge] Updated badge: text=', total, 'display=', navBadge.style.display);
-                    }
+                    updateSupportBadge(navBadge, total);
                 })
                 .catch(err => {
                     console.error('[pollSupportBadge] Error:', err);

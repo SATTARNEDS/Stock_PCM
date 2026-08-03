@@ -18,6 +18,7 @@ requests==2.32.5
 six==1.17.0
 urllib3==2.6.3
 Werkzeug==3.1.6
+waitress>=3.0.2,<4
 qrcode[pil]==7.3.1
 xlsxwriter==3.2.9
 Flask-APScheduler

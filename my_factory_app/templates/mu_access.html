@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="th">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>ยืนยันสิทธิ์เบิกของ MU</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fonts/fonts.css') }}">
+    <style>
+        body{font-family:"Mitr",sans-serif;min-height:100vh;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 15% 15%,#c9f2e7,transparent 35%),radial-gradient(circle at 90% 85%,#ccecf6,transparent 32%),linear-gradient(145deg,#f8fafc,#eef8f7);overflow:hidden}
+        body:before,body:after{content:"";position:fixed;border-radius:42% 58% 65% 35%;filter:blur(2px);opacity:.2;animation:floatShape 8s ease-in-out infinite;pointer-events:none}body:before{width:260px;height:260px;background:#0f766e;top:-90px;right:-60px}body:after{width:210px;height:210px;background:#0891b2;bottom:-80px;left:-45px;animation-delay:-4s}
+        .access-card{position:relative;width:min(100%,460px);border:1px solid rgba(255,255,255,.8);border-radius:26px;background:rgba(255,255,255,.9);box-shadow:0 28px 70px rgba(15,23,42,.16);backdrop-filter:blur(12px);animation:cardIn .55s ease both}
+        .brand-icon{width:64px;height:64px;display:grid;place-items:center;border-radius:20px;color:#fff;background:linear-gradient(135deg,#0f766e,#0891b2);font-size:1.6rem;box-shadow:0 12px 26px rgba(15,118,110,.25);animation:pulseIcon 2.8s ease-in-out infinite}
+        .form-control,.btn{min-height:48px;border-radius:14px}
+        .password-wrap{position:relative}.password-wrap .form-control{padding-right:48px}.password-toggle{position:absolute;right:5px;top:5px;width:40px;height:38px;border:0;background:transparent;color:#64748b;border-radius:10px}.btn-success{position:relative;overflow:hidden}.btn-success:after{content:"";position:absolute;inset:0;transform:translateX(-120%);background:linear-gradient(100deg,transparent,rgba(255,255,255,.28),transparent);animation:shine 3s infinite}
+        .access-pending{border:1px solid #f3c766;border-radius:18px;background:linear-gradient(145deg,#fff9e8,#fff3cd);color:#76520a}.access-pending-icon{width:48px;height:48px;display:grid;place-items:center;flex:0 0 48px;border-radius:15px;background:#f59e0b;color:#fff;font-size:1.15rem;box-shadow:0 8px 18px rgba(245,158,11,.22)}
+        @keyframes cardIn{from{opacity:0;transform:translateY(18px) scale(.98)}to{opacity:1;transform:none}}@keyframes floatShape{50%{transform:translate(18px,24px) rotate(18deg)}}@keyframes pulseIcon{50%{transform:translateY(-4px);box-shadow:0 18px 32px rgba(15,118,110,.34)}}@keyframes shine{55%,100%{transform:translateX(120%)}}
+        @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important}}
+    </style>
+</head>
+<body>
+<main class="access-card p-4 p-md-5">
+    <div class="brand-icon mb-4"><i class="fas fa-industry" aria-hidden="true"></i></div>
+    <p class="text-uppercase small fw-semibold text-success mb-1">Manufacturing Unit</p>
+    <h1 class="h3 fw-semibold">ยืนยันรหัสผ่านก่อนเบิก</h1>
+    <p class="text-muted">ผู้ใช้งาน: {{ user['name'] }} ({{ user['emp_id'] }})</p>
+    {% with messages=get_flashed_messages(with_categories=true) %}
+    {% for category,message in messages %}<div class="alert alert-{{ category }}">{{ message }}</div>{% endfor %}
+    {% endwith %}
+    {% if has_mu_access %}
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ next_page }}">
+        <label class="form-label" for="muPassword">รหัสผ่านส่วน MU</label>
+        <div class="password-wrap mb-3"><input class="form-control" id="muPassword" name="password" type="password" minlength="4" maxlength="128" required autocomplete="current-password" autofocus><button class="password-toggle" type="button" onclick="togglePassword()" aria-label="แสดงหรือซ่อนรหัสผ่าน"><i class="fas fa-eye" id="passwordIcon"></i></button></div>
+        <button class="btn btn-success w-100 fw-semibold" type="submit"><i class="fas fa-lock-open me-2"></i>เข้าสู่หน้าเบิกของ MU</button>
+    </form>
+    {% else %}
+    <section class="access-pending p-3" role="status" aria-labelledby="accessPendingTitle">
+        <div class="d-flex gap-3 align-items-start">
+            <div class="access-pending-icon" aria-hidden="true"><i class="fas fa-user-lock"></i></div>
+            <div>
+                <h2 class="h6 fw-semibold mb-1" id="accessPendingTitle">ยังไม่มีสิทธิ์ใช้งาน MU</h2>
+                <p class="small mb-1">บัญชีนี้ยังไม่มีรหัสผ่านสำหรับเข้าหน้าเบิกของ MU</p>
+                <p class="small mb-0 opacity-75">กรุณาติดต่อ Admin MU เพื่อกำหนดสิทธิ์และตั้งรหัสผ่านให้ก่อนใช้งาน</p>
+            </div>
+        </div>
+    </section>
+    {% endif %}
+    <a class="btn btn-link w-100 mt-2" href="{{ url_for('user_services', emp_id=user['emp_id']) }}">กลับหน้าเลือกเมนู</a>
+</main>
+<script>
+function togglePassword(){const input=document.getElementById('muPassword');const icon=document.getElementById('passwordIcon');const show=input.type==='password';input.type=show?'text':'password';icon.className=show?'fas fa-eye-slash':'fas fa-eye'}
+document.querySelector('main form')?.addEventListener('submit',function(){const button=this.querySelector('button[type="submit"]');button.disabled=true;button.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>กำลังตรวจสอบสิทธิ์...'})
+</script>
+</body>
+</html>

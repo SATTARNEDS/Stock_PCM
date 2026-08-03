@@ -1,0 +1,29 @@
+/* Force Mermaid SVG to fit A4 page width */
+svg[id^="mermaid"],
+svg[class*="mermaid"],
+.mermaid svg {
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+    display: block;
+    margin: 0 auto;
+}
+
+/* Prevent code blocks and diagram containers from overflowing */
+pre, code, .mermaid {
+    overflow: hidden !important;
+    page-break-inside: avoid;
+}
+
+/* General page body */
+body {
+    font-family: "Mitr", "Sarabun", "Noto Sans Thai", sans-serif;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+/* Table fit */
+table {
+    width: 100%;
+    word-break: break-word;
+}

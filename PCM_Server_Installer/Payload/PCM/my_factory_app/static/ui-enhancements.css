@@ -1,0 +1,156 @@
+:root {
+    --pcm-motion-fast: 160ms;
+    --pcm-motion-normal: 260ms;
+    --pcm-ease: cubic-bezier(.2, .75, .25, 1);
+}
+
+html.pcm-ui-ready body {
+    position: relative;
+}
+
+html.pcm-ui-ready body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+        radial-gradient(circle at 92% 8%, rgba(45, 126, 247, .055), transparent 22rem),
+        radial-gradient(circle at 8% 92%, rgba(18, 146, 111, .05), transparent 24rem);
+}
+
+.pcm-reveal {
+    opacity: 0;
+    transform: translateY(12px);
+}
+
+.pcm-reveal.pcm-visible {
+    opacity: 1;
+    transform: none;
+    transition:
+        opacity var(--pcm-motion-normal) var(--pcm-ease),
+        transform var(--pcm-motion-normal) var(--pcm-ease);
+}
+
+html.pcm-ui-ready .btn,
+html.pcm-ui-ready button {
+    -webkit-tap-highlight-color: transparent;
+}
+
+html.pcm-ui-ready .btn:not(:disabled) {
+    position: relative;
+    overflow: hidden;
+    transition:
+        transform var(--pcm-motion-fast) var(--pcm-ease),
+        box-shadow var(--pcm-motion-fast) ease,
+        background-color var(--pcm-motion-fast) ease,
+        border-color var(--pcm-motion-fast) ease;
+}
+
+html.pcm-ui-ready .btn:not(:disabled):active {
+    transform: scale(.975);
+}
+
+.pcm-ripple {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    background: rgba(255, 255, 255, .34);
+    transform: scale(0);
+    animation: pcm-ripple .52s ease-out;
+}
+
+html.pcm-ui-ready .form-control,
+html.pcm-ui-ready .form-select {
+    transition:
+        border-color var(--pcm-motion-fast) ease,
+        box-shadow var(--pcm-motion-fast) ease,
+        background-color var(--pcm-motion-fast) ease;
+}
+
+html.pcm-ui-ready .form-control:focus,
+html.pcm-ui-ready .form-select:focus {
+    box-shadow: 0 0 0 .22rem rgba(13, 110, 253, .12);
+}
+
+html.pcm-ui-ready .table tbody tr {
+    transition:
+        background-color var(--pcm-motion-fast) ease,
+        box-shadow var(--pcm-motion-fast) ease;
+}
+
+html.pcm-ui-ready .dropdown-menu,
+html.pcm-ui-ready .offcanvas,
+html.pcm-ui-ready .modal-content {
+    animation: pcm-pop-in .2s var(--pcm-ease);
+}
+
+.pcm-page-progress {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 100000;
+    width: 0;
+    height: 3px;
+    opacity: 0;
+    pointer-events: none;
+    background: linear-gradient(90deg, #0d6efd, #10b981);
+    box-shadow: 0 0 12px rgba(13, 110, 253, .45);
+    transition: width .22s ease, opacity .18s ease;
+}
+
+.pcm-page-progress.is-active {
+    width: 72%;
+    opacity: 1;
+}
+
+.pcm-page-progress.is-complete {
+    width: 100%;
+    opacity: 0;
+}
+
+@keyframes pcm-ripple {
+    to {
+        transform: scale(4);
+        opacity: 0;
+    }
+}
+
+@keyframes pcm-pop-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px) scale(.99);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pcm-reveal,
+    .pcm-reveal.pcm-visible,
+    .pcm-ripple,
+    html.pcm-ui-ready .btn,
+    html.pcm-ui-ready .form-control,
+    html.pcm-ui-ready .form-select,
+    html.pcm-ui-ready .dropdown-menu,
+    html.pcm-ui-ready .offcanvas,
+    html.pcm-ui-ready .modal-content {
+        animation: none !important;
+        transition: none !important;
+        transform: none !important;
+        opacity: 1 !important;
+    }
+}
+
+@media print {
+    .pcm-page-progress {
+        display: none !important;
+    }
+
+    .pcm-reveal {
+        opacity: 1 !important;
+        transform: none !important;
+    }
+}
